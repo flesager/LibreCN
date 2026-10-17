@@ -280,6 +280,7 @@ name = "librecn-scheduler"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "librecn-common",
  "loom",
  "proptest",
  "rustix",

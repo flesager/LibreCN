@@ -126,24 +126,14 @@ impl<T: MsgBody> OutMsg<T> {
     }
 
     /// Sets the correlation id.
-    pub fn set_corr_id(&mut self, corr_id: u32) {
-        self.header.corr_id = corr_id;
-    }
-
-    /// Sets the flags, see [`flags`](crate::flags).
-    pub fn set_flags(&mut self, flags: u32) {
-        self.header.flags = flags;
-    }
-
-    /// Builder form of [`set_corr_id`](Self::set_corr_id).
     pub fn with_corr_id(mut self, corr_id: u32) -> Self {
-        self.set_corr_id(corr_id);
+        self.header.corr_id = corr_id;
         self
     }
 
-    /// Builder form of [`set_flags`](Self::set_flags).
+    /// Sets the header flags (free for the application).
     pub fn with_flags(mut self, flags: u32) -> Self {
-        self.set_flags(flags);
+        self.header.flags = flags;
         self
     }
 

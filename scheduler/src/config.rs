@@ -13,7 +13,7 @@ pub struct EoConfig {
     /// Slots of the data lane (messages from other EOs).
     pub data_capacity: usize,
     /// Slots of the system lane (timers, I/O, lifecycle). Must hold every timer,
-    /// one readiness message per I/O registration, plus start and stop.
+    /// one readiness message per I/O registration, plus start, stop and poll.
     pub system_capacity: usize,
     /// Buffer pool size classes, for message bodies.
     pub buffers: Vec<BufferClassConfig>,
@@ -87,8 +87,8 @@ impl EoConfig {
         if self.data_capacity == 0 {
             return Err(Error::InvalidConfig("data_capacity must be > 0"));
         }
-        if self.system_capacity < self.max_timers as usize + usize::from(self.max_io) + 2 {
-            return Err(Error::InvalidConfig("system_capacity must be >= max_timers + max_io + 2"));
+        if self.system_capacity < self.max_timers as usize + usize::from(self.max_io) + 3 {
+            return Err(Error::InvalidConfig("system_capacity must be >= max_timers + max_io + 3"));
         }
         if self.flight_recorder_depth == 0 {
             return Err(Error::InvalidConfig("flight_recorder_depth must be > 0"));

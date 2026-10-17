@@ -19,11 +19,10 @@ use crate::context::{Platform, Poster, check_user_msg_id, post_signal, post_stop
 use crate::core::EoCore;
 use crate::exec::{self, TurnEnd};
 use crate::failure::{self, FailureReport, FaultPolicy};
-use crate::header::system;
 use crate::io::{self, Poller};
 use crate::registry::Registry;
 use crate::timer::{Expired, Time, TimerId, TimerWheel, WheelHandle};
-use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, MsgHeader, Result};
+use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, Result};
 
 /// Sizes and policies of a [`TestBed`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,20 +100,7 @@ impl TestBed {
 
     /// Creates an EO; its `on_start` runs on the next `run_until_idle`.
     pub fn add(&mut self, cfg: EoConfig, eo: impl ExecutionObject) -> Result<EoId> {
-        let id = self.registry.reserve()?;
-        let core = match EoCore::create(id, &cfg, 0, Box::new(eo)) {
-            Ok(core) => core,
-            Err(e) => {
-                self.registry.abandon(id);
-                return Err(e);
-            }
-        };
-        let must_schedule = core.post_system(MsgHeader::system(system::EO_START, id, 0))?;
-        self.registry.publish(core.clone());
-        if must_schedule {
-            self.schedule(&core);
-        }
-        Ok(id)
+        self.spawn(&cfg, Box::new(eo))
     }
 
     /// Sends `value` to `to` from [`EoId::SYSTEM`].
@@ -208,6 +194,23 @@ impl TestBed {
             .expect("epoll_wait")
     }
 
+    /// Queues one `EO_POLL` for every polling EO, without running any EO.
+    /// The runtime does this after each of their turns; the test bed leaves
+    /// the cadence to the test. Returns the EOs that poll.
+    pub fn poll(&mut self) -> usize {
+        let mut polling = 0;
+        for index in 0..self.registry.capacity() {
+            let Some(core) = self.registry.by_index(index) else { continue };
+            if core.is_polling() && core.check_alive().is_ok() {
+                polling += 1;
+                if exec::post_poll(&core) {
+                    self.schedule(&core);
+                }
+            }
+        }
+        polling
+    }
+
     /// Virtual time.
     pub fn now(&self) -> Time {
         self.clock
@@ -294,6 +297,14 @@ impl Platform for TestBed {
         if !faulted {
             self.registry.remove(core.id);
         }
+    }
+
+    fn spawn(&mut self, cfg: &EoConfig, eo: Box<dyn ExecutionObject>) -> Result<EoId> {
+        let (core, must_schedule) = self.registry.create(cfg, 0, eo)?;
+        if must_schedule {
+            self.schedule(&core);
+        }
+        Ok(core.id)
     }
 }
 

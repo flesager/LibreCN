@@ -28,8 +28,7 @@ impl Interest {
     /// Room to write.
     pub const WRITABLE: Interest = Interest(2);
 
-    /// Whether every flag of `other` is set.
-    pub const fn contains(self, other: Interest) -> bool {
+    const fn contains(self, other: Interest) -> bool {
         self.0 & other.0 == other.0
     }
 }
@@ -43,7 +42,7 @@ impl std::ops::BitOr for Interest {
 }
 
 /// Bits of the `corr_id` of an `IO_READY` message.
-pub mod readiness {
+mod readiness {
     /// Data to read (or end of stream).
     pub const READABLE: u32 = 1 << 0;
     /// Room to write.
@@ -68,7 +67,7 @@ impl IoToken {
     }
 
     /// Raw value, as carried in the `reserved` field of `IO_READY`.
-    pub const fn raw(self) -> u32 {
+    pub(crate) const fn raw(self) -> u32 {
         self.0
     }
 
@@ -86,8 +85,7 @@ impl IoToken {
 pub struct IoReady {
     /// Token returned by `register_io`.
     pub token: IoToken,
-    /// Bits from [`readiness`].
-    pub readiness: u32,
+    pub(crate) readiness: u32,
 }
 
 impl IoReady {

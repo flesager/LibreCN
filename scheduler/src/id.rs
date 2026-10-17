@@ -28,11 +28,6 @@ impl EoId {
     pub const fn generation(self) -> u32 {
         (self.0 >> 32) as u32
     }
-
-    /// Raw 64-bit value, as carried in message headers.
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
 }
 
 impl std::fmt::Debug for EoId {

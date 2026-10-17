@@ -18,7 +18,7 @@ pub struct MsgHeader {
     pub to: EoId,
     /// Request/response correlation; for `TIMER_EXPIRED`, the tag given when arming.
     pub corr_id: u32,
-    /// Message role, see [`flags`].
+    /// Free for the application (e.g. request / response role).
     pub flags: u32,
     /// System messages: timer id, I/O token, ... Free for user messages.
     pub reserved: u64,
@@ -39,16 +39,6 @@ impl MsgHeader {
     }
 }
 
-/// Values for [`MsgHeader::flags`].
-pub mod flags {
-    /// The message expects a response carrying the same `corr_id`.
-    pub const REQUEST: u32 = 1 << 0;
-    /// Response to the request with the same `corr_id`.
-    pub const RESPONSE: u32 = 1 << 1;
-    /// One-way notification.
-    pub const NOTIFICATION: u32 = 1 << 2;
-}
-
 /// Message ids reserved for the scheduler.
 pub mod system {
     /// Highest reserved id.
@@ -61,6 +51,9 @@ pub mod system {
     pub const TIMER_EXPIRED: u32 = 0x0003;
     /// A registered file descriptor is ready: `reserved` = I/O token.
     pub const IO_READY: u32 = 0x0004;
+    /// Once per turn to an EO that polls (`Context::set_polling`). Not kept
+    /// in the flight recorder.
+    pub const EO_POLL: u32 = 0x0005;
 
     /// Whether `msg_id` is in the reserved range.
     pub const fn is_system(msg_id: u32) -> bool {

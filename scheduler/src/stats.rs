@@ -187,7 +187,7 @@ pub struct WorkerStats {
     pub messages: u64,
     /// Time spent running turns.
     pub busy: Duration,
-    /// Time spent sleeping in `epoll_wait`.
+    /// Time spent sleeping in `epoll_wait`, the current sleep included.
     pub idle: Duration,
     /// Times it woke up from sleep.
     pub wakeups: u64,
@@ -206,6 +206,8 @@ pub(crate) struct WorkerCounters {
     pub(crate) messages: AtomicU64,
     pub(crate) busy_ns: AtomicU64,
     pub(crate) idle_ns: AtomicU64,
+    /// Platform time + 1 when the current sleep began, 0 when awake.
+    pub(crate) asleep_since: AtomicU64,
     pub(crate) wakeups: AtomicU64,
     pub(crate) io_events: AtomicU64,
     pub(crate) timers_fired: AtomicU64,
@@ -220,6 +222,7 @@ impl WorkerCounters {
             messages: AtomicU64::new(0),
             busy_ns: AtomicU64::new(0),
             idle_ns: AtomicU64::new(0),
+            asleep_since: AtomicU64::new(0),
             wakeups: AtomicU64::new(0),
             io_events: AtomicU64::new(0),
             timers_fired: AtomicU64::new(0),
@@ -236,8 +239,13 @@ impl WorkerCounters {
         counter.fetch_add(d.as_nanos().min(u128::from(u64::MAX)) as u64, Ordering::Relaxed);
     }
 
-    pub(crate) fn snapshot(&self, pool: &str, index: usize, core: Option<usize>) -> WorkerStats {
+    /// `now`: platform time, to count the sleep in progress.
+    pub(crate) fn snapshot(&self, pool: &str, index: usize, core: Option<usize>, now_ns: u64) -> WorkerStats {
         let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        let asleep = match load(&self.asleep_since) {
+            0 => 0,
+            since => now_ns.saturating_sub(since - 1),
+        };
         WorkerStats {
             pool: pool.to_string(),
             index,
@@ -245,7 +253,7 @@ impl WorkerCounters {
             turns: load(&self.turns),
             messages: load(&self.messages),
             busy: Duration::from_nanos(load(&self.busy_ns)),
-            idle: Duration::from_nanos(load(&self.idle_ns)),
+            idle: Duration::from_nanos(load(&self.idle_ns) + asleep),
             wakeups: load(&self.wakeups),
             io_events: load(&self.io_events),
             timers_fired: load(&self.timers_fired),

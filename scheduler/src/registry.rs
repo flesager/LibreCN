@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::core::EoCore;
-use crate::{EoId, Error, Result};
+use crate::header::system;
+use crate::{EoConfig, EoId, Error, ExecutionObject, MsgHeader, Result};
 
 struct Slot {
     next_generation: AtomicU32,
@@ -36,21 +37,23 @@ impl Registry {
         self.slots.len() as u32
     }
 
-    /// Takes a free slot; follow with [`publish`](Self::publish) or [`abandon`](Self::abandon).
-    pub(crate) fn reserve(&self) -> Result<EoId> {
+    /// Builds an EO in a free slot (allocating on the calling thread) and
+    /// publishes it with `EO_START` queued. Returns it, and whether the caller
+    /// must schedule it.
+    pub(crate) fn create(
+        &self,
+        cfg: &EoConfig,
+        pool: u16,
+        eo: Box<dyn ExecutionObject>,
+    ) -> Result<(Arc<EoCore>, bool)> {
         let index = self.free.lock().unwrap().pop().ok_or(Error::RegistryFull)?;
-        let generation = self.slots[index as usize].next_generation.load(Ordering::Relaxed);
-        Ok(EoId::new(index, generation))
-    }
-
-    pub(crate) fn abandon(&self, id: EoId) {
-        self.free.lock().unwrap().push(id.index());
-    }
-
-    pub(crate) fn publish(&self, core: Arc<EoCore>) {
-        let slot = &self.slots[core.id.index() as usize];
-        *slot.entry.write().unwrap() = Some(core);
+        let slot = &self.slots[index as usize];
+        let id = EoId::new(index, slot.next_generation.load(Ordering::Relaxed));
+        let core = EoCore::create(id, cfg, pool, eo).inspect_err(|_| self.free.lock().unwrap().push(index))?;
+        let must_schedule = core.post_system(MsgHeader::system(system::EO_START, id, 0))?;
+        *slot.entry.write().unwrap() = Some(core.clone());
         self.alive.fetch_add(1, Ordering::Relaxed);
+        Ok((core, must_schedule))
     }
 
     /// The EO with exactly this id, stopped or faulted ones included until removed.

@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{Big, KICK, Ping, Pong};
+use librecn_common::flags;
 use librecn_scheduler::testbed::{Probe, TestBed, TestBedConfig};
-use librecn_scheduler::{Context, EoConfig, EoId, Error, ExecutionObject, Message, Time, TimerId, flags};
+use librecn_scheduler::{Context, EoConfig, EoId, Error, ExecutionObject, Message, Time, TimerId};
 
 const MS: Duration = Duration::from_millis(1);
 
@@ -311,4 +312,28 @@ fn budget_interleaves_busy_eos() {
     let stats = tb.stats(a).unwrap();
     // Turns: start, then 4 + 4; the first of those two turns left messages waiting.
     assert_eq!((stats.runs, stats.budget_exhausted), (3, 1));
+}
+
+/// Spawns an `Echo` child on start and pings it; logs the answer.
+struct Parent(Log<u64>);
+
+impl ExecutionObject for Parent {
+    fn on_start(&mut self, ctx: &mut Context<'_>) {
+        let child = ctx.spawn(EoConfig::new("child"), Echo).unwrap();
+        ctx.send_value(child, &Ping { seq: 1 }).unwrap();
+    }
+    fn on_message(&mut self, msg: &Message<'_>, _: &mut Context<'_>) {
+        if let Some(p) = msg.body::<Pong>() {
+            self.0.lock().unwrap().push(p.seq);
+        }
+    }
+}
+
+#[test]
+fn eos_spawn_eos() {
+    let mut tb = TestBed::new();
+    let got = log();
+    tb.add(EoConfig::new("parent"), Parent(got.clone())).unwrap();
+    tb.run_until_idle();
+    assert_eq!(*got.lock().unwrap(), [2]);
 }

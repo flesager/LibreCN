@@ -39,6 +39,10 @@ pub(crate) struct EoCore {
     fault: OnceLock<Box<FailureReport>>,
     /// An `IO_READY` could not be queued: re-arm every registration at the end of the next turn.
     pub(crate) io_lost: AtomicBool,
+    /// Wants an `EO_POLL` every turn.
+    polling: AtomicBool,
+    /// An `EO_POLL` is waiting in the system lane.
+    pub(crate) poll_queued: AtomicBool,
     eo: UnsafeCell<Option<Box<dyn ExecutionObject>>>,
     recorder: UnsafeCell<FlightRecorder>,
     timers: UnsafeCell<TimerTable>,
@@ -72,6 +76,8 @@ impl EoCore {
             state: AtomicU8::new(IDLE),
             fault: OnceLock::new(),
             io_lost: AtomicBool::new(false),
+            polling: AtomicBool::new(false),
+            poll_queued: AtomicBool::new(false),
             eo: UnsafeCell::new(Some(eo)),
             recorder: UnsafeCell::new(recorder),
             timers: UnsafeCell::new(timers),
@@ -131,6 +137,14 @@ impl EoCore {
 
     pub(crate) fn is_closed(&self) -> bool {
         self.state.load(Ordering::Acquire) == CLOSED
+    }
+
+    pub(crate) fn set_polling(&self, on: bool) {
+        self.polling.store(on, Ordering::Relaxed);
+    }
+
+    pub(crate) fn is_polling(&self) -> bool {
+        self.polling.load(Ordering::Relaxed)
     }
 
     pub(crate) fn set_fault(&self, report: Box<FailureReport>) {

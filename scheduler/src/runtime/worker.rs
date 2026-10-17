@@ -15,11 +15,7 @@ use crate::exec::{self, TurnEnd};
 use crate::io::{self, Poller};
 use crate::stats::WorkerCounters;
 use crate::timer::{Expired, Time, TimerId, TimerWheel, WheelHandle};
-use crate::{EoId, Error, Result};
-
-/// While the run queue stays busy, readiness is polled after this many turns
-/// or once per timer tick, whichever comes first.
-const TURNS_PER_POLL: usize = 32;
+use crate::{EoConfig, EoId, Error, ExecutionObject, Result};
 
 /// epoll data of the worker's own descriptors.
 const WAKE: u64 = 0;
@@ -111,27 +107,27 @@ impl Worker {
     pub(crate) fn run(mut self) {
         let shared = self.shared.clone();
         let pool = &shared.pools[self.pool];
+        // While the run queue stays busy, readiness is polled once per tick.
         let tick = self.wheel.tick();
-        let (mut turns_since_poll, mut last_poll) = (0, Time::ZERO);
+        let mut last_poll = Time::ZERO;
         while !shared.shutdown.load(Ordering::Acquire) {
             // Timers are checked before every turn: a long turn on another
             // EO must not delay the expiries this worker's wheel holds.
             self.apply_cancels();
             let now = self.fire_timers();
-            if turns_since_poll >= TURNS_PER_POLL || now - last_poll >= tick {
+            if now - last_poll >= tick {
                 self.harvest_io(pool);
-                (turns_since_poll, last_poll) = (0, now);
+                last_poll = now;
             }
             if let Some(index) = pool.run_queue.pop() {
                 self.run_turn(index, pool.budget);
-                turns_since_poll += 1;
                 continue;
             }
             // Always poll right before sleeping (see the I/O leader note).
             if self.harvest_io(pool) == 0 {
                 self.sleep(pool);
             }
-            (turns_since_poll, last_poll) = (0, self.shared.now());
+            last_poll = self.shared.now();
         }
     }
 
@@ -144,7 +140,10 @@ impl Worker {
         WorkerCounters::add_time(&counters.busy_ns, started.elapsed());
         WorkerCounters::add(&counters.turns, 1);
         WorkerCounters::add(&counters.messages, handled as u64);
-        if let TurnEnd::Requeue = end {
+        // A polling EO gets its next `EO_POLL`, which keeps it runnable.
+        let polling = !matches!(end, TurnEnd::Retired) && core.is_polling();
+        let woken = polling && exec::post_poll(&core);
+        if matches!(end, TurnEnd::Requeue) || woken {
             self.shared.requeue(&core);
         }
     }
@@ -217,7 +216,9 @@ impl Worker {
             return;
         }
         let timeout = self.wheel.next_deadline().map(|deadline| deadline - self.shared.now());
-        let started = Instant::now();
+        let started = self.shared.now();
+        // Platform time + 1 while asleep, so a snapshot can count the current sleep.
+        self.counters().asleep_since.store(started.as_nanos() + 1, Ordering::Relaxed);
         let wake = &self.shared.workers[self.id].wake;
         let leader = !pool.io_leader.swap(true, Ordering::AcqRel);
         let epoll = if leader { &self.sleep_io } else { &self.sleep_plain };
@@ -231,8 +232,10 @@ impl Worker {
             pool.io_leader.store(false, Ordering::Release);
         }
         pool.idle.fetch_and(!self.bit, Ordering::SeqCst);
+        let slept = self.shared.now() - started;
         let counters = self.counters();
-        WorkerCounters::add_time(&counters.idle_ns, started.elapsed());
+        counters.asleep_since.store(0, Ordering::Relaxed);
+        WorkerCounters::add_time(&counters.idle_ns, slept);
         WorkerCounters::add(&counters.wakeups, 1);
     }
 }
@@ -279,5 +282,9 @@ impl Platform for Worker {
         if !faulted {
             self.shared.registry.remove(core.id);
         }
+    }
+
+    fn spawn(&mut self, cfg: &EoConfig, eo: Box<dyn ExecutionObject>) -> Result<EoId> {
+        self.shared.spawn(cfg, eo)
     }
 }

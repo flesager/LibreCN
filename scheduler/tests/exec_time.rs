@@ -90,7 +90,7 @@ fn metric_loop_collects_periodically() {
     tb.advance(Duration::from_millis(35));
 
     let collected = collected.lock().unwrap();
-    let times: Vec<_> = collected.iter().map(|(t, _)| t.elapsed_since_start()).collect();
+    let times: Vec<_> = collected.iter().map(|(t, _)| *t - Time::ZERO).collect();
     assert_eq!(times, [10, 20, 30].map(Duration::from_millis));
     let max: Vec<_> = collected.iter().map(|(_, s)| s[0].1.processing.max).collect();
     assert!(max[0] >= WORK, "first window saw the ping");

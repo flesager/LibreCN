@@ -75,8 +75,13 @@ pub(crate) fn run_turn(
             counters.io_events.fetch_add(1, Ordering::Relaxed);
         }
         handled += 1;
-        // SAFETY: runner; the recorder is not borrowed anywhere else right now.
-        unsafe { core.recorder_mut() }.record(&header);
+        if header.msg_id == system::EO_POLL {
+            // Polls would flush the real history out of the recorder.
+            core.poll_queued.store(false, Ordering::Release);
+        } else {
+            // SAFETY: runner; the recorder is not borrowed anywhere else right now.
+            unsafe { core.recorder_mut() }.record(&header);
+        }
         let body = buf.as_ref().map_or(&[][..], |b| core.mailbox.pool.bytes(b, header.body_len as usize));
         outcome = dispatch(platform, core, Message::new(header, body), policy);
         if let Some(buf) = buf {
@@ -180,6 +185,22 @@ pub(crate) fn expiry_header(expired: &Expired) -> MsgHeader {
     let mut header = MsgHeader::system(system::TIMER_EXPIRED, expired.eo, expired.timer.raw());
     header.corr_id = expired.tag;
     header
+}
+
+/// Queues the `EO_POLL` of a polling EO, unless one is already waiting.
+/// Returns whether the EO must be scheduled.
+pub(crate) fn post_poll(core: &EoCore) -> bool {
+    if core.poll_queued.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    match core.post_system(MsgHeader::system(system::EO_POLL, core.id, 0)) {
+        Ok(must_schedule) => must_schedule,
+        // Lane full (the EO has work and will run anyway) or EO closed.
+        Err(_) => {
+            core.poll_queued.store(false, Ordering::Release);
+            false
+        }
+    }
 }
 
 /// Queues an `IO_READY`. Returns whether the EO must be scheduled. If the

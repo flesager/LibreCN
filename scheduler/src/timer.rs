@@ -26,11 +26,6 @@ impl Time {
     pub const fn as_nanos(self) -> u64 {
         self.0
     }
-
-    /// Duration since start.
-    pub const fn elapsed_since_start(self) -> Duration {
-        Duration::from_nanos(self.0)
-    }
 }
 
 impl Add<Duration> for Time {
@@ -64,7 +59,7 @@ impl TimerId {
     }
 
     /// Raw value, as carried in the `reserved` field of `TIMER_EXPIRED`.
-    pub const fn raw(self) -> u64 {
+    pub(crate) const fn raw(self) -> u64 {
         self.0
     }
 

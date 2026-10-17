@@ -19,13 +19,12 @@ use rustix::event::{EventfdFlags, eventfd};
 use crate::context::{Poster, check_user_msg_id, post_signal, post_stop, post_value};
 use crate::core::EoCore;
 use crate::failure::{self, FailureReport, FaultPolicy};
-use crate::header::system;
 use crate::io::Poller;
 use crate::queue::Ring;
 use crate::registry::Registry;
 use crate::stats::{WorkerCounters, WorkerStats};
 use crate::timer::{Time, WheelHandle};
-use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, MsgHeader, Result};
+use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, Result};
 
 /// Workers of one pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,6 +203,20 @@ impl Shared {
         }
     }
 
+    fn spawn(&self, cfg: &EoConfig, eo: Box<dyn ExecutionObject>) -> Result<EoId> {
+        let pool = match &cfg.pool {
+            None => 0,
+            Some(name) => {
+                self.pools.iter().position(|p| p.name == *name).ok_or(Error::InvalidConfig("unknown pool"))?
+            }
+        };
+        let (core, must_schedule) = self.registry.create(cfg, pool as u16, eo)?;
+        if must_schedule {
+            self.schedule(&core);
+        }
+        Ok(core.id)
+    }
+
     fn wake(&self, worker: usize) {
         // Only fails if the counter would overflow, i.e. the worker is already awake.
         let _ = rustix::io::write(&self.workers[worker].wake, &1u64.to_ne_bytes());
@@ -313,27 +326,7 @@ impl Runtime {
     /// The allocation happens on the calling thread; workers only see the EO
     /// once it is fully built. Works before and while traffic flows.
     pub fn add(&self, cfg: EoConfig, eo: impl ExecutionObject) -> Result<EoId> {
-        let pool = match &cfg.pool {
-            None => 0,
-            Some(name) => {
-                self.shared.pools.iter().position(|p| p.name == *name).ok_or(Error::InvalidConfig("unknown pool"))?
-            }
-        };
-        let registry = &self.shared.registry;
-        let id = registry.reserve()?;
-        let core = match EoCore::create(id, &cfg, pool as u16, Box::new(eo)) {
-            Ok(core) => core,
-            Err(e) => {
-                registry.abandon(id);
-                return Err(e);
-            }
-        };
-        let must_schedule = core.post_system(MsgHeader::system(system::EO_START, id, 0))?;
-        registry.publish(core.clone());
-        if must_schedule {
-            self.shared.schedule(&core);
-        }
-        Ok(id)
+        self.shared.spawn(&cfg, Box::new(eo))
     }
 
     /// Sends `value` to `to` from [`EoId::SYSTEM`].
@@ -395,7 +388,10 @@ impl Runtime {
         self.shared
             .workers
             .iter()
-            .map(|w| w.counters.snapshot(&self.shared.pools[usize::from(w.pool)].name, w.index_in_pool, w.core))
+            .map(|w| {
+                let pool = &self.shared.pools[usize::from(w.pool)].name;
+                w.counters.snapshot(pool, w.index_in_pool, w.core, self.shared.now().as_nanos())
+            })
             .collect()
     }
 

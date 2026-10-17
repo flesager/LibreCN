@@ -542,3 +542,27 @@ fn pinned_workers_stay_on_their_cores() {
     assert!(seen.iter().all(|c| cores.contains(c)), "ran on {seen:?}, pinned to {cores:?}");
     assert!(rt.worker_stats().iter().all(|w| w.core.is_some()));
 }
+
+/// Spawns an `Echo` child in pool "up" on start and pings it.
+struct Parent(Arc<AtomicU64>);
+
+impl ExecutionObject for Parent {
+    fn on_start(&mut self, ctx: &mut Context<'_>) {
+        let child = ctx.spawn(EoConfig::new("child").pool("up"), Echo).unwrap();
+        ctx.send_value(child, &Ping { seq: 41 }).unwrap();
+    }
+    fn on_message(&mut self, msg: &Message<'_>, _: &mut Context<'_>) {
+        if let Some(p) = msg.body::<Pong>() {
+            self.0.store(p.seq, Ordering::Relaxed);
+        }
+    }
+}
+
+#[test]
+fn eos_spawn_eos_in_other_pools() {
+    let rt = runtime(vec![PoolConfig::new("cp", 1), PoolConfig::new("up", 1)]);
+    let got = Arc::new(AtomicU64::new(0));
+    rt.add(EoConfig::new("parent").pool("cp"), Parent(got.clone())).unwrap();
+    assert!(wait_until(5 * SECOND, || got.load(Ordering::Relaxed) == 42));
+    assert_eq!(rt.alive(), 2);
+}

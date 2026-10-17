@@ -12,6 +12,7 @@ zerocopy.workspace = true
 rustix.workspace = true
 
 [dev-dependencies]
+librecn-common = { path = "../common" }
 proptest.workspace = true
 criterion.workspace = true
 

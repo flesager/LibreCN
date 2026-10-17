@@ -10,7 +10,7 @@ use crate::header::system;
 use crate::io::{self, Interest, IoToken, Poller};
 use crate::mailbox::DataItem;
 use crate::timer::{Time, TimerId, WheelHandle};
-use crate::{EoId, EoStats, Error, MsgBody, MsgHeader, OutMsg, Result};
+use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, MsgHeader, OutMsg, Result};
 
 /// Enough to post messages: test bed, runtime workers, and the runtime's
 /// control handle all implement it.
@@ -33,6 +33,8 @@ pub(crate) trait Platform: Poster {
     fn poller(&self, pool: u16) -> &Poller;
     /// The EO retired; free its registry slot unless it faulted.
     fn retired(&mut self, core: &EoCore, faulted: bool);
+    /// Creates and schedules an EO.
+    fn spawn(&mut self, cfg: &EoConfig, eo: Box<dyn ExecutionObject>) -> Result<EoId>;
 }
 
 pub(crate) fn check_user_msg_id(msg_id: u32) -> Result<()> {
@@ -56,8 +58,7 @@ pub(crate) fn post_value<P: Poster + ?Sized, T: MsgBody>(
 ) -> Result<()> {
     check_user_msg_id(T::MSG_ID)?;
     let core = platform.lookup(to)?;
-    let mut msg = OutMsg::<T>::new(core, from)?;
-    msg.set_corr_id(corr_id);
+    let mut msg = OutMsg::<T>::new(core, from)?.with_corr_id(corr_id);
     msg.as_mut_bytes().copy_from_slice(value.as_bytes());
     let (core, item) = msg.into_parts();
     post_item(platform, &core, item)
@@ -190,6 +191,15 @@ impl<'a> Context<'a> {
         true
     }
 
+    /// Poll mode: while on, the EO receives one `EO_POLL` per turn and stays
+    /// runnable, so its worker never sleeps (busy polling of rings, sockets in
+    /// non-blocking mode, ...). Turning it off when there is nothing to poll,
+    /// and back on at the next `IO_READY` or message, gives a hybrid mode.
+    /// The test bed delivers polls only on [`TestBed::poll`](crate::testbed::TestBed::poll).
+    pub fn set_polling(&mut self, on: bool) {
+        self.core.set_polling(on);
+    }
+
     /// Metrics of any live EO.
     pub fn stats(&mut self, eo: EoId) -> Option<EoStats> {
         self.platform.lookup(eo).ok().map(|core| core.stats(false))
@@ -198,6 +208,13 @@ impl<'a> Context<'a> {
     /// Metrics of any live EO, then resets its peaks (min/max time, high-water marks).
     pub fn stats_and_reset_peaks(&mut self, eo: EoId) -> Option<EoStats> {
         self.platform.lookup(eo).ok().map(|core| core.stats(true))
+    }
+
+    /// Creates an EO, on the pool named in `cfg` (the test bed ignores pools).
+    /// Its memory is allocated now, on this thread, and its creation cost is
+    /// in its [`CreationStats`](crate::CreationStats).
+    pub fn spawn(&mut self, cfg: EoConfig, eo: impl ExecutionObject) -> Result<EoId> {
+        self.platform.spawn(&cfg, Box::new(eo))
     }
 
     /// Asks for this EO to stop: `on_stop` runs next (system messages come
