@@ -1,0 +1,23 @@
+[package]
+name = "librecn"
+description = "LibreCN 5G core: runtime, OAM EOs and network functions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-scheduler = { path = "../scheduler" }
+librecn-common = { path = "../common" }
+librecn-oam = { path = "../oam" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+signal-hook.workspace = true
+zerocopy.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

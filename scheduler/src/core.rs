@@ -29,6 +29,8 @@ const CLOSED: u8 = 3;
 /// recorder, timer and I/O tables).
 pub(crate) struct EoCore {
     pub(crate) id: EoId,
+    /// Creation order, for shutdown.
+    pub(crate) created: u64,
     pub(crate) name: Box<str>,
     /// Runtime pool index (0 on the test bed).
     pub(crate) pool: u16,
@@ -57,7 +59,13 @@ unsafe impl Sync for EoCore {}
 
 impl EoCore {
     /// Allocates and prefaults every region, measuring how long it takes.
-    pub(crate) fn create(id: EoId, cfg: &EoConfig, pool: u16, eo: Box<dyn ExecutionObject>) -> Result<Arc<Self>> {
+    pub(crate) fn create(
+        id: EoId,
+        created: u64,
+        cfg: &EoConfig,
+        pool: u16,
+        eo: Box<dyn ExecutionObject>,
+    ) -> Result<Arc<Self>> {
         cfg.validate()?;
         let started = Instant::now();
         let mailbox = Mailbox::new(cfg)?;
@@ -68,6 +76,7 @@ impl EoCore {
             mailbox.bytes_reserved() + timers.bytes_reserved() + io.bytes_reserved() + recorder.bytes_reserved();
         Ok(Arc::new(EoCore {
             id,
+            created,
             name: cfg.name.as_str().into(),
             pool,
             mailbox,

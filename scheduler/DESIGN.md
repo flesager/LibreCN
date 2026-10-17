@@ -88,6 +88,8 @@ A worker loops:
 3. pop an EO and run up to `budget` messages, system lane first; re-queue it if messages remain;
 4. with nothing to run: collect readiness, then sleep in `epoll_wait` until the next timer.
 
+`Runtime::shutdown` stops the EOs in reverse creation order, each one finishing before the next is asked: services created first (the log EO, ...) still serve the `on_stop` of the EOs created after them.
+
 **Wake-ups.** A pool keeps a bitmask of sleeping workers. Queuing an EO wakes one through its eventfd, with fences on both sides so no wake-up is lost. Re-queuing its own EO wakes another worker only if more than one EO is waiting. One sleeping worker at a time, the **I/O leader**, also watches the pool's epoll, so a socket event wakes one worker, not all of them. Every awake worker collects readiness before sleeping, so readiness is never left unwatched.
 
 **Poll and hybrid modes.** `ctx.set_polling(true)` makes the platform deliver one `EO_POLL` per turn and keep the EO runnable, so its worker never sleeps (busy polling of rings or non-blocking sockets). An EO that turns polling off after N empty polls, and back on at its next `IO_READY` or message, runs in hybrid mode. The EO decides, because it alone knows its traffic. Polls are not kept in the flight recorder. On the test bed, polls are delivered only on `TestBed::poll()`.
@@ -124,12 +126,13 @@ pub trait ExecutionObject: Send + 'static {
 | `register_io`, `deregister_io` | socket readiness |
 | `set_polling` | poll / hybrid mode |
 | `spawn` | create an EO, in any pool |
-| `stats`, `stats_and_reset_peaks` | metrics of any EO |
-| `stop_self` | `on_stop` runs next, then the EO is removed |
+| `stop(id)` | stop any EO, this one included: `on_stop` runs next, then it is removed |
+| `name`, `eos`, `find(name)` | own name, list of EOs, a well-known service by name |
+| `stats`, `stats_and_reset_peaks`, `worker_stats` | metrics of any EO, of the workers |
 
 ## 9. Observability and failures
 
-**Per EO** (`stats(id)`): processing time per message (count, total, min, max, histogram in powers of two from 1 µs), turns, budget exhaustions, timers fired and stale, I/O events and stale; for each lane, depth, `high_water`, `rejected`; for each buffer class, `in_use`, `high_water`, `fallbacks`, `alloc_failures`; creation time and bytes. `stats_and_reset_peaks` resets min, max and high-water marks for periodic collection. `MetricCollector` is the metric loop, itself an EO.
+**Per EO** (`stats(id)`): processing time per message (count, total, min, max, histogram in powers of two from 1 µs), turns, budget exhaustions, timers fired and stale, I/O events and stale; for each lane, depth, `high_water`, `rejected`; for each buffer class, `in_use`, `high_water`, `fallbacks`, `alloc_failures`; creation time and bytes. `stats_and_reset_peaks` resets min, max and high-water marks for periodic collection. The counters are atomics any EO reads through its `Context`, so the metric loop needs no EO of its own: the OAM web server exports them (Prometheus histograms, so no reader resets anything).
 
 **Per worker** (`Runtime::worker_stats`): turns, messages, busy time, idle time (current sleep included), wake-ups, I/O events, timers, remote and lazy cancellations.
 
@@ -141,11 +144,11 @@ pub trait ExecutionObject: Send + 'static {
 - **Units**: ring (proptest model, loom), buffer pool, timer wheel and tables, I/O table, histogram.
 - **Runtime, real threads**: load balancing (4 workers, 16 EOs: fair share, exclusivity, per-sender order under migration), overload from 4 threads (exact counters, fallback, timers overtake data, recovery without leak), execution time and metric loop, timers never early and never delivered once cancelled, UDP echo, busy and hybrid polling, isolated fault, stop and shutdown, spawn across pools, pinning.
 - **Zero allocation** on the test bed message path and on worker threads between messages (counting allocator, proven to catch an injected allocation).
-- Stress: repeated runs in release and debug, and restricted to 1 and 2 CPUs.
+- Stress (`scripts/stress.sh`, outside `cargo test` so the trunk stays fast): repeated release runs, runs restricted to 1 and 2 CPUs, loom.
 
 ```
-cargo test --workspace [--release]
-RUSTFLAGS="--cfg loom" CARGO_TARGET_DIR=target/loom cargo test -p librecn-scheduler --release --lib queue::loom_tests
+cargo test --workspace          # everything, ~2 s
+scripts/stress.sh [RUNS]        # slow checks
 cargo bench -p librecn-scheduler
 ```
 
@@ -158,6 +161,8 @@ Dependencies: `rustix` (epoll, eventfd, affinity), `zerocopy`, `thiserror`; test
 **Taken away**
 - *Pool modes* (`Event` / `Poll` / `Hybrid` with spin settings): replaced by one EO flag, `set_polling` (§5).
 - *Message roles* (`flags::REQUEST`, ...): an NF convention the scheduler never reads, moved to `common`.
+- *`MetricCollector`*: metrics are read in place by whoever needs them (§9); the collector survives as a test helper.
+- *`stop_self`*: `stop(ctx.self_id())`.
 - *"Poll I/O every 32 turns"*: readiness is polled once per tick and before sleeping.
 - *Duplicates*: the two EO-creation paths are now one (`Registry::create`, also behind `ctx.spawn`); `OutMsg` setters that duplicated the builders; public readiness bits that duplicated `IoReady`'s methods; `Time::elapsed_since_start`; public `raw()` on opaque handles.
 

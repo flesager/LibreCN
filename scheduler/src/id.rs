@@ -28,6 +28,16 @@ impl EoId {
     pub const fn generation(self) -> u32 {
         (self.0 >> 32) as u32
     }
+
+    /// 64-bit value, e.g. for an API. Stable for the EO's life.
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// Back from [`raw`](Self::raw). An id that names no live EO is simply refused when used.
+    pub const fn from_raw(raw: u64) -> Self {
+        EoId(raw)
+    }
 }
 
 impl std::fmt::Debug for EoId {

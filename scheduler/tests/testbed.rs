@@ -6,11 +6,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{Big, KICK, Ping, Pong};
-use librecn_common::flags;
 use librecn_scheduler::testbed::{Probe, TestBed, TestBedConfig};
 use librecn_scheduler::{Context, EoConfig, EoId, Error, ExecutionObject, Message, Time, TimerId};
 
 const MS: Duration = Duration::from_millis(1);
+
+/// Response role, as an application would define it in `flags`.
+const RESPONSE: u32 = 2;
 
 type Log<T> = Arc<Mutex<Vec<T>>>;
 
@@ -24,8 +26,7 @@ struct Echo;
 impl ExecutionObject for Echo {
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if let Some(ping) = msg.body::<Ping>() {
-            let mut pong =
-                ctx.alloc::<Pong>(msg.from()).unwrap().with_corr_id(msg.corr_id()).with_flags(flags::RESPONSE);
+            let mut pong = ctx.alloc::<Pong>(msg.from()).unwrap().with_corr_id(msg.corr_id()).with_flags(RESPONSE);
             pong.seq = ping.seq + 1;
             ctx.send(pong).unwrap();
         }
@@ -48,7 +49,7 @@ fn request_response_keeps_correlation() {
     let r = &got[0];
     assert_eq!(r.body::<Pong>(), Some(Pong { seq: 42 }));
     assert_eq!(r.body::<Ping>(), None, "wrong type is refused");
-    assert_eq!((r.header.from, r.header.to, r.header.corr_id, r.header.flags), (echo, client, 7, flags::RESPONSE));
+    assert_eq!((r.header.from, r.header.to, r.header.corr_id, r.header.flags), (echo, client, 7, RESPONSE));
     assert_eq!(r.header.body_len as usize, std::mem::size_of::<Pong>());
 }
 
@@ -198,7 +199,7 @@ impl ExecutionObject for Lifecycle {
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         self.0.lock().unwrap().push(format!("msg {:#x}", msg.id()));
         if msg.id() == KICK {
-            ctx.stop_self();
+            ctx.stop(ctx.self_id()).unwrap();
         }
     }
     fn on_stop(&mut self, _: &mut Context<'_>) {
@@ -336,4 +337,34 @@ fn eos_spawn_eos() {
     tb.add(EoConfig::new("parent"), Parent(got.clone())).unwrap();
     tb.run_until_idle();
     assert_eq!(*got.lock().unwrap(), [2]);
+}
+
+/// On `KICK`: lists the EOs, finds "echo" by name and stops it.
+struct Supervisor(Log<Vec<(String, bool)>>);
+
+impl ExecutionObject for Supervisor {
+    fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
+        if msg.id() == KICK {
+            let listing = ctx.eos().into_iter().map(|e| (e.name, e.alive)).collect();
+            self.0.lock().unwrap().push(listing);
+            assert!(ctx.worker_stats().is_empty(), "no workers on the test bed");
+            let echo = ctx.find("echo").unwrap();
+            ctx.stop(echo).unwrap();
+            assert_eq!(ctx.name(), "supervisor");
+        }
+    }
+}
+
+#[test]
+fn an_eo_lists_finds_and_stops_others() {
+    let mut tb = TestBed::new();
+    let seen = log();
+    let echo = tb.add(EoConfig::new("echo"), Echo).unwrap();
+    let sup = tb.add(EoConfig::new("supervisor"), Supervisor(seen.clone())).unwrap();
+    tb.run_until_idle();
+    tb.signal(sup, KICK).unwrap();
+    tb.run_until_idle();
+    assert_eq!(seen.lock().unwrap()[0], [("echo".to_string(), true), ("supervisor".to_string(), true)]);
+    assert!(!tb.is_alive(echo));
+    assert_eq!(EoId::from_raw(sup.raw()), sup);
 }

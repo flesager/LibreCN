@@ -3,12 +3,12 @@
 //! Lookups take a per-slot read lock; platforms cache the result per worker
 //! so the message path normally never touches the registry.
 
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::core::EoCore;
 use crate::header::system;
-use crate::{EoConfig, EoId, Error, ExecutionObject, MsgHeader, Result};
+use crate::{EoConfig, EoId, EoInfo, Error, ExecutionObject, MsgHeader, Result};
 
 struct Slot {
     next_generation: AtomicU32,
@@ -20,6 +20,7 @@ pub(crate) struct Registry {
     free: Mutex<Vec<u32>>,
     /// EOs added and neither stopped nor faulted.
     alive: AtomicUsize,
+    created: AtomicU64,
 }
 
 impl Registry {
@@ -30,6 +31,7 @@ impl Registry {
                 .collect(),
             free: Mutex::new((0..capacity).rev().collect()),
             alive: AtomicUsize::new(0),
+            created: AtomicU64::new(0),
         }
     }
 
@@ -49,7 +51,8 @@ impl Registry {
         let index = self.free.lock().unwrap().pop().ok_or(Error::RegistryFull)?;
         let slot = &self.slots[index as usize];
         let id = EoId::new(index, slot.next_generation.load(Ordering::Relaxed));
-        let core = EoCore::create(id, cfg, pool, eo).inspect_err(|_| self.free.lock().unwrap().push(index))?;
+        let created = self.created.fetch_add(1, Ordering::Relaxed);
+        let core = EoCore::create(id, created, cfg, pool, eo).inspect_err(|_| self.free.lock().unwrap().push(index))?;
         let must_schedule = core.post_system(MsgHeader::system(system::EO_START, id, 0))?;
         *slot.entry.write().unwrap() = Some(core.clone());
         self.alive.fetch_add(1, Ordering::Relaxed);
@@ -87,12 +90,34 @@ impl Registry {
         self.alive.load(Ordering::Relaxed)
     }
 
-    /// Ids of the EOs not yet stopped or faulted.
-    pub(crate) fn alive_ids(&self) -> Vec<EoId> {
+    /// Live and faulted EOs; `pool_name` resolves pool indices.
+    pub(crate) fn infos<'a>(&self, pool_name: impl Fn(u16) -> &'a str) -> Vec<EoInfo> {
         (0..self.capacity())
             .filter_map(|i| self.by_index(i))
-            .filter(|core| !core.is_closed())
-            .map(|core| core.id)
+            .filter(|core| core.fault().is_some() || !core.is_closed())
+            .map(|core| EoInfo {
+                id: core.id,
+                name: core.name.to_string(),
+                pool: pool_name(core.pool).to_string(),
+                alive: core.fault().is_none(),
+            })
             .collect()
+    }
+
+    /// First live EO with this name.
+    pub(crate) fn find(&self, name: &str) -> Option<EoId> {
+        (0..self.capacity())
+            .filter_map(|i| self.by_index(i))
+            .find(|core| &*core.name == name && core.check_alive().is_ok())
+            .map(|core| core.id)
+    }
+
+    /// Ids of the EOs not yet stopped or faulted.
+    /// In creation order.
+    pub(crate) fn alive_ids(&self) -> Vec<EoId> {
+        let mut alive: Vec<_> =
+            (0..self.capacity()).filter_map(|i| self.by_index(i)).filter(|core| !core.is_closed()).collect();
+        alive.sort_by_key(|core| core.created);
+        alive.into_iter().map(|core| core.id).collect()
     }
 }

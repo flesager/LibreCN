@@ -9,11 +9,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use common::{KICK, Ping, Pong, UdpEcho, spin, wait_until};
+use common::{KICK, MetricCollector, Ping, Pong, UdpEcho, spin, wait_until};
 use librecn_scheduler::runtime::{PoolConfig, Runtime, RuntimeConfig};
 use librecn_scheduler::{
-    Context, EoConfig, EoId, EoStats, Error, ExecutionObject, FaultPolicy, Message, MetricCollector, MsgBody, Time,
-    TimerId, histogram_bucket,
+    Context, EoConfig, EoId, EoStats, Error, ExecutionObject, FaultPolicy, Message, MsgBody, Time, TimerId,
+    histogram_bucket,
 };
 
 const SECOND: Duration = Duration::from_secs(1);
@@ -565,4 +565,25 @@ fn eos_spawn_eos_in_other_pools() {
     rt.add(EoConfig::new("parent").pool("cp"), Parent(got.clone())).unwrap();
     assert!(wait_until(5 * SECOND, || got.load(Ordering::Relaxed) == 42));
     assert_eq!(rt.alive(), 2);
+}
+
+/// Records its name when stopped.
+struct StopOrder(&'static str, Arc<Mutex<Vec<&'static str>>>);
+
+impl ExecutionObject for StopOrder {
+    fn on_message(&mut self, _: &Message<'_>, _: &mut Context<'_>) {}
+    fn on_stop(&mut self, _: &mut Context<'_>) {
+        self.1.lock().unwrap().push(self.0);
+    }
+}
+
+#[test]
+fn shutdown_stops_the_last_created_first() {
+    let mut rt = runtime(vec![PoolConfig::new("cp", workers(4))]);
+    let order = Arc::default();
+    for name in ["service", "nf-a", "nf-b"] {
+        rt.add(EoConfig::new(name), StopOrder(name, Arc::clone(&order))).unwrap();
+    }
+    assert!(rt.shutdown(5 * SECOND));
+    assert_eq!(*order.lock().unwrap(), ["nf-b", "nf-a", "service"]);
 }

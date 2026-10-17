@@ -13,9 +13,10 @@ use crate::context::{Platform, Poster};
 use crate::core::EoCore;
 use crate::exec::{self, TurnEnd};
 use crate::io::{self, Poller};
+use crate::registry::Registry;
 use crate::stats::WorkerCounters;
 use crate::timer::{Expired, Time, TimerId, TimerWheel, WheelHandle};
-use crate::{EoConfig, EoId, Error, ExecutionObject, Result};
+use crate::{EoConfig, EoId, Error, ExecutionObject, Result, WorkerStats};
 
 /// epoll data of the worker's own descriptors.
 const WAKE: u64 = 0;
@@ -286,5 +287,17 @@ impl Platform for Worker {
 
     fn spawn(&mut self, cfg: &EoConfig, eo: Box<dyn ExecutionObject>) -> Result<EoId> {
         self.shared.spawn(cfg, eo)
+    }
+
+    fn registry(&self) -> &Registry {
+        &self.shared.registry
+    }
+
+    fn pool_name(&self, pool: u16) -> &str {
+        self.shared.pool_name(pool)
+    }
+
+    fn worker_stats(&self) -> Vec<WorkerStats> {
+        self.shared.worker_stats()
     }
 }

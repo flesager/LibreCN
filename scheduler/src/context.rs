@@ -9,8 +9,9 @@ use crate::core::EoCore;
 use crate::header::system;
 use crate::io::{self, Interest, IoToken, Poller};
 use crate::mailbox::DataItem;
+use crate::registry::Registry;
 use crate::timer::{Time, TimerId, WheelHandle};
-use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, MsgHeader, OutMsg, Result};
+use crate::{EoConfig, EoId, EoInfo, EoStats, Error, ExecutionObject, MsgBody, MsgHeader, OutMsg, Result, WorkerStats};
 
 /// Enough to post messages: test bed, runtime workers, and the runtime's
 /// control handle all implement it.
@@ -35,6 +36,11 @@ pub(crate) trait Platform: Poster {
     fn retired(&mut self, core: &EoCore, faulted: bool);
     /// Creates and schedules an EO.
     fn spawn(&mut self, cfg: &EoConfig, eo: Box<dyn ExecutionObject>) -> Result<EoId>;
+    fn registry(&self) -> &Registry;
+    /// Name of a pool (empty on the test bed).
+    fn pool_name(&self, pool: u16) -> &str;
+    /// Activity of the workers (none on the test bed).
+    fn worker_stats(&self) -> Vec<WorkerStats>;
 }
 
 pub(crate) fn check_user_msg_id(msg_id: u32) -> Result<()> {
@@ -104,6 +110,11 @@ impl<'a> Context<'a> {
     /// Id of the running EO.
     pub fn self_id(&self) -> EoId {
         self.core.id
+    }
+
+    /// Name of the running EO.
+    pub fn name(&self) -> &str {
+        &self.core.name
     }
 
     /// Platform time.
@@ -217,10 +228,27 @@ impl<'a> Context<'a> {
         self.platform.spawn(&cfg, Box::new(eo))
     }
 
-    /// Asks for this EO to stop: `on_stop` runs next (system messages come
-    /// first), then the EO is removed.
-    pub fn stop_self(&mut self) {
-        let _ = post_stop(self.platform, self.core.id);
+    /// Asks an EO, this one included, to stop: its `on_stop` runs next
+    /// (system messages come first), then it is removed.
+    pub fn stop(&mut self, id: EoId) -> Result<()> {
+        post_stop(self.platform, id)
+    }
+
+    /// Live and faulted EOs. Allocates: for supervision, not for the message path.
+    pub fn eos(&self) -> Vec<EoInfo> {
+        let platform = &*self.platform;
+        platform.registry().infos(|pool| platform.pool_name(pool))
+    }
+
+    /// First live EO with this name, e.g. a well-known service. Scans the
+    /// registry: cache the result.
+    pub fn find(&self, name: &str) -> Option<EoId> {
+        self.platform.registry().find(name)
+    }
+
+    /// Activity of the workers (empty on the test bed). Allocates.
+    pub fn worker_stats(&self) -> Vec<WorkerStats> {
+        self.platform.worker_stats()
     }
 }
 

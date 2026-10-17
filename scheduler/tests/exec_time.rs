@@ -5,10 +5,10 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use common::Ping;
+use common::{MetricCollector, Ping};
 use librecn_scheduler::testbed::TestBed;
 use librecn_scheduler::{
-    Context, EoConfig, EoId, EoStats, ExecutionObject, HIST_BUCKETS, Message, MetricCollector, Time, histogram_bucket,
+    Context, EoConfig, EoId, EoStats, ExecutionObject, HIST_BUCKETS, Message, Time, histogram_bucket,
 };
 
 /// One call of the metric sink.

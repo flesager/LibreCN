@@ -23,7 +23,6 @@ mod id;
 mod io;
 mod mailbox;
 mod message;
-mod metrics;
 mod pool;
 pub mod queue;
 mod recorder;
@@ -36,14 +35,13 @@ mod timer;
 
 pub use config::EoConfig;
 pub use context::Context;
-pub use eo::ExecutionObject;
+pub use eo::{EoInfo, ExecutionObject};
 pub use error::{Error, Result};
 pub use failure::{FailureReport, FaultPolicy, install_panic_hook};
 pub use header::{MsgHeader, system};
 pub use id::EoId;
 pub use io::{Interest, IoReady, IoToken};
 pub use message::{Message, MsgBody, OutMsg, TimerFired};
-pub use metrics::{MetricCollector, MetricSink};
 pub use pool::{BUFFER_ALIGN, BufferClassConfig};
 pub use stats::{
     BufferClassStats, CreationStats, EoStats, HIST_BUCKETS, LaneStats, ProcessingStats, WorkerStats, histogram_bucket,

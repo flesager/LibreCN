@@ -1,0 +1,27 @@
+# LibreCN configuration example: `librecn --config librecn.example.toml`.
+# Every section is optional; without a file: pool "cp" with one worker per
+# core but one, pool "oam" with one worker, web server on 127.0.0.1:8080.
+
+[runtime]
+max_eos = 256
+fault_policy = "abort"        # "isolate": a panicking EO is faulted, the others run on
+
+[[runtime.pools]]             # control-plane NFs
+name = "cp"
+workers = 2                   # or `cores = [2, 3]` for pinned workers
+
+[[runtime.pools]]             # OAM EOs: log, alarm, control, server
+name = "oam"
+workers = 1
+
+[oam]
+listen = "127.0.0.1:8080"     # web API and GUI
+
+# NFs started at boot; more through the GUI or `POST /api/nfs`.
+[[nf]]
+kind = "demo"
+name = "demo-1"
+pool = "cp"
+[nf.params]
+period_ms = 1000
+alarm = false

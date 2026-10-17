@@ -217,6 +217,18 @@ impl Shared {
         Ok(core.id)
     }
 
+    fn worker_stats(&self) -> Vec<WorkerStats> {
+        let now = self.now().as_nanos();
+        self.workers
+            .iter()
+            .map(|w| w.counters.snapshot(&self.pools[usize::from(w.pool)].name, w.index_in_pool, w.core, now))
+            .collect()
+    }
+
+    fn pool_name(&self, pool: u16) -> &str {
+        &self.pools[usize::from(pool)].name
+    }
+
     fn wake(&self, worker: usize) {
         // Only fails if the counter would overflow, i.e. the worker is already awake.
         let _ = rustix::io::write(&self.workers[worker].wake, &1u64.to_ne_bytes());
@@ -345,7 +357,7 @@ impl Runtime {
         post_signal(&mut Control(&self.shared), EoId::SYSTEM, to, msg_id, 0)
     }
 
-    /// Asks `id` to stop, like [`Context::stop_self`](crate::Context::stop_self).
+    /// Asks `id` to stop, like [`Context::stop`](crate::Context::stop).
     pub fn stop(&self, id: EoId) -> Result<()> {
         post_stop(&mut Control(&self.shared), id)
     }
@@ -385,31 +397,29 @@ impl Runtime {
 
     /// Activity of every worker, pool by pool.
     pub fn worker_stats(&self) -> Vec<WorkerStats> {
-        self.shared
-            .workers
-            .iter()
-            .map(|w| {
-                let pool = &self.shared.pools[usize::from(w.pool)].name;
-                w.counters.snapshot(pool, w.index_in_pool, w.core, self.shared.now().as_nanos())
-            })
-            .collect()
+        self.shared.worker_stats()
     }
 
-    /// Stops every EO (each runs `on_stop`), waits up to `timeout` for them to
-    /// finish, then stops the workers. Returns whether every EO stopped in
+    /// Stops every EO in reverse creation order, each one finishing (its
+    /// `on_stop` included) before the next is asked, within `timeout`
+    /// overall; then stops the workers. Returns whether every EO stopped in
     /// time. Called by `Drop` with a 5 s timeout if not called before.
     pub fn shutdown(&mut self, timeout: Duration) -> bool {
         if self.threads.is_empty() {
             return self.shared.registry.alive() == 0;
         }
         let deadline = Instant::now() + timeout;
-        let mut pending = self.shared.registry.alive_ids();
-        loop {
-            pending.retain(|&id| post_stop(&mut Control(&self.shared), id) == Err(Error::QueueFull));
-            if self.shared.registry.alive() == 0 || Instant::now() >= deadline {
-                break;
+        let pause = || std::thread::sleep(Duration::from_micros(100));
+        let registry = &self.shared.registry;
+        // Last created, first stopped: services created first (logs, ...)
+        // still serve the `on_stop` of those created after them.
+        for id in registry.alive_ids().into_iter().rev() {
+            while post_stop(&mut Control(&self.shared), id) == Err(Error::QueueFull) && Instant::now() < deadline {
+                pause();
             }
-            std::thread::sleep(Duration::from_millis(1));
+            while registry.get(id).is_some_and(|core| core.fault().is_none()) && Instant::now() < deadline {
+                pause();
+            }
         }
         let clean = self.shared.registry.alive() == 0;
         self.shared.shutdown.store(true, Ordering::Release);

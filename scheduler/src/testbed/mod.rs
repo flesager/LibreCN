@@ -22,7 +22,7 @@ use crate::failure::{self, FailureReport, FaultPolicy};
 use crate::io::{self, Poller};
 use crate::registry::Registry;
 use crate::timer::{Expired, Time, TimerId, TimerWheel, WheelHandle};
-use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, Result};
+use crate::{EoConfig, EoId, EoStats, Error, ExecutionObject, MsgBody, Result, WorkerStats};
 
 /// Sizes and policies of a [`TestBed`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,7 +119,7 @@ impl TestBed {
         post_signal(self, EoId::SYSTEM, to, msg_id, 0)
     }
 
-    /// Asks `id` to stop, like [`Context::stop_self`](crate::Context::stop_self).
+    /// Asks `id` to stop, like [`Context::stop`](crate::Context::stop).
     pub fn stop(&mut self, id: EoId) -> Result<()> {
         post_stop(self, id)
     }
@@ -305,6 +305,18 @@ impl Platform for TestBed {
             self.schedule(&core);
         }
         Ok(core.id)
+    }
+
+    fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    fn pool_name(&self, _pool: u16) -> &str {
+        ""
+    }
+
+    fn worker_stats(&self) -> Vec<WorkerStats> {
+        Vec::new()
     }
 }
 

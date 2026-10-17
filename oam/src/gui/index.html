@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LibreCN</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #667085; --line: #e3e6ec;
+          --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --accent: #2457c5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1218; --card: #171b23; --ink: #e6e9ef; --muted: #98a2b3; --line: #2a303c;
+            --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #6ea8fe; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .muted { color: var(--muted); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  button { font: inherit; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+           background: var(--card); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  textarea { width: 100%; min-height: 110px; font: 13px ui-monospace, monospace; padding: 8px;
+             border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+  pre { margin: 8px 0 0; white-space: pre-wrap; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LibreCN</h1>
+  <span class="muted" id="status">connecting…</span>
+</header>
+
+<section>
+  <h2>Active alarms</h2>
+  <div class="scroll"><table id="alarms"></table></div>
+</section>
+
+<section>
+  <h2>Execution objects</h2>
+  <div class="scroll"><table id="eos"></table></div>
+</section>
+
+<section>
+  <h2>Workers</h2>
+  <div class="scroll"><table id="workers"></table></div>
+</section>
+
+<section>
+  <h2>Start NFs</h2>
+  <p class="muted">Deployment in TOML or JSON. Kinds: <span id="kinds">…</span></p>
+  <textarea id="deployment">[[nf]]
+kind = "demo"
+name = "demo-1"
+pool = "cp"
+</textarea>
+  <p><button id="deploy">Start</button></p>
+  <pre id="result"></pre>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const num = (v, digits = 0) => v === undefined || v === null ? "" : Number(v).toFixed(digits);
+const PROTECTED = ["log", "alarm", "control", "server"];
+let previous = { at: 0, busy: {} };
+
+function table(el, head, rows) {
+  el.innerHTML = "<tr>" + head.map(([h, cls]) => `<th class="${cls || ""}">${h}</th>`).join("") + "</tr>" +
+    (rows.length ? rows.join("") : `<tr><td class="muted" colspan="${head.length}">none</td></tr>`);
+}
+
+function renderAlarms(alarms) {
+  const sev = { CRITICAL: "bad", MAJOR: "bad", MINOR: "warn", WARNING: "warn" };
+  table($("alarms"), [["Severity"], ["Source"], ["Id", "num"], ["Text"], ["Raised"]], alarms.map((a) =>
+    `<tr><td class="${sev[a.severity] || ""}">${esc(a.severity)}</td><td>${esc(a.source)}</td>` +
+    `<td class="num">${a.alarm_id}</td><td>${esc(a.text)}</td>` +
+    `<td>${new Date(a.raised_unix_ms).toLocaleTimeString()}</td></tr>`));
+}
+
+function renderEos(eos) {
+  table($("eos"), [["Name"], ["Pool"], ["State"], ["Messages", "num"], ["Mean µs", "num"], ["Max µs", "num"],
+    ["Queue", "num"], ["Queue peak", "num"], ["Rejected", "num"], ["Buffers peak/count"], [""]], eos.map((e) => {
+    const s = e.stats || {};
+    const buffers = (s.buffers || []).map((b) =>
+      `<span class="${b.failures ? "bad" : b.high_water >= b.count ? "warn" : ""}">${b.size}B ${b.high_water}/${b.count}</span>`).join(" ");
+    const stop = e.alive && !PROTECTED.includes(e.name) ? `<button data-stop="${e.id}">Stop</button>` : "";
+    return `<tr><td>${esc(e.name)}</td><td>${esc(e.pool)}</td>` +
+      `<td class="${e.alive ? "ok" : "bad"}">${e.alive ? "running" : "faulted"}</td>` +
+      `<td class="num">${num(s.messages)}</td><td class="num">${num(s.mean_us, 1)}</td><td class="num">${num(s.max_us, 1)}</td>` +
+      `<td class="num">${num(s.data_depth)}</td><td class="num">${num(s.data_high_water)}</td>` +
+      `<td class="num ${s.data_rejected ? "bad" : ""}">${num(s.data_rejected)}</td><td>${buffers}</td><td>${stop}</td></tr>`;
+  }));
+}
+
+function renderWorkers(workers, now) {
+  const dt = previous.at ? now - previous.at : 0;
+  table($("workers"), [["Pool"], ["Worker", "num"], ["Core", "num"], ["Load", "num"], ["Messages", "num"], ["Wake-ups", "num"]],
+    workers.map((w) => {
+      const key = w.pool + "/" + w.index;
+      const load = dt && previous.busy[key] !== undefined ? (100 * (w.busy_ms - previous.busy[key]) / dt) : null;
+      previous.busy[key] = w.busy_ms;
+      return `<tr><td>${esc(w.pool)}</td><td class="num">${w.index}</td><td class="num">${w.core ?? ""}</td>` +
+        `<td class="num">${load === null ? "" : num(Math.min(load, 100), 0) + " %"}</td>` +
+        `<td class="num">${w.messages}</td><td class="num">${w.wakeups}</td></tr>`;
+    }));
+  previous.at = now;
+}
+
+async function get(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(path + ": " + r.status);
+  return r.json();
+}
+
+async function refresh() {
+  try {
+    const [eos, workers, alarms] = await Promise.all([get("/api/eos"), get("/api/workers"), get("/api/alarms").catch(() => [])]);
+    renderAlarms(alarms);
+    renderEos(eos);
+    renderWorkers(workers, performance.now());
+    $("status").textContent = "updated " + new Date().toLocaleTimeString();
+    $("status").className = "muted";
+  } catch (e) {
+    $("status").textContent = "unreachable (" + e.message + ")";
+    $("status").className = "bad";
+  }
+}
+
+$("eos").addEventListener("click", async (ev) => {
+  const id = ev.target.dataset.stop;
+  if (!id) return;
+  ev.target.disabled = true;
+  const r = await fetch(`/api/eos/${id}/stop`, { method: "POST" });
+  $("result").textContent = JSON.stringify(await r.json(), null, 2);
+  refresh();
+});
+
+$("deploy").addEventListener("click", async () => {
+  const r = await fetch("/api/nfs", { method: "POST", body: $("deployment").value });
+  $("result").textContent = JSON.stringify(await r.json(), null, 2);
+  refresh();
+});
+
+get("/api/kinds").then((k) => { $("kinds").textContent = k.join(", ") || "none"; }).catch(() => { $("kinds").textContent = "unknown"; });
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

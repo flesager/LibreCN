@@ -1,0 +1,19 @@
+[package]
+name = "librecn-oam"
+description = "Operations, administration and maintenance EOs: log, alarms, control, web server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-scheduler = { path = "../scheduler" }
+librecn-common = { path = "../common" }
+zerocopy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+httparse.workspace = true
+
+[lints]
+workspace = true
