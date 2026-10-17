@@ -26,6 +26,8 @@ cargo run --release -p librecn -- --config app/librecn.example.toml
 
 Then open http://127.0.0.1:8080. Logs are JSON lines on stdout. Stop with Ctrl-C or SIGTERM.
 
+To run it on a real machine, with a gNB on N2 and N3 and a data network on N6: [`RUNNING.md`](RUNNING.md).
+
 ## Test
 
 ```
