@@ -2,7 +2,7 @@
 //! thread running it may touch.
 
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering, fence};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
@@ -36,6 +36,9 @@ pub(crate) struct EoCore {
     pub(crate) pool: u16,
     pub(crate) mailbox: Mailbox,
     pub(crate) counters: EoCounters,
+    /// The EO's own counters, named by its config.
+    pub(crate) own: Box<[AtomicU64]>,
+    own_names: &'static [&'static str],
     creation: CreationStats,
     state: AtomicU8,
     fault: OnceLock<Box<FailureReport>>,
@@ -81,6 +84,8 @@ impl EoCore {
             pool,
             mailbox,
             counters: EoCounters::new(),
+            own: cfg.counters.iter().map(|_| AtomicU64::new(0)).collect(),
+            own_names: cfg.counters,
             creation: CreationStats { duration: started.elapsed(), bytes_reserved },
             state: AtomicU8::new(IDLE),
             fault: OnceLock::new(),
@@ -222,6 +227,12 @@ impl EoCore {
             system_lane,
             data_lane,
             buffers: self.mailbox.pool.stats(reset_peaks),
+            counters: self
+                .own_names
+                .iter()
+                .zip(self.own.iter())
+                .map(|(n, c)| (*n, c.load(Ordering::Relaxed)))
+                .collect(),
             creation: self.creation,
         }
     }

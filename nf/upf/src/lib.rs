@@ -60,13 +60,13 @@ impl Default for Params {
     }
 }
 
-/// Packets and drops, for the log.
-#[derive(Default, Debug)]
-struct Counters {
-    uplink: u64,
-    downlink: u64,
-    dropped: u64,
-}
+/// The UPF's counters (`/metrics`: `librecn_eo_counter_total`), by index.
+const COUNTERS: &[&str] = &["uplink_packets", "uplink_bytes", "downlink_packets", "downlink_bytes", "dropped_packets"];
+const UPLINK_PACKETS: usize = 0;
+const UPLINK_BYTES: usize = 1;
+const DOWNLINK_PACKETS: usize = 2;
+const DOWNLINK_BYTES: usize = 3;
+const DROPPED: usize = 4;
 
 /// The UPF EO.
 pub struct Upf {
@@ -78,7 +78,6 @@ pub struct Upf {
     n3_socket: Option<(UdpSocket, IoToken)>,
     n6: Option<(File, Option<IoToken>)>,
     buffer: Box<[u8]>,
-    counters: Counters,
     log: Logger,
     alarms: Alarms,
 }
@@ -100,7 +99,6 @@ impl Upf {
             n3_socket: None,
             n6: None,
             buffer: vec![0; BUFFER].into_boxed_slice(),
-            counters: Counters::default(),
             log: Logger::default(),
             alarms: Alarms::new(),
         })
@@ -111,9 +109,10 @@ impl Upf {
         Ok((Self::eo_config(name), Self::new(name, params)?))
     }
 
-    /// N4 messages are small; N3 and N6 are two I/O registrations.
+    /// N4 messages are small; N3 and N6 are two I/O registrations; the
+    /// packet counters.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_io(2).max_timers(0).buffers(&[(256, 64)])
+        EoConfig::new(name).max_io(2).max_timers(0).buffers(&[(256, 64)]).counters(COUNTERS)
     }
 
     /// N6 on an already open, non-blocking packet device instead of the
@@ -155,9 +154,10 @@ impl Upf {
                     // The inner source must be the session's UE (no spoofing).
                     let session = self.sessions.by_teid(teid);
                     if session.is_some_and(|s| ipv4_src(payload) == Some(s.ue_ip)) && device.write(payload).is_ok() {
-                        self.counters.uplink += 1;
+                        ctx.count(UPLINK_PACKETS, 1);
+                        ctx.count(UPLINK_BYTES, payload.len() as u64);
                     } else {
-                        self.counters.dropped += 1;
+                        ctx.count(DROPPED, 1);
                     }
                 }
                 Ok(Gtp::EchoRequest { seq }) => {
@@ -165,7 +165,7 @@ impl Upf {
                     let len = librecn_gtpu::echo_response(seq, &mut response);
                     let _ = socket.send_to(&response[..len], from);
                 }
-                Ok(Gtp::Other { .. }) | Err(_) => self.counters.dropped += 1,
+                Ok(Gtp::Other { .. }) | Err(_) => ctx.count(DROPPED, 1),
             }
         }
     }
@@ -183,14 +183,17 @@ impl Upf {
             };
             let packet = &self.buffer[G_PDU_HEADER..G_PDU_HEADER + n];
             let Some((gnb, teid)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue(dst)).and_then(|s| s.dl) else {
-                self.counters.dropped += 1;
+                ctx.count(DROPPED, 1);
                 continue;
             };
             let header: &mut [u8; G_PDU_HEADER] = (&mut self.buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
             librecn_gtpu::write_g_pdu_header(header, teid, QFI, n);
             match socket.send_to(&self.buffer[..G_PDU_HEADER + n], SocketAddr::V4(gnb)) {
-                Ok(_) => self.counters.downlink += 1,
-                Err(_) => self.counters.dropped += 1,
+                Ok(_) => {
+                    ctx.count(DOWNLINK_PACKETS, 1);
+                    ctx.count(DOWNLINK_BYTES, n as u64);
+                }
+                Err(_) => ctx.count(DROPPED, 1),
             }
         }
     }
@@ -296,7 +299,8 @@ impl ExecutionObject for Upf {
     }
 
     fn on_stop(&mut self, ctx: &mut Context<'_>) {
-        let c = &self.counters;
+        let counters = ctx.stats(ctx.self_id()).map(|s| s.counters).unwrap_or_default();
+        let get = |i: usize| counters.get(i).map_or(0, |c| c.1);
         log!(
             self.log,
             ctx,
@@ -304,9 +308,9 @@ impl ExecutionObject for Upf {
             "UPF {} stopping, {} session(s), {} packet(s) up, {} down, {} dropped",
             self.name,
             self.sessions.len(),
-            c.uplink,
-            c.downlink,
-            c.dropped
+            get(UPLINK_PACKETS),
+            get(DOWNLINK_PACKETS),
+            get(DROPPED)
         );
     }
 }

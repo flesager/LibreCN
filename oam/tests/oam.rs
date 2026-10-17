@@ -179,10 +179,14 @@ fn alarms_are_raised_updated_cleared_listed_and_logged() {
     assert!(logged[2].1.contains("cleared"));
 }
 
-/// An NF kind for the tests: does nothing; panics on `KICK`.
+/// An NF kind for the tests: counts its start (counter "starts"); panics on `KICK`.
 struct Dummy;
 
 impl ExecutionObject for Dummy {
+    fn on_start(&mut self, ctx: &mut Context<'_>) {
+        ctx.count(0, 1);
+    }
+
     fn on_message(&mut self, msg: &Message<'_>, _: &mut Context<'_>) {
         assert_ne!(msg.id(), KICK, "dummy kicked");
     }
@@ -193,7 +197,7 @@ fn dummy_factory() -> Factory {
         if params.get("fail").and_then(|v| v.as_bool()) == Some(true) {
             return Err("asked to fail".into());
         }
-        Ok((EoConfig::new(name), Box::new(Dummy)))
+        Ok((EoConfig::new(name).counters(&["starts"]), Box::new(Dummy)))
     })
 }
 
@@ -350,6 +354,7 @@ fn web_api_lists_deploys_stops_and_exports_metrics() {
     let names: Vec<_> = eos.as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap().to_string()).collect();
     assert_eq!(names, ["log", "alarm", "control", "server", "d1"]);
     assert!(eos[0]["stats"]["messages"].as_u64().unwrap() > 0, "the log EO handled records");
+    assert_eq!(eos[4]["stats"]["counters"]["starts"], 1, "the NF's own counter");
 
     let (_, kinds) = http(&mut tb, addr, "GET", "/api/kinds", "");
     assert_eq!(kinds, r#"["dummy"]"#);
@@ -362,6 +367,7 @@ fn web_api_lists_deploys_stops_and_exports_metrics() {
     assert_eq!(status, 200);
     assert!(metrics.contains("librecn_eo_processing_seconds_bucket{eo=\"d1\",pool=\"\",le=\"+Inf\"}"), "{metrics}");
     assert!(metrics.contains("# TYPE librecn_eo_lane_depth gauge"));
+    assert!(metrics.contains("librecn_eo_counter_total{eo=\"d1\",pool=\"\",counter=\"starts\"} 1"), "{metrics}");
 
     let (status, body) = http(&mut tb, addr, "POST", &format!("/api/eos/{id}/stop"), "");
     assert_eq!((status, body.as_str()), (200, r#"{"stopping":"d1"}"#));

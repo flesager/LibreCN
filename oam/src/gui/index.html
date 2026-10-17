@@ -108,16 +108,18 @@ function renderAlarms(alarms) {
 
 function renderEos(eos) {
   table($("eos"), [["Name"], ["Pool"], ["State"], ["Messages", "num"], ["Mean µs", "num"], ["Max µs", "num"],
-    ["Queue", "num"], ["Queue peak", "num"], ["Rejected", "num"], ["Buffers peak/count"], [""]], eos.map((e) => {
+    ["Queue", "num"], ["Queue peak", "num"], ["Rejected", "num"], ["Buffers peak/count"], ["Counters"], [""]], eos.map((e) => {
     const s = e.stats || {};
     const buffers = (s.buffers || []).map((b) =>
       `<span class="${b.failures ? "bad" : b.high_water >= b.count ? "warn" : ""}">${b.size}B ${b.high_water}/${b.count}</span>`).join(" ");
+    const counters = Object.entries(s.counters || {}).map(([k, v]) => `${esc(k)} ${v}`).join(", ");
     const stop = e.alive && !PROTECTED.includes(e.name) ? `<button data-stop="${e.id}">Stop</button>` : "";
     return `<tr><td>${esc(e.name)}</td><td>${esc(e.pool)}</td>` +
       `<td class="${e.alive ? "ok" : "bad"}">${e.alive ? "running" : "faulted"}</td>` +
       `<td class="num">${num(s.messages)}</td><td class="num">${num(s.mean_us, 1)}</td><td class="num">${num(s.max_us, 1)}</td>` +
       `<td class="num">${num(s.data_depth)}</td><td class="num">${num(s.data_high_water)}</td>` +
-      `<td class="num ${s.data_rejected ? "bad" : ""}">${num(s.data_rejected)}</td><td>${buffers}</td><td>${stop}</td></tr>`;
+      `<td class="num ${s.data_rejected ? "bad" : ""}">${num(s.data_rejected)}</td><td>${buffers}</td>` +
+      `<td class="muted">${counters}</td><td>${stop}</td></tr>`;
   }));
 }
 

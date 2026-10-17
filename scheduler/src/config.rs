@@ -23,6 +23,9 @@ pub struct EoConfig {
     pub max_io: u16,
     /// Headers kept for failure reports.
     pub flight_recorder_depth: usize,
+    /// Names of the EO's own counters ([`Context::count`](crate::Context::count)),
+    /// exported with its stats.
+    pub counters: &'static [&'static str],
 }
 
 impl EoConfig {
@@ -38,6 +41,7 @@ impl EoConfig {
             max_timers: 32,
             max_io: 8,
             flight_recorder_depth: 32,
+            counters: &[],
         }
     }
 
@@ -74,6 +78,12 @@ impl EoConfig {
     /// Sets [`max_timers`](Self::max_timers).
     pub fn max_timers(mut self, timers: u32) -> Self {
         self.max_timers = timers;
+        self
+    }
+
+    /// Sets [`counters`](Self::counters): counter `i` is `names[i]`.
+    pub fn counters(mut self, names: &'static [&'static str]) -> Self {
+        self.counters = names;
         self
     }
 

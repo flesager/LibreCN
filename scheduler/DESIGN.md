@@ -132,7 +132,7 @@ pub trait ExecutionObject: Send + 'static {
 
 ## 9. Observability and failures
 
-**Per EO** (`stats(id)`): processing time per message (count, total, min, max, histogram in powers of two from 1 µs), turns, budget exhaustions, timers fired and stale, I/O events and stale; for each lane, depth, `high_water`, `rejected`; for each buffer class, `in_use`, `high_water`, `fallbacks`, `alloc_failures`; creation time and bytes. `stats_and_reset_peaks` resets min, max and high-water marks for periodic collection. The counters are atomics any EO reads through its `Context`, so the metric loop needs no EO of its own: the OAM web server exports them (Prometheus histograms, so no reader resets anything).
+**Per EO** (`stats(id)`): processing time per message (count, total, min, max, histogram in powers of two from 1 µs), turns, budget exhaustions, timers fired and stale, I/O events and stale; for each lane, depth, `high_water`, `rejected`; for each buffer class, `in_use`, `high_water`, `fallbacks`, `alloc_failures`; creation time and bytes; the EO's own counters, named in its `EoConfig` (`counters`) and incremented by `ctx.count(i, n)`, one relaxed atomic add (the UPF's packets and bytes). `stats_and_reset_peaks` resets min, max and high-water marks for periodic collection. The counters are atomics any EO reads through its `Context`, so the metric loop needs no EO of its own: the OAM web server exports them (Prometheus histograms, so no reader resets anything).
 
 **Per worker** (`Runtime::worker_stats`): turns, messages, busy time, idle time (current sleep included), wake-ups, I/O events, timers, remote and lazy cancellations.
 

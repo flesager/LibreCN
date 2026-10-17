@@ -107,6 +107,15 @@ impl<'a> Context<'a> {
         Context { platform, core }
     }
 
+    /// Adds `n` to the EO's counter `counter` (an index into
+    /// [`EoConfig::counters`](crate::EoConfig::counters); ignored if out of
+    /// range). One relaxed atomic add.
+    pub fn count(&self, counter: usize, n: u64) {
+        if let Some(c) = self.core.own.get(counter) {
+            c.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Id of the running EO.
     pub fn self_id(&self) -> EoId {
         self.core.id

@@ -168,6 +168,8 @@ pub struct EoStats {
     pub data_lane: LaneStats,
     /// Buffer pool, one entry per size class, smallest first.
     pub buffers: Vec<BufferClassStats>,
+    /// The EO's own counters ([`EoConfig::counters`](crate::EoConfig::counters)).
+    pub counters: Vec<(&'static str, u64)>,
     /// Creation cost.
     pub creation: CreationStats,
 }

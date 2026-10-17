@@ -45,6 +45,7 @@ ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || tru
 docker exec librecn-ran nr-cli UERANSIM-gnb-999-70-1 -e "ue-release 1" >/dev/null || true
 wait_for librecn-core "deactivated (the UE is idle)" || true
 idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
+metrics=$(docker exec librecn-core curl -s http://127.0.0.1:8080/metrics | grep 'eo="upf"' | grep counter_total || true)
 docker stop -t 5 librecn-core >/dev/null
 
 echo "--- gnb"; docker exec librecn-ran cat /tmp/gnb.log 2>/dev/null || docker cp librecn-ran:/tmp/gnb.log - 2>/dev/null || true
@@ -52,9 +53,11 @@ echo "--- ue"; docker logs librecn-ran 2>&1
 echo "--- core"; docker logs librecn-core 2>&1
 echo "--- ping"; echo "$ping"
 echo "--- ping after idle"; echo "$idle_ping"
+echo "--- UPF counters"; echo "$metrics"
 core=$(docker logs librecn-core 2>&1)
 echo "$ping" | grep -q " 0% packet loss" \
   && echo "$idle_ping" | grep -Eq " [1-9][0-9]* received" \
   && echo "$core" | grep -q "resumed after" \
   && echo "$core" | grep -q "PDU session 1 reactivated" \
+  && echo "$metrics" | grep -Eq 'counter="downlink_packets"} [1-9]' \
   && echo "OK: UERANSIM's UE pinged through LibreCN's user plane, before and after idle" || { echo "FAILED"; exit 1; }

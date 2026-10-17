@@ -411,6 +411,8 @@ struct StatsView {
     timers_fired: u64,
     io_events: u64,
     buffers: Vec<BufferView>,
+    /// The EO's own counters, by name.
+    counters: std::collections::BTreeMap<&'static str, u64>,
 }
 
 #[derive(Serialize)]
@@ -452,6 +454,7 @@ fn eo_views(ctx: &mut Context<'_>) -> Vec<EoView> {
                         failures: b.alloc_failures,
                     })
                     .collect(),
+                counters: s.counters.iter().copied().collect(),
             });
             EoView { id: e.id.raw().to_string(), name: e.name, pool: e.pool, alive: e.alive, stats }
         })

@@ -104,6 +104,9 @@ fn uplink_packets_reach_n6_only_from_their_ue() {
     p.pump();
     let n = p.gnb.recv(&mut buf).unwrap();
     assert_eq!(buf[..n], [0x32, 2, 0, 6, 0, 0, 0, 0, 0x12, 0x34, 0, 0, 14, 0]);
+    let counters = p.tb.stats(p.upf).unwrap().counters;
+    let n = |name: &str| counters.iter().find(|c| c.0 == name).unwrap().1;
+    assert_eq!((n("uplink_packets"), n("uplink_bytes"), n("dropped_packets")), (1, packet.len() as u64, 2));
     p.tb.stop(p.upf).unwrap();
     p.tb.run_until_idle();
     assert!(p.log.lines().iter().any(|l| l.msg.contains("1 packet(s) up, 0 down, 2 dropped")), "{:#?}", p.log.lines());

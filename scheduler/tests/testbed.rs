@@ -368,3 +368,23 @@ fn an_eo_lists_finds_and_stops_others() {
     assert!(!tb.is_alive(echo));
     assert_eq!(EoId::from_raw(sup.raw()), sup);
 }
+
+#[test]
+fn an_eo_counts_into_its_named_counters() {
+    struct Counting;
+    impl ExecutionObject for Counting {
+        fn on_message(&mut self, _: &Message<'_>, ctx: &mut Context<'_>) {
+            ctx.count(0, 2);
+            ctx.count(1, 5);
+            ctx.count(7, 1); // no such counter: ignored
+        }
+    }
+    let mut tb = TestBed::new();
+    let id = tb.add(EoConfig::new("counting").counters(&["a", "b"]), Counting).unwrap();
+    tb.signal(id, 0x1_0000).unwrap();
+    tb.signal(id, 0x1_0000).unwrap();
+    tb.run_until_idle();
+    assert_eq!(tb.stats(id).unwrap().counters, [("a", 4), ("b", 10)]);
+    let plain = tb.add(EoConfig::new("plain"), Counting).unwrap();
+    assert!(tb.stats(plain).unwrap().counters.is_empty());
+}

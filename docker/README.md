@@ -6,7 +6,7 @@ TUN device, which a container gives without touching the host.
 
 | File | Role |
 |---|---|
-| `Dockerfile` | Ubuntu 26.04 (the build host's), `iproute2`, `ping`, `libsctp1` (UERANSIM's gNB), the binaries |
+| `Dockerfile` | Ubuntu 26.04 (the build host's), `iproute2`, `ping`, `curl` (the metrics check), `libsctp1` (UERANSIM's gNB), the binaries |
 | `core.sh`, `core.toml` | the core's container (10.210.0.10): `upf0` (10.45.0.1/16) for N6, then every NF |
 | `gnb.yaml`, `ue.yaml` | the RAN's container (10.210.0.20): UERANSIM's gNB and UE |
 

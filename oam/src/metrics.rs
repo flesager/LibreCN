@@ -56,6 +56,13 @@ pub fn render(eos: &[(EoInfo, EoStats)], workers: &[WorkerStats]) -> String {
         }
     }
 
+    family(&mut out, "librecn_eo_counter_total", "counter", "Counters an EO keeps for itself");
+    for (e, s) in eos {
+        for (name, value) in &s.counters {
+            let _ = writeln!(out, "librecn_eo_counter_total{{{},counter=\"{}\"}} {value}", eo_labels(e), escape(name));
+        }
+    }
+
     let buffer_families: [Family<librecn_scheduler::BufferClassStats>; 5] = [
         ("librecn_eo_buffers_in_use", "gauge", "Body buffers held, per size class", |b| u64::from(b.in_use)),
         ("librecn_eo_buffers_high_water", "gauge", "Most body buffers held, per size class", |b| {

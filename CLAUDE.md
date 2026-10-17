@@ -57,7 +57,7 @@ Later: deployment. Dependencies point down only: `scheduler` ← `common` ← `o
 
 ## OAM decisions
 
-- **Non-3GPP EOs run in the `oam` pool**: `log`, `alarm`, `control`, `server`. Metrics have no EO: counters are read in place and exported by the server (Prometheus `/metrics`).
+- **Non-3GPP EOs run in the `oam` pool**: `log`, `alarm`, `control`, `server`. Metrics have no EO: counters are read in place and exported by the server (Prometheus `/metrics`). An NF's own counters are named in its `EoConfig` (`counters`) and incremented with `ctx.count(i, n)`; they come out as `librecn_eo_counter_total{eo,pool,counter}` (the UPF's packets and bytes).
 - **Control EO**: starts NFs from deployments, stops EOs (OAM EOs are protected), supervises (critical alarm when an EO faults).
 - **Server EO**: web API (REST + JSON with **serde**) and a GUI in **plain HTML/JS embedded in the binary**, with no framework and no build step.
 - **Boot**: the system starts with OAM only. NFs come from the TOML config file (`[[nf]]`) or are loaded through the server (`POST /api/nfs`, TOML or JSON), both through the control EO.
