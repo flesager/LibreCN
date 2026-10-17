@@ -67,6 +67,8 @@ struct SmContext {
     pdu_session_id: u8,
     pti: u8,
     slice: Snssai,
+    /// Its DNN, an index in the configuration's (and in the pools).
+    dnn: usize,
     ue_ip: Ipv4Addr,
     amf: EoId,
     /// The AMF's id of the UE, the `corr_id` of its last request.
@@ -86,7 +88,8 @@ pub struct Smf {
     name: String,
     config: SmfConfig,
     upf: Service,
-    pool: Pool,
+    /// UE addresses, one pool per DNN.
+    pools: Vec<Pool>,
     contexts: HashMap<u32, SmContext>,
     next_ctx: u32,
     log: Logger,
@@ -97,7 +100,7 @@ impl Smf {
         Smf {
             name: name.to_string(),
             upf: Service::named(config.upf.clone()),
-            pool: Pool::new(config.pool.0, config.pool.1),
+            pools: config.dnns.iter().map(|d| Pool::new(d.pool.0, d.pool.1)).collect(),
             config,
             contexts: HashMap::new(),
             next_ctx: 1,
@@ -153,8 +156,9 @@ impl Smf {
             Err(refused) => return self.refuse(ctx, to, &supi, psi, refused),
         };
         let insufficient = Refused { pti: accepted.pti, cause: cause::INSUFFICIENT_RESOURCES };
-        let Some(ue_ip) = self.pool.allocate() else {
-            log!(self.log, ctx, Error, "address pool exhausted");
+        let dnn = accepted.dnn;
+        let Some(ue_ip) = self.pools[dnn].allocate() else {
+            log!(self.log, ctx, Error, "address pool of {} exhausted", self.config.dnns[dnn].dnn);
             return self.refuse(ctx, to, &supi, psi, insufficient);
         };
         let id = self.next_ctx();
@@ -166,7 +170,7 @@ impl Smf {
         });
         if let Err(e) = sent {
             self.upf.forget();
-            self.pool.release(ue_ip);
+            self.pools[dnn].release(ue_ip);
             log!(self.log, ctx, Error, "cannot reach the UPF {:?}: {e}", self.upf.name());
             return self.refuse(ctx, to, &supi, psi, insufficient);
         }
@@ -175,6 +179,7 @@ impl Smf {
             pdu_session_id: psi,
             pti: accepted.pti,
             slice,
+            dnn,
             ue_ip,
             amf: to.0,
             amf_ue: to.1,
@@ -199,7 +204,7 @@ impl Smf {
         }
         let n3 = (Ipv4Addr::from(result.n3_addr), result.ul_teid);
         c.n3 = Some(n3);
-        let (pti, slice, ue_ip) = (c.pti, c.slice, c.ue_ip);
+        let (pti, slice, dnn, ue_ip) = (c.pti, c.slice, c.dnn, c.ue_ip);
         let n2 = match self.setup_transfer(n3) {
             Ok(n2) => n2,
             Err(e) => {
@@ -208,13 +213,13 @@ impl Smf {
                 return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });
             }
         };
-        let n1 = session::accept(&self.config, psi, pti, slice, ue_ip);
+        let n1 = session::accept(&self.config, psi, pti, slice, dnn, ue_ip);
         log!(
             self.log,
             ctx,
             Info,
             "{supi}: PDU session {psi} to {}, UE {ue_ip}, N3 {} TEID {:#x}",
-            self.config.dnn,
+            self.config.dnns[dnn].dnn,
             n3.0,
             n3.1
         );
@@ -432,7 +437,7 @@ impl Smf {
                     .into_iter()
                     .map(|(id, c)| {
                         json!({ "id": id, "supi": c.supi.as_str(), "pdu_session_id": c.pdu_session_id,
-                                "ue_ip": c.ue_ip.to_string(), "dnn": self.config.dnn,
+                                "ue_ip": c.ue_ip.to_string(), "dnn": self.config.dnns[c.dnn].dnn,
                                 "state": if c.releasing { "releasing" } else { "active" } })
                     })
                     .collect();
@@ -452,7 +457,7 @@ impl Smf {
     /// Drops a session: the UPF's side, the address.
     fn remove(&mut self, ctx: &mut Context<'_>, id: u32) {
         let Some(c) = self.contexts.remove(&id) else { return };
-        self.pool.release(c.ue_ip);
+        self.pools[c.dnn].release(c.ue_ip);
         if c.n3.is_some()
             && let Some(upf) = self.upf.get(ctx)
         {
@@ -472,16 +477,9 @@ impl Smf {
 
 impl ExecutionObject for Smf {
     fn on_start(&mut self, ctx: &mut Context<'_>) {
-        let (net, len) = self.config.pool;
-        log!(
-            self.log,
-            ctx,
-            Vip,
-            "SMF {} ready: DNN {}, pool {net}/{len}, UPF {:?}",
-            self.name,
-            self.config.dnn,
-            self.upf.name()
-        );
+        let dnns: Vec<String> =
+            self.config.dnns.iter().map(|d| format!("{} ({}/{})", d.dnn, d.pool.0, d.pool.1)).collect();
+        log!(self.log, ctx, Vip, "SMF {} ready: DNN {}, UPF {:?}", self.name, dnns.join(", "), self.upf.name());
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {

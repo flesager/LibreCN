@@ -1,8 +1,9 @@
 #!/usr/bin/env sh
 # User-plane interop check with UERANSIM, in Docker (UERANSIM's UE needs
 # root for uesimtun0): the core in one container, UERANSIM's gNB and UE in
-# another. The UE registers, gets its PDU session, then pings the UPF's N6
-# address (10.45.0.1) through uesimtun0: GTP-U on N3, upf0 on N6. The gNB
+# another. The UE registers, gets its two PDU sessions (DNNs internet and
+# ims), then pings the UPF's N6 addresses (10.45.0.1 through uesimtun0,
+# 10.46.0.1 through uesimtun1): GTP-U on N3, upf0 on N6. The gNB
 # then releases the UE (idle): the next ping brings it back with a Service
 # Request, its session reactivated (UERANSIM may drop the packet that woke
 # it: one answer at least is expected). Released again, the UE is then
@@ -58,7 +59,11 @@ wait_for librecn-core "AMF amf-1 ready"
 run librecn-ran 10.210.0.20 sh -c 'nr-gnb -c /etc/librecn/gnb.yaml > /tmp/gnb.log 2>&1 & sleep 1; exec nr-ue -c /etc/librecn/ue.yaml'
 wait_for librecn-ran "TUN interface\[uesimtun0" || true
 
+wait_for librecn-ran "TUN interface\[uesimtun1" || true
+sleep 1 # UERANSIM logs the interface up before it reads from it
 ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
+# The second session, on the second DNN (ims).
+ims_ping=$(docker exec librecn-ran ping -I uesimtun1 -c 3 -W 2 10.46.0.1 2>&1 || true)
 release
 wait_for librecn-core "deactivated (the UE is idle)" || true
 idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
@@ -77,11 +82,13 @@ echo "--- gnb"; docker exec librecn-ran cat /tmp/gnb.log 2>/dev/null || docker c
 echo "--- ue"; docker logs librecn-ran 2>&1
 echo "--- core"; docker logs librecn-core 2>&1
 echo "--- ping"; echo "$ping"
+echo "--- ping on the second DNN"; echo "$ims_ping"
 echo "--- ping after idle"; echo "$idle_ping"
 echo "--- ping of the idle UE (paging)"; echo "$paged_ping"
 echo "--- UPF counters"; echo "$metrics"
 core=$(docker logs librecn-core 2>&1)
 echo "$ping" | grep -q " 0% packet loss" \
+  && echo "$ims_ping" | grep -q " 0% packet loss" \
   && echo "$idle_ping" | grep -Eq " [1-9][0-9]* received" \
   && echo "$core" | grep -q "resumed after" \
   && echo "$core" | grep -q "PDU session 1 reactivated" \
@@ -90,5 +97,5 @@ echo "$ping" | grep -q " 0% packet loss" \
   && echo "$core" | grep -q "registration from idle (Periodic)" \
   && [ "$(echo "$core" | grep -c "registered: imsi-999700000000001")" -ge 2 ] \
   && echo "$metrics" | grep -Eq 'counter="downlink_packets"} [1-9]' \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane, before and after idle; pinged while idle: paged; periodic registration" \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs, before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

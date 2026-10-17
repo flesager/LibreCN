@@ -90,7 +90,7 @@ cores = [2]
 
 ## 4. Preparing N6
 
-LibreCN attaches to the TUN device, but never configures the network. The UE addresses come from the SMF's `pool` (default `10.45.0.0/16`); its first address (10.45.0.1) is the UPF's side.
+LibreCN attaches to the TUN device, but never configures the network. The UE addresses come from the pools of the SMF's `dnns` (default: `internet`, `10.45.0.0/16`); the first address of each pool (10.45.0.1) is the UPF's side, to put on the device (one `ip addr add` per pool).
 
 **Once per boot of the machine** (as root):
 
@@ -119,7 +119,7 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | AMF address | AMF: `n2` | gNB: `amfConfigs` |
 | Subscriber | UDM: `[[nf.params.subscribers]]` with `supi`, `k`, `opc` (`amf`, `sqn`, `count` optional) | UE: `supi`, `key`, `op` with `opType: OPC`, `amf` |
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
-| Data network | SMF: `dnn = "internet"` | UE: `sessions[].apn` |
+| Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
 
 Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. Those live in memory only and are gone at the next start.
 
@@ -163,8 +163,7 @@ n6 = "upf0"
 kind = "smf"
 name = "smf"
 [nf.params]
-dnn = "internet"
-pool = "10.45.0.0/16"
+dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]
 
 [[nf]]
 kind = "amf"

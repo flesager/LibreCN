@@ -31,12 +31,17 @@ struct Core {
 }
 
 fn core() -> Core {
+    core_with(&serde_json::Value::Null)
+}
+
+/// The same, the SMF with `params`.
+fn core_with(params: &serde_json::Value) -> Core {
     let mut tb = TestBed::new();
     let (sink, log) = LogSink::capture();
     tb.add(LogSink::config(), sink).unwrap();
     let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
     let upf = tb.add(cfg, upf).unwrap();
-    let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
+    let (cfg, smf) = Smf::from_params("smf", params).unwrap();
     let smf = tb.add(cfg, smf).unwrap();
     let (probe, seen) = Probe::new();
     let amf = tb.add(EoConfig::new("amf").buffers(&[(256, 8), (2048, 8), (16 * 1024, 2)]), probe).unwrap();
@@ -46,9 +51,13 @@ fn core() -> Core {
 
 impl Core {
     fn create(&mut self, dnn: &str, n1: &[u8]) -> CreateSmContextResult {
+        self.create_session(1, dnn, n1)
+    }
+
+    fn create_session(&mut self, psi: u8, dnn: &str, n1: &[u8]) -> CreateSmContextResult {
         let mut request = CreateSmContext::new_zeroed();
         request.supi = Supi::new("imsi-999700000000001").unwrap();
-        request.pdu_session_id = 1;
+        request.pdu_session_id = psi;
         request.slice = Slice { sst: 1, has_sd: 0, sd: [0; 3] };
         request.dnn = DnnText::new(dnn).unwrap();
         request.n1.set(n1);
@@ -246,4 +255,29 @@ fn without_a_upf_the_request_is_refused_for_resources() {
     tb.run_until_idle();
     let result: CreateSmContextResult = seen.take()[0].body().unwrap();
     assert_eq!(result.n1.get(), hex("2e0101c31a"), "Reject, #26 insufficient resources");
+}
+
+#[test]
+fn a_ue_gets_sessions_on_two_dnns_each_from_its_pool() {
+    let params = serde_json::json!({ "dnns": [{ "dnn": "internet", "pool": "10.45.0.0/16" },
+                                              { "dnn": "ims", "pool": "10.46.0.0/16" }] });
+    let mut c = core_with(&params);
+    assert!(c.logged("smf", "DNN internet (10.45.0.0/16), ims (10.46.0.0/16)"), "{:#?}", c.log.lines());
+    let internet = c.create_session(1, "internet", &hex("2e 01 01 c1 ffff 91 a1"));
+    let ims = c.create_session(2, "ims", &hex("2e 02 02 c1 ffff 91 a1"));
+    let default = c.create_session(3, "", &hex("2e 03 03 c1 ffff 91 a1"));
+    let address =
+        |r: &CreateSmContextResult, a: [u8; 4]| r.n1.get().windows(5).any(|w| w == [0x01, a[0], a[1], a[2], a[3]]);
+    assert!(address(&internet, [10, 45, 0, 2]) && address(&ims, [10, 46, 0, 2]), "each DNN its pool");
+    assert!(address(&default, [10, 45, 0, 3]), "no DNN asked: the first one");
+    assert_ne!(internet.sm_ctx, ims.sm_ctx);
+
+    let mut manage = Manage::new_zeroed();
+    manage.fill(Method::Get, "sessions", "");
+    c.tb.inject_from(c.amf, c.smf, 50, &manage).unwrap();
+    c.tb.run_until_idle();
+    let reply: librecn_common::manage::Reply = c.seen.take()[0].body().unwrap();
+    let list: serde_json::Value = serde_json::from_str(reply.text()).unwrap();
+    let dnns: Vec<_> = list.as_array().unwrap().iter().map(|s| s["dnn"].as_str().unwrap().to_string()).collect();
+    assert_eq!(dnns, ["internet", "ims", "internet"]);
 }

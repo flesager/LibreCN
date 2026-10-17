@@ -33,6 +33,10 @@ sessions:
     apn: 'internet'
     slice:
       sst: 1
+  - type: 'IPv4'  # the second DNN (librecn.toml)
+    apn: 'ims'
+    slice:
+      sst: 1
 configured-nssai:
   - sst: 1
 default-nssai:

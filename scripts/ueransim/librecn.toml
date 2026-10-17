@@ -1,6 +1,6 @@
 # LibreCN with an AMF on 127.0.0.1:38412, PLMN 999/70, SST 1 (the defaults),
 # an AUSF and a UDM knowing UERANSIM's sample UE (ue.yaml), an SMF and a UPF
-# (DNN internet, 10.45.0.0/16, N3 on 127.0.0.2), for the scripts of
+# (DNNs internet, 10.45.0.0/16, and ims, 10.46.0.0/16; N3 on 127.0.0.2), for the scripts of
 # scripts/ueransim/.
 [[runtime.pools]]
 name = "cp"
@@ -31,6 +31,8 @@ private_key = "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d"
 [[nf]]
 kind = "smf"
 name = "smf"
+[nf.params]
+dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }, { dnn = "ims", pool = "10.46.0.0/16" }]
 
 [[nf]]
 kind = "upf"

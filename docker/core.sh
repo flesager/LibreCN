@@ -4,5 +4,6 @@
 set -eu
 ip tuntap add dev upf0 mode tun
 ip addr add 10.45.0.1/16 dev upf0
+ip addr add 10.46.0.1/16 dev upf0   # the second DNN (ims, core.toml)
 ip link set upf0 up
 exec librecn --config /etc/librecn/core.toml

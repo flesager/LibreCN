@@ -705,3 +705,54 @@ fn a_full_ue_table_starts_overload_at_the_gnbs_and_stops_it_once_emptied() {
     let _: OverloadStop = initiating(&pdu, ID_OVERLOAD_STOP);
     assert!(s.logged("amf-1", "overload over: 1 of 2 UE contexts"));
 }
+
+#[test]
+fn a_ue_holds_two_sessions_and_gets_both_back_from_idle() {
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    let accept = ue.register(&mut s, &gnb);
+    let tmsi = accept[15..19].to_vec();
+    for (psi, teid) in [(1u8, 0x71u32), (2, 0x72)] {
+        let n1 = [0x2e, psi, psi, 0xc1, 0xff, 0xff, 0x91, 0xa1];
+        let transport =
+            [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &[0x12, psi], &hex("81")].concat();
+        ue.uplink_protected(&gnb, 2, &transport);
+        let (carrier, _) = ue.downlink(&mut s, &gnb);
+        assert!(matches!(carrier, Carrier::SessionSetup(p, _) if p == psi), "{carrier:?}");
+        gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, psi, teid)).unwrap();
+        s.pump();
+    }
+    assert!(s.logged("smf", "PDU session 2 to internet, UE 10.45.0.3"), "{:#?}", s.log.lines());
+
+    let first = ue.amf_id;
+    gnb.send(0, ue.stream, NGAP_PPID, &release_request(first, 1)).unwrap();
+    let (_, pdu) = s.receive(&gnb);
+    let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
+    gnb.send(0, ue.stream, NGAP_PPID, &release_complete(first, 1)).unwrap();
+    s.pump();
+    let deactivated = s.log.lines().iter().filter(|l| l.eo == "smf" && l.msg.contains("deactivated")).count();
+    assert_eq!(deactivated, 2, "both sessions' user plane off");
+
+    // Back with data for both sessions.
+    let cleartext = [&hex("7e004c 10 0007 f4 0040")[..], &tmsi].concat();
+    let whole = [&cleartext[..], &hex("4002 0600 5002 0600")].concat();
+    let request = ue.initial(&cleartext, &whole);
+    gnb.send(0, 2, NGAP_PPID, &initial_ue_message(2, &request)).unwrap();
+    let (_, service_accept) = ue.downlink(&mut s, &gnb);
+    assert_eq!(service_accept, hex("7e004e 50020600"), "Service Accept: sessions 1 and 2");
+    gnb.send(0, ue.stream, NGAP_PPID, &context_setup_response(ue.amf_id, 2)).unwrap();
+    let mut reactivated = Vec::new();
+    for _ in 0..2 {
+        let (stream, pdu) = s.receive(&gnb);
+        let setup: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
+        let list =
+            &setup.protocol_ies.0.iter().find(|ie| ie.id == ID_PDUSESSION_RESOURCE_SETUP_LIST_SUREQ.0).unwrap().value;
+        let psi = open::<PDUSessionResourceSetupListSUReq>(list).unwrap().0[0].p_dusession_id.0;
+        reactivated.push(psi);
+        gnb.send(0, stream, NGAP_PPID, &session_setup_response(ue.amf_id, 2, psi, 0x80 + u32::from(psi))).unwrap();
+    }
+    s.pump();
+    reactivated.sort();
+    assert_eq!(reactivated, [1, 2]);
+    assert!(s.logged("upf", "TEID 0x81") && s.logged("upf", "TEID 0x82"), "{:#?}", s.log.lines());
+}

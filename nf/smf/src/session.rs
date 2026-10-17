@@ -18,6 +18,8 @@ pub const N1_MAX: usize = 128;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Accepted {
     pub pti: u8,
+    /// The DNN chosen, an index in the configuration's.
+    pub dnn: usize,
 }
 
 /// A refused request: its PTI and 5GSM cause.
@@ -28,7 +30,7 @@ pub struct Refused {
 }
 
 /// Checks the UE's request (`n1`) for PDU session `pdu_session_id` on
-/// `slice`, to `dnn` (empty: the UE asked none, the default one).
+/// `slice`, to `dnn` (empty: the UE asked none, the first one served).
 pub fn decide(
     config: &SmfConfig,
     pdu_session_id: u8,
@@ -45,9 +47,8 @@ pub fn decide(
     if header.pdu_session_id != pdu_session_id || !(1..=15).contains(&pdu_session_id) {
         return refuse(cause::INVALID_PDU_SESSION_IDENTITY);
     }
-    if !dnn.is_empty() && !dnn.eq_ignore_ascii_case(&config.dnn) {
-        return refuse(cause::MISSING_OR_UNKNOWN_DNN);
-    }
+    let dnn = if dnn.is_empty() { Some(0) } else { config.dnns.iter().position(|d| dnn.eq_ignore_ascii_case(&d.dnn)) };
+    let Some(dnn) = dnn else { return refuse(cause::MISSING_OR_UNKNOWN_DNN) };
     if !config.slices.contains(&slice) {
         return refuse(cause::REQUEST_REJECTED);
     }
@@ -59,12 +60,19 @@ pub fn decide(
     if ssc_mode.is_some_and(|m| m != 1) {
         return refuse(cause::SERVICE_OPTION_NOT_SUPPORTED);
     }
-    Ok(Accepted { pti: header.pti })
+    Ok(Accepted { pti: header.pti, dnn })
 }
 
-/// PDU Session Establishment Accept: IPv4 `address`, SSC mode 1, the
-/// default flow, the configured AMBR.
-pub fn accept(config: &SmfConfig, pdu_session_id: u8, pti: u8, slice: Snssai, address: Ipv4Addr) -> Vec<u8> {
+/// PDU Session Establishment Accept: IPv4 `address` on DNN `dnn` (an index
+/// in the configuration's), SSC mode 1, the default flow, the configured AMBR.
+pub fn accept(
+    config: &SmfConfig,
+    pdu_session_id: u8,
+    pti: u8,
+    slice: Snssai,
+    dnn: usize,
+    address: Ipv4Addr,
+) -> Vec<u8> {
     let mut out = [0u8; N1_MAX];
     let accept = SmDownlink::EstablishmentAccept {
         address: address.octets(),
@@ -72,7 +80,7 @@ pub fn accept(config: &SmfConfig, pdu_session_id: u8, pti: u8, slice: Snssai, ad
         flow: QosFlow { qfi: DEFAULT_QFI, five_qi: config.five_qi },
         ambr_mbps: config.ambr_mbps,
         snssai: slice,
-        dnn: &config.dnn,
+        dnn: &config.dnns[dnn].dnn,
     };
     let n = accept.encode(pdu_session_id, pti, &mut out).expect("an accept fits in 128 bytes");
     out[..n].to_vec()
@@ -117,12 +125,15 @@ mod tests {
 
     #[test]
     fn requests_are_checked_against_what_the_smf_serves() {
-        let c = SmfConfig::from_params(&serde_json::Value::Null).unwrap();
+        let params = serde_json::json!({ "dnns": [{ "dnn": "internet", "pool": "10.45.0.0/16" },
+                                                  { "dnn": "ims", "pool": "10.46.0.0/16" }] });
+        let c = SmfConfig::from_params(&params).unwrap();
         let request = hex("2e 01 07 c1 ffff 91 a1");
-        assert_eq!(decide(&c, 1, SST1, "internet", &request), Ok(Accepted { pti: 7 }));
-        assert_eq!(decide(&c, 1, SST1, "", &request), Ok(Accepted { pti: 7 }), "default DNN");
+        assert_eq!(decide(&c, 1, SST1, "internet", &request), Ok(Accepted { pti: 7, dnn: 0 }));
+        assert_eq!(decide(&c, 1, SST1, "IMS", &request), Ok(Accepted { pti: 7, dnn: 1 }), "DNNs ignore case");
+        assert_eq!(decide(&c, 1, SST1, "", &request), Ok(Accepted { pti: 7, dnn: 0 }), "the first DNN by default");
         let refused = |cause| Err(Refused { pti: 7, cause });
-        assert_eq!(decide(&c, 1, SST1, "ims", &request), refused(cause::MISSING_OR_UNKNOWN_DNN));
+        assert_eq!(decide(&c, 1, SST1, "mms", &request), refused(cause::MISSING_OR_UNKNOWN_DNN));
         assert_eq!(decide(&c, 2, SST1, "internet", &request), refused(cause::INVALID_PDU_SESSION_IDENTITY));
         assert_eq!(decide(&c, 1, Snssai { sst: 2, sd: None }, "", &request), refused(cause::REQUEST_REJECTED));
         assert_eq!(decide(&c, 1, SST1, "", &hex("2e 01 07 c1 ffff 92")), refused(cause::IPV4_ONLY_ALLOWED));
@@ -133,6 +144,8 @@ mod tests {
         assert_eq!(reject(1, Refused { pti: 7, cause: 27 }), hex("2e0107c31b"));
         assert_eq!(release_command(1, 0), hex("2e0100d324"));
         assert_eq!(modification_reject(1, 3), hex("2e0103ca1f"));
-        assert_eq!(accept(&c, 1, 7, SST1, Ipv4Addr::new(10, 45, 0, 2))[..5], hex("2e0107c211")[..]);
+        assert_eq!(accept(&c, 1, 7, SST1, 0, Ipv4Addr::new(10, 45, 0, 2))[..5], hex("2e0107c211")[..]);
+        let ims = accept(&c, 1, 7, SST1, 1, Ipv4Addr::new(10, 46, 0, 2));
+        assert!(ims.ends_with(&hex("25 04 03696d73")), "DNN ims in the accept");
     }
 }

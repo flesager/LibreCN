@@ -57,8 +57,9 @@ name = "smf"
 pool = "cp"
 [nf.params]                   # all optional: these are the defaults
 upf = "upf"
-dnn = "internet"
-pool = "10.45.0.0/16"         # UE addresses; 10.45.0.1 is the UPF's N6 side
+# Data networks, the first by default, each with its UE addresses (the first
+# address is the UPF's N6 side: 10.45.0.1); pools must not overlap.
+dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]
 slices = [{ sst = 1 }]
 five_qi = 9
 ambr_mbps = { uplink = 1000, downlink = 1000 }

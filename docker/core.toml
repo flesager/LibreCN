@@ -34,6 +34,8 @@ n6 = "upf0"
 [[nf]]
 kind = "smf"
 name = "smf"
+[nf.params]
+dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }, { dnn = "ims", pool = "10.46.0.0/16" }]
 
 [[nf]]
 kind = "amf"

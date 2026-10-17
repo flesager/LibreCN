@@ -3,7 +3,9 @@
 # LibreCN (AMF, AUSF, UDM), its SUCI concealed with ECIES Profile A and
 # deciphered by the UDM: 5G AKA, NAS security mode, Registration Accept
 # in Initial Context Setup and Complete; it then establishes its PDU session
-# (SMF, UPF, PDU Session Resource Setup). Without root, the UE cannot create
+# (SMF, UPF, PDU Session Resource Setup), and a second one on the second DNN
+# (ims; both in ue.yaml: on the host, UERANSIM's UE bars its own nr-cli
+# ps-establish, its RRC thread missing the 100 ms UAC check). Without root, the UE cannot create
 # its TUN interface: the user plane is not checked here. The UE releases its
 # session (nr-cli ps-release) and UERANSIM sets it up again; the network then
 # releases it (DELETE on the SMF's web API). The network then deregisters the
@@ -30,10 +32,11 @@ wait_for "$out/gnb.log" "NG Setup procedure is successful"
 "$bin/nr-ue" -c scripts/ueransim/ue.yaml > "$out/ue.log" 2>&1 & ue=$!
 wait_for "$out/core.log" "PDU session 1 set up" || true
 cli() { "$bin/nr-cli" imsi-999700000000001 -e "$1" >> "$out/cli.log" 2>&1 || true; }
+wait_for "$out/core.log" "PDU session 2 set up" || true
 cli "ps-release 1"
 wait_count "$out/core.log" "PDU session 1 set up" 2 || true
 web=$(grep -o 'http://127.0.0.1:[0-9]*' "$out/core.log" | head -1)
-id=$(curl -s "$web/api/nfs/smf/sessions" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+id=$(curl -s "$web/api/nfs/smf/sessions" | tr '{' '\n' | grep '"pdu_session_id":1,' | grep -o '"id":[0-9]*' | cut -d: -f2)
 curl -s -X DELETE "$web/api/nfs/smf/sessions/$id" >> "$out/cli.log"
 wait_count "$out/core.log" "PDU session 1 released\$" 2 || true
 sleep 0.5
@@ -49,6 +52,8 @@ grep -q "Initial Registration is successful" "$out/ue.log" \
   && grep -q "SUCI of Profile A" "$out/core.log" \
   && grep -q "registered: imsi-999700000000001" "$out/core.log" \
   && grep -q "PDU Session establishment is successful PSI\[1\]" "$out/ue.log" \
+  && grep -q "PDU Session establishment is successful PSI\[2\]" "$out/ue.log" \
+  && grep -q "PDU session 2 to ims, UE 10.46.0.2" "$out/core.log" \
   && [ "$(grep -c "UE 1: PDU session 1 set up" "$out/core.log")" -ge 2 ] \
   && grep -q "PDU session 1: PDU Session Release Request" "$out/core.log" \
   && grep -q "PDU session 1 released by the network" "$out/core.log" \
