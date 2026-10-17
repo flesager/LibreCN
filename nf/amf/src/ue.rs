@@ -129,6 +129,10 @@ impl UeTable {
         Ok(ue)
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &UeContext> {
+        self.ues.values()
+    }
+
     pub fn get_mut_by_id(&mut self, amf_id: AmfUeId) -> Option<&mut UeContext> {
         self.ues.get_mut(&amf_id)
     }

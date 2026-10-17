@@ -1,5 +1,5 @@
 //! 5GMM for one UE (TS 24.501 §5): registration with 5G AKA, NAS security
-//! mode control, identification and UE-originating deregistration.
+//! mode control, identification, deregistration by the UE or the network.
 //!
 //! Pure logic on domain values: the EO hands in the UE's uplink NAS PDUs
 //! and the AUSF's answers; this module acts through [`Effects`].
@@ -22,8 +22,9 @@
 //!
 //! A message waiting for an answer is sent again when its timer expires
 //! (§10.2): T3570 (Identity Request), T3560 (Authentication Request,
-//! Security Mode Command), T3550 (Registration Accept), 6 s, four times;
-//! the fifth expiry aborts the procedure.
+//! Security Mode Command), T3550 (Registration Accept), T3522 (the network's
+//! Deregistration Request), 6 s, four times; the fifth expiry aborts the
+//! procedure (a deregistration then completes locally).
 
 use std::fmt;
 use std::time::Duration;
@@ -130,6 +131,8 @@ pub enum State {
     /// Registration Accept sent.
     Accepting,
     Registered,
+    /// The network's Deregistration Request sent.
+    Deregistering,
 }
 
 /// The challenge sent to the UE.
@@ -145,6 +148,7 @@ fn timer_name(message: &Downlink<'_>) -> &'static str {
     match message {
         Downlink::IdentityRequest(_) => "T3570",
         Downlink::RegistrationAccept { .. } => "T3550",
+        Downlink::DeregistrationRequest { .. } => "T3522",
         _ => "T3560",
     }
 }
@@ -325,6 +329,7 @@ impl Mm {
                 | (State::Challenged, Uplink::AuthenticationResponse { .. } | Uplink::AuthenticationFailure { .. })
                 | (State::SecurityMode, Uplink::SecurityModeComplete { .. } | Uplink::SecurityModeReject { .. })
                 | (State::Accepting, Uplink::RegistrationComplete)
+                | (State::Deregistering, Uplink::DeregistrationAccept)
                 | (_, Uplink::RegistrationRequest(_) | Uplink::DeregistrationRequest { .. })
         );
         if answers && self.retransmit.take().is_some() {
@@ -386,6 +391,11 @@ impl Mm {
                 }
                 let off = if switch_off { " (switch off)" } else { "" };
                 fx.log(Level::Info, format_args!("deregistered{off}"));
+                self.state = State::Deregistered;
+                fx.release(Release::Deregister);
+            }
+            (State::Deregistering, Uplink::DeregistrationAccept) => {
+                fx.log(Level::Info, format_args!("deregistered by the network"));
                 self.state = State::Deregistered;
                 fx.release(Release::Deregister);
             }
@@ -574,11 +584,29 @@ impl Mm {
             // The UE most likely has its 5G-GUTI (§5.5.1.2.8).
             fx.log(Level::Info, format_args!("{timer} expired 5 times: registered without Registration Complete"));
             self.state = State::Registered;
+        } else if let Downlink::DeregistrationRequest { .. } = message {
+            // The deregistration completes locally (§5.5.2.3.4).
+            fx.log(Level::Info, format_args!("{timer} expired 5 times: deregistered by the network, locally"));
+            self.state = State::Deregistered;
+            fx.release(Release::Deregister);
         } else {
             fx.log(Level::Info, format_args!("{timer} expired 5 times: {what} unanswered, the UE is released"));
             self.state = State::Deregistered;
             fx.release(Release::Normal);
         }
+    }
+
+    /// The network deregisters the registered UE (§5.5.2.3); `reregister`:
+    /// it must register again. False if the UE is in another procedure.
+    pub fn deregister(&mut self, reregister: bool, fx: &mut impl Effects) -> bool {
+        if self.state != State::Registered {
+            return false;
+        }
+        let again = if reregister { ", re-registration required" } else { "" };
+        fx.log(Level::Info, format_args!("deregistration by the network{again}"));
+        self.state = State::Deregistering;
+        self.expect(Downlink::DeregistrationRequest { reregister }, fx);
+        true
     }
 
     /// The gNB's context: K_gNB from the uplink NAS COUNT of the message
@@ -1155,6 +1183,26 @@ mod tests {
         }
         expire(&mut mm, &mut fx);
         assert_eq!((mm.state(), fx.released, fx.timer), (State::Registered, None, false));
+    }
+
+    #[test]
+    fn the_network_deregisters_a_ue_which_accepts_or_never_answers() {
+        let (config, mut mm, mut fx, mut ue) = registered();
+        assert!(mm.deregister(true, &mut fx));
+        assert_eq!(ue.open(&fx.sent.pop().unwrap(), 2), hex("7e004705"), "re-registration required, 3GPP");
+        assert!(!mm.deregister(true, &mut fx), "already deregistering");
+        assert_eq!((mm.state(), fx.released, fx.timer), (State::Deregistering, None, true), "T3522 runs");
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0048")), &mut fx);
+        assert_eq!((mm.state(), fx.released, fx.timer), (State::Deregistered, Some(Release::Deregister), false));
+
+        let (_, mut mm, mut fx, _) = registered();
+        mm.deregister(false, &mut fx);
+        for _ in 0..4 {
+            expire(&mut mm, &mut fx);
+        }
+        assert_eq!(fx.sent.len(), 5, "sent, then four times again");
+        expire(&mut mm, &mut fx);
+        assert_eq!((mm.state(), fx.released), (State::Deregistered, Some(Release::Deregister)), "locally");
     }
 
     /// The selected algorithms octet of the Security Mode Command, for a UE

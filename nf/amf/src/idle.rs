@@ -39,6 +39,23 @@ impl Idle {
     fn sm_contexts(&self) -> impl Iterator<Item = u32> + '_ {
         self.sessions.iter().flatten().filter_map(|s| s.sm_ctx)
     }
+
+    pub(crate) fn supi(&self) -> Option<&librecn_sbi::Supi> {
+        self.mm.supi()
+    }
+
+    /// For the web API.
+    pub(crate) fn describe(&self, tmsi: u32, now: Time) -> serde_json::Value {
+        let sessions: Vec<usize> =
+            self.sessions.iter().enumerate().filter(|(_, s)| s.is_some()).map(|(p, _)| p).collect();
+        serde_json::json!({
+            "supi": self.mm.supi().map(|s| s.as_str()),
+            "cm": "idle",
+            "tmsi": format!("{tmsi:08x}"),
+            "idle_s": (now - self.since).as_secs(),
+            "sessions": sessions,
+        })
+    }
 }
 
 impl Amf {
@@ -84,14 +101,19 @@ impl Amf {
         let expired: Vec<u32> =
             self.idle.iter().filter(|(_, i)| now - i.since >= MOBILE_REACHABLE).map(|(tmsi, _)| *tmsi).collect();
         for tmsi in expired {
-            let Some(idle) = self.idle.remove(&tmsi) else { continue };
-            for sm_ctx in idle.sm_contexts() {
-                self.idle_sessions.remove(&sm_ctx);
-                self.release_sm_context(ctx, sm_ctx);
-            }
-            let supi = idle.mm.supi().map_or_else(String::new, |s| format!(" ({s})"));
-            log!(self.log, ctx, Info, "5G-TMSI {tmsi:08x}{supi}: implicitly deregistered, unreachable");
+            self.forget_idle(ctx, tmsi, "implicitly deregistered, unreachable");
         }
+    }
+
+    /// Deregisters idle UE `tmsi`: its sessions released; `why` logged.
+    pub(crate) fn forget_idle(&mut self, ctx: &mut Context<'_>, tmsi: u32, why: &str) {
+        let Some(idle) = self.idle.remove(&tmsi) else { return };
+        for sm_ctx in idle.sm_contexts() {
+            self.idle_sessions.remove(&sm_ctx);
+            self.release_sm_context(ctx, sm_ctx);
+        }
+        let supi = idle.mm.supi().map_or_else(String::new, |s| format!(" ({s})"));
+        log!(self.log, ctx, Info, "5G-TMSI {tmsi:08x}{supi}: {why}");
     }
 }
 

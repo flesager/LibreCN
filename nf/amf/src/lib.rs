@@ -1,10 +1,10 @@
 //! AMF, the access and mobility management function, hosted in one EO.
 //!
 //! This release covers N2 (SCTP one-to-many, NG Setup, NG Reset, Error
-//! Indication, UE-associated signalling), registration (5G AKA through the
-//! AUSF, NAS security, Registration Accept in Initial Context Setup,
-//! UE-originating deregistration) and PDU session establishment through the
-//! SMF (PDU Session Resource Setup).
+//! Indication, UE-associated signalling, Paging), registration (5G AKA
+//! through the AUSF, NAS security, Registration Accept in Initial Context
+//! Setup), deregistration by the UE or the network, idle UEs, and PDU
+//! sessions through the SMF (PDU Session Resource Setup).
 //!
 //! - [`sctp`], the transport;
 //! - `n2`, NGAP ↔ domain values (the only module seeing ASN.1);
@@ -13,6 +13,7 @@
 //! - `mm`, 5GMM for one UE, on domain values;
 //! - `sessions`, PDU sessions between the UE, the SMF and the gNB;
 //! - `idle`, the contexts of registered UEs without N2 connection, paging;
+//! - `manage`, the UEs on the web API, deregistration by the network;
 //! - [`config`], identity and addresses, from the deployment `params`.
 //!
 //! The AUSF and the SMF are reached by EO messages (`librecn-sbi`); the
@@ -20,6 +21,7 @@
 
 pub mod config;
 mod idle;
+mod manage;
 mod mm;
 mod n2;
 pub mod sctp;
@@ -140,8 +142,8 @@ impl Amf {
     }
 
     /// N2 traffic arrives through the SCTP socket, not the mailbox: small
-    /// lanes, and buffers for the AUSF's and the SMF's answers. A NAS timer
-    /// per UE, and the idle sweep.
+    /// lanes, buffers for the AUSF's and the SMF's answers and for the web
+    /// API's requests. A NAS timer per UE, and the idle sweep.
     pub fn eo_config(&self) -> EoConfig {
         // A NAS timer per UE, the idle sweep, the notices' retry.
         let timers = u32::try_from(self.config.max_ues).unwrap_or(u32::MAX).saturating_add(2);
@@ -150,7 +152,7 @@ impl Amf {
             .max_io(1)
             .max_timers(timers)
             .system_capacity(timers as usize + 1 + 3)
-            .buffers(&[(256, 1024), (2048, 1024)])
+            .buffers(&[(256, 1024), (2048, 1024), (8 * 1024, 2)])
     }
 
     /// The N2 address actually bound, once the EO started (port 0: chosen by the kernel).
@@ -406,6 +408,8 @@ impl Amf {
             }
         } else if let Some(notify) = msg.body::<SmNotify>() {
             self.on_sm_notify(ctx, msg, amf_id, notify);
+        } else if let Some(request) = msg.body::<librecn_common::manage::Manage>() {
+            self.on_manage(ctx, msg, request);
         }
     }
 

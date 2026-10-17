@@ -84,6 +84,9 @@ server answers 503 at once. Today:
 | UDM | `DELETE subscribers/{supi}` | 200, or 404 |
 | SMF | `GET sessions` | `[{"id", "supi", "pdu_session_id", "ue_ip", "dnn", "state"}]` |
 | SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
+| AMF | `GET ues` | `{"connected", "registered", "idle", "ues": [...]}`, the first 64 UEs (`supi`, `cm`, `state`, `tmsi`, `sessions`) |
+| AMF | `GET ues/{supi}` | that UE, or 404 |
+| AMF | `DELETE ues/{supi}`, body `{"reregister": true}` optional | the network deregisters the UE: 202 if it is connected (Deregistration Request), 200 if idle (locally), 409 if in another procedure, 404 |
 
 The GUI's Subscribers view uses them.
 

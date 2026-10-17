@@ -16,6 +16,8 @@ pub mod kind {
     pub const REGISTRATION_REJECT: u8 = 0x44;
     pub const DEREGISTRATION_REQUEST_UE: u8 = 0x45;
     pub const DEREGISTRATION_ACCEPT_UE: u8 = 0x46;
+    pub const DEREGISTRATION_REQUEST_NETWORK: u8 = 0x47;
+    pub const DEREGISTRATION_ACCEPT_NETWORK: u8 = 0x48;
     pub const SERVICE_REQUEST: u8 = 0x4c;
     pub const SERVICE_REJECT: u8 = 0x4d;
     pub const SERVICE_ACCEPT: u8 = 0x4e;
@@ -42,6 +44,8 @@ pub fn name(kind: u8) -> &'static str {
         kind::REGISTRATION_REJECT => "Registration Reject",
         kind::DEREGISTRATION_REQUEST_UE => "Deregistration Request",
         kind::DEREGISTRATION_ACCEPT_UE => "Deregistration Accept",
+        kind::DEREGISTRATION_REQUEST_NETWORK => "Deregistration Request (network)",
+        kind::DEREGISTRATION_ACCEPT_NETWORK => "Deregistration Accept (network)",
         kind::SERVICE_REQUEST => "Service Request",
         kind::SERVICE_REJECT => "Service Reject",
         kind::SERVICE_ACCEPT => "Service Accept",
@@ -148,15 +152,35 @@ pub struct ServiceRequest<'a> {
 pub enum Uplink<'a> {
     RegistrationRequest(RegistrationRequest<'a>),
     RegistrationComplete,
-    AuthenticationResponse { res_star: Option<&'a [u8]> },
-    AuthenticationFailure { cause: u8, auts: Option<&'a [u8; 14]> },
-    SecurityModeComplete { imeisv: Option<MobileIdentity<'a>>, container: Option<&'a [u8]> },
-    SecurityModeReject { cause: u8 },
-    IdentityResponse { identity: MobileIdentity<'a> },
-    DeregistrationRequest { switch_off: bool, ngksi: NgKsi, identity: MobileIdentity<'a> },
+    AuthenticationResponse {
+        res_star: Option<&'a [u8]>,
+    },
+    AuthenticationFailure {
+        cause: u8,
+        auts: Option<&'a [u8; 14]>,
+    },
+    SecurityModeComplete {
+        imeisv: Option<MobileIdentity<'a>>,
+        container: Option<&'a [u8]>,
+    },
+    SecurityModeReject {
+        cause: u8,
+    },
+    IdentityResponse {
+        identity: MobileIdentity<'a>,
+    },
+    DeregistrationRequest {
+        switch_off: bool,
+        ngksi: NgKsi,
+        identity: MobileIdentity<'a>,
+    },
+    /// The UE accepts the network's deregistration.
+    DeregistrationAccept,
     UlNasTransport(UlNasTransport<'a>),
     ServiceRequest(ServiceRequest<'a>),
-    Status { cause: u8 },
+    Status {
+        cause: u8,
+    },
 }
 
 impl<'a> Uplink<'a> {
@@ -211,6 +235,7 @@ impl<'a> Uplink<'a> {
                     identity,
                 }
             }
+            kind::DEREGISTRATION_ACCEPT_NETWORK => Uplink::DeregistrationAccept,
             kind::STATUS => Uplink::Status { cause: r.u8()? },
             kind::UL_NAS_TRANSPORT => Uplink::UlNasTransport(ul_nas_transport(r)?),
             kind::SERVICE_REQUEST => Uplink::ServiceRequest(service_request(r)?),
@@ -230,6 +255,7 @@ impl<'a> Uplink<'a> {
             Uplink::SecurityModeReject { .. } => kind::SECURITY_MODE_REJECT,
             Uplink::IdentityResponse { .. } => kind::IDENTITY_RESPONSE,
             Uplink::DeregistrationRequest { .. } => kind::DEREGISTRATION_REQUEST_UE,
+            Uplink::DeregistrationAccept => kind::DEREGISTRATION_ACCEPT_NETWORK,
             Uplink::UlNasTransport(_) => kind::UL_NAS_TRANSPORT,
             Uplink::ServiceRequest(_) => kind::SERVICE_REQUEST,
             Uplink::Status { .. } => kind::STATUS,
@@ -338,6 +364,11 @@ pub enum Downlink<'a> {
         cause: u8,
     },
     DeregistrationAccept,
+    /// The network deregisters the UE over 3GPP access (§8.2.14);
+    /// `reregister`: it must register again.
+    DeregistrationRequest {
+        reregister: bool,
+    },
     ServiceReject {
         cause: u8,
     },
@@ -370,6 +401,7 @@ impl Downlink<'_> {
             Downlink::RegistrationAccept { .. } => kind::REGISTRATION_ACCEPT,
             Downlink::RegistrationReject { .. } => kind::REGISTRATION_REJECT,
             Downlink::DeregistrationAccept => kind::DEREGISTRATION_ACCEPT_UE,
+            Downlink::DeregistrationRequest { .. } => kind::DEREGISTRATION_REQUEST_NETWORK,
             Downlink::ServiceReject { .. } => kind::SERVICE_REJECT,
             Downlink::ServiceAccept { .. } => kind::SERVICE_ACCEPT,
             Downlink::Status { .. } => kind::STATUS,
@@ -409,6 +441,9 @@ impl Downlink<'_> {
                 w.u8(cause)
             }
             Downlink::ServiceAccept { sessions } => w.tlv(0x50, |w| w.bytes(&sessions.octets())),
+            // De-registration type (§9.11.3.20): not switch off, re-registration
+            // required or not, 3GPP access; the spare half octet.
+            Downlink::DeregistrationRequest { reregister } => w.u8(u8::from(reregister) << 2 | 0x01),
             Downlink::DlNasTransport { pdu_session_id, container, cause } => {
                 w.u8(PAYLOAD_N1_SM);
                 w.lve(|w| w.bytes(container));
@@ -474,6 +509,7 @@ mod tests {
         assert_eq!((t.pdu_session_id, t.request_type), (Some(1), Some(request::INITIAL)));
         assert_eq!(t.snssai, Some(Snssai { sst: 1, sd: None }));
         assert!(t.dnn.unwrap().is("internet"));
+        assert_eq!(Uplink::decode(&hex("7e0048")), Ok(Uplink::DeregistrationAccept));
         assert_eq!(Uplink::decode(&hex("7e0099")), Err(Error::UnknownMessage(0x99)));
         assert_eq!(Uplink::decode(&hex("7e0041 01 0005 01")), Err(Error::Truncated));
         assert_eq!(Uplink::decode(&hex("2e0041")), Err(Error::Invalid("plain 5GMM header")));
@@ -508,6 +544,8 @@ mod tests {
         assert_eq!(encode(Downlink::RegistrationReject { cause: 111 }, &mut buf), "7e00446f");
         assert_eq!(encode(Downlink::IdentityRequest(IdentityType::Suci), &mut buf), "7e005b01");
         assert_eq!(encode(Downlink::DeregistrationAccept, &mut buf), "7e0046");
+        assert_eq!(encode(Downlink::DeregistrationRequest { reregister: true }, &mut buf), "7e004705");
+        assert_eq!(encode(Downlink::DeregistrationRequest { reregister: false }, &mut buf), "7e004701");
         assert_eq!(
             encode(Downlink::ServiceAccept { sessions: SessionSet(0x02) }, &mut buf),
             "7e004e 50020200".replace(' ', "")

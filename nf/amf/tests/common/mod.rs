@@ -9,6 +9,7 @@ use librecn_amf::config::AmfConfig;
 use librecn_amf::sctp::{NGAP_PPID, Received, SctpSocket};
 use librecn_ngap::*;
 use librecn_oam::{AlarmManager, CapturedLog, LogSink};
+use librecn_scheduler::EoId;
 use librecn_scheduler::testbed::TestBed;
 
 pub fn vector(name: &str) -> Vec<u8> {
@@ -19,6 +20,7 @@ pub struct Setup {
     pub tb: TestBed,
     pub log: CapturedLog,
     pub addr: std::net::SocketAddr,
+    pub amf: EoId,
 }
 
 /// Test bed with log, alarms and an AMF on a free port, serving `plmn`.
@@ -36,10 +38,10 @@ pub fn amf_with(mcc: &str, mnc: &str, more: impl FnOnce(&mut TestBed)) -> Setup 
     let params = serde_json::json!({ "n2": "127.0.0.1:0", "plmn": { "mcc": mcc, "mnc": mnc } });
     let amf = Amf::new(AmfConfig::from_params("amf-1", &params).unwrap());
     let bound = amf.bound_addr();
-    tb.add(amf.eo_config(), amf).unwrap();
+    let amf = tb.add(amf.eo_config(), amf).unwrap();
     tb.run_until_idle();
     let addr = bound.lock().unwrap().expect("N2 open");
-    Setup { tb, log, addr }
+    Setup { tb, log, addr, amf }
 }
 
 impl Setup {

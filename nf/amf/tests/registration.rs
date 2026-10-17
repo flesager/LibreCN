@@ -7,15 +7,18 @@ mod common;
 use common::{Setup, amf_with, initiating, release_complete, vector};
 use librecn_amf::sctp::{NGAP_PPID, SctpSocket};
 use librecn_ausf::Ausf;
+use librecn_common::manage::{Manage, Method, Reply};
 use librecn_ngap::*;
 use librecn_sbi::pdu_session::N4Report;
 use librecn_scheduler::EoId;
+use librecn_scheduler::testbed::{Probe, ProbeLog};
 use librecn_security::milenage::Milenage;
 use librecn_security::{Direction, kdf, nea2, nia2};
 use librecn_smf::Smf;
 use librecn_udm::Udm;
 use librecn_upf::Upf;
 use rasn::types::{BitString, FixedBitString, FixedOctetString, Integer};
+use zerocopy::FromZeros;
 
 const K: &str = "465B5CE8B199B49FAA5F0A2EE238A6BC";
 const OPC: &str = "E8ED289DEBA952E4283B54E88E6183CA";
@@ -39,10 +42,12 @@ fn core_with(smf_capacity: usize) -> (Setup, SctpSocket) {
     (s, gnb)
 }
 
-/// The SMF's and UPF's EOs.
+/// The SMF's and UPF's EOs, and a probe standing for the web server.
 struct Ids {
     smf: EoId,
     upf: EoId,
+    web: EoId,
+    replies: ProbeLog,
 }
 
 fn core_and_ids(smf_capacity: usize) -> (Setup, SctpSocket, Ids) {
@@ -57,7 +62,9 @@ fn core_and_ids(smf_capacity: usize) -> (Setup, SctpSocket, Ids) {
         let smf = tb.add(cfg.data_capacity(smf_capacity), smf).unwrap();
         let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
         let upf = tb.add(cfg, upf).unwrap();
-        ids = Some(Ids { smf, upf });
+        let (probe, replies) = Probe::new();
+        let web = tb.add(librecn_scheduler::EoConfig::new("web").buffers(&[(16 * 1024, 4)]), probe).unwrap();
+        ids = Some(Ids { smf, upf, web, replies });
     });
     let gnb = s.connect();
     assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
@@ -604,4 +611,48 @@ fn an_unknown_subscriber_is_rejected() {
     let (_, pdu) = s.receive(&gnb);
     let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
     assert!(s.logged("udm", "no authentication vector for suci-0-208-93-0000-0-0-0000000009: UserNotFound"));
+}
+
+/// A web API request to the AMF; its status and JSON.
+fn manage(s: &mut Setup, ids: &Ids, method: Method, path: &str, body: &str) -> (u16, serde_json::Value) {
+    let mut request = Manage::new_zeroed();
+    request.fill(method, path, body);
+    s.tb.inject_from(ids.web, s.amf, 7, &request).unwrap();
+    s.tb.run_until_idle();
+    let reply: Reply = ids.replies.take().into_iter().find_map(|m| m.body()).expect("a reply");
+    (reply.status(), serde_json::from_str(reply.text()).unwrap())
+}
+
+#[test]
+fn the_network_deregisters_a_connected_ue_then_an_idle_one() {
+    let (mut s, gnb, ids) = core_and_ids(1024);
+    let mut ue = Ue::default();
+    ue.register(&mut s, &gnb);
+    let (status, listed) = manage(&mut s, &ids, Method::Get, "ues", "");
+    assert_eq!((status, &listed["connected"], &listed["registered"]), (200, &1.into(), &1.into()));
+    assert_eq!(listed["ues"][0]["supi"], "imsi-208930000000001");
+
+    let (status, _) = manage(&mut s, &ids, Method::Delete, "ues/imsi-208930000000001", r#"{"reregister": true}"#);
+    assert_eq!(status, 202, "the UE is told");
+    let (_, request) = ue.downlink(&mut s, &gnb);
+    assert_eq!(request, hex("7e004705"), "Deregistration Request, re-registration required");
+    ue.uplink_protected(&gnb, 2, &hex("7e0048"));
+    let (_, pdu) = s.receive(&gnb);
+    let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
+    gnb.send(0, ue.stream, NGAP_PPID, &release_complete(ue.amf_id, 1)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", "deregistered by the network"), "{:#?}", s.log.lines());
+    assert!(s.logged("amf-1", "released, 0 UE(s) left"));
+    assert_eq!(manage(&mut s, &ids, Method::Get, "ues/imsi-208930000000001", "").0, 404, "forgotten");
+
+    // Registered again, with a session, then idle: deregistered locally, its session released.
+    let mut ue = Ue::default();
+    registered_with_a_session_then_idle(&mut s, &gnb, &mut ue);
+    let (status, idle) = manage(&mut s, &ids, Method::Get, "ues/imsi-208930000000001", "");
+    assert_eq!((status, &idle["cm"], &idle["sessions"]), (200, &"idle".into(), &serde_json::json!([1])));
+    assert_eq!(manage(&mut s, &ids, Method::Delete, "ues/imsi-208930000000001", "").0, 200);
+    s.pump();
+    assert!(s.logged("amf-1", "deregistered by the network, locally (idle)"));
+    assert!(s.logged("smf", "PDU session 1 released, 0 left"), "{:#?}", s.log.lines());
+    assert_eq!(manage(&mut s, &ids, Method::Delete, "ues/imsi-208930000000001", "").0, 404);
 }

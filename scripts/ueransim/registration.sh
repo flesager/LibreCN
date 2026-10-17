@@ -5,8 +5,10 @@
 # (SMF, UPF, PDU Session Resource Setup). Without root, the UE cannot create
 # its TUN interface: the user plane is not checked here. The UE releases its
 # session (nr-cli ps-release) and UERANSIM sets it up again; the network then
-# releases it (DELETE on the SMF's web API). The UE finally switches off:
-# Deregistration Request, UE Context Release. UERANSIM is expected next to this repository:
+# releases it (DELETE on the SMF's web API). The network then deregisters the
+# UE, re-registration required (DELETE on the AMF's web API): it registers
+# again. The UE finally switches off: Deregistration Request, UE Context
+# Release. UERANSIM is expected next to this repository:
 # ../UERANSIM/build (override with UERANSIM=).
 set -eu
 cd "$(dirname "$0")/../.."
@@ -34,6 +36,10 @@ id=$(curl -s "$web/api/nfs/smf/sessions" | grep -o '"id":[0-9]*' | head -1 | cut
 curl -s -X DELETE "$web/api/nfs/smf/sessions/$id" >> "$out/cli.log"
 wait_count "$out/core.log" "PDU session 1 released\$" 2 || true
 sleep 0.5
+curl -s -X DELETE "$web/api/nfs/amf-1/ues/imsi-999700000000001" -d '{"reregister": true}' >> "$out/cli.log"
+wait_count "$out/core.log" "registered: imsi-999700000000001" 2 || true
+wait_count "$out/core.log" "PDU session 1 set up" 3 || true
+sleep 0.5
 cli "deregister switch-off"
 wait_for "$out/core.log" "released, 0 UE(s) left" || true
 
@@ -45,7 +51,9 @@ grep -q "Initial Registration is successful" "$out/ue.log" \
   && grep -q "PDU session 1: PDU Session Release Request" "$out/core.log" \
   && grep -q "PDU session 1 released by the network" "$out/core.log" \
   && [ "$(grep -c "UE 1: PDU session 1 released\"" "$out/core.log")" -eq 2 ] \
+  && grep -q "deregistered by the network\"" "$out/core.log" \
+  && [ "$(grep -c "registered: imsi-999700000000001" "$out/core.log")" -ge 2 ] \
   && grep -q "deregistered (switch off)" "$out/core.log" \
   && grep -q "released, 0 UE(s) left" "$out/core.log" \
-  && echo "OK: UERANSIM's UE registered, got, released (UE, network) and got again its PDU session, deregistered" \
+  && echo "OK: UERANSIM's UE registered, got, released (UE, network) and got again its PDU session, deregistered by the network then by itself" \
   || { echo "FAILED"; exit 1; }
