@@ -2,13 +2,20 @@
 # User-plane interop check with UERANSIM, in Docker (UERANSIM's UE needs
 # root for uesimtun0): the core in one container, UERANSIM's gNB and UE in
 # another. The UE registers, gets its PDU session, then pings the UPF's N6
-# address (10.45.0.1) through uesimtun0: GTP-U on N3, upf0 on N6.
+# address (10.45.0.1) through uesimtun0: GTP-U on N3, upf0 on N6. The gNB
+# then releases the UE (idle): the next ping brings it back with a Service
+# Request, its session reactivated (UERANSIM may drop the packet that woke
+# it: one answer at least is expected).
 # UERANSIM is expected next to this repository: ../UERANSIM/build
-# (override with UERANSIM=). Needs docker and the host's sctp module.
+# (override with UERANSIM=), with patches/0001 applied. Needs docker and the
+# host's sctp module.
 set -eu
 cd "$(dirname "$0")/../.."
 bin=${UERANSIM:-../UERANSIM/build}
 [ -x "$bin/nr-gnb" ] && [ -x "$bin/nr-ue" ] && [ -x "$bin/nr-cli" ] || { echo "no UERANSIM in $bin"; exit 1; }
+patch=scripts/ueransim/patches/0001-gnb-select-an-AMF-for-protected-initial-messages.patch
+git -C "$bin/../src" apply --check -R "$PWD/$patch" 2>/dev/null \
+  || { echo "UERANSIM's gNB lacks $patch: git -C $bin/../src apply, then rebuild"; exit 1; }
 image=librecn-interop
 net=librecn-interop
 ctx=$(mktemp -d)
@@ -35,12 +42,19 @@ run librecn-ran 10.210.0.20 sh -c 'nr-gnb -c /etc/librecn/gnb.yaml > /tmp/gnb.lo
 wait_for librecn-ran "TUN interface\[uesimtun0" || true
 
 ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
+docker exec librecn-ran nr-cli UERANSIM-gnb-999-70-1 -e "ue-release 1" >/dev/null || true
+wait_for librecn-core "deactivated (the UE is idle)" || true
+idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
 docker stop -t 5 librecn-core >/dev/null
 
 echo "--- gnb"; docker exec librecn-ran cat /tmp/gnb.log 2>/dev/null || docker cp librecn-ran:/tmp/gnb.log - 2>/dev/null || true
 echo "--- ue"; docker logs librecn-ran 2>&1
 echo "--- core"; docker logs librecn-core 2>&1
 echo "--- ping"; echo "$ping"
+echo "--- ping after idle"; echo "$idle_ping"
+core=$(docker logs librecn-core 2>&1)
 echo "$ping" | grep -q " 0% packet loss" \
-  && docker logs librecn-core 2>&1 | grep -q "3 packet(s) up, 3 down" \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane" || { echo "FAILED"; exit 1; }
+  && echo "$idle_ping" | grep -Eq " [1-9][0-9]* received" \
+  && echo "$core" | grep -q "resumed after" \
+  && echo "$core" | grep -q "PDU session 1 reactivated" \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane, before and after idle" || { echo "FAILED"; exit 1; }

@@ -12,12 +12,14 @@
 //! - `ue`, UE contexts and AMF-UE-NGAP-ID allocation;
 //! - `mm`, 5GMM for one UE, on domain values;
 //! - `sessions`, PDU sessions between the UE, the SMF and the gNB;
+//! - `idle`, the contexts of registered UEs without N2 connection;
 //! - [`config`], identity and addresses, from the deployment `params`.
 //!
 //! The AUSF and the SMF are reached by EO messages (`librecn-sbi`); the
 //! `corr_id` of a request is the UE's AMF-UE-NGAP-ID.
 
 pub mod config;
+mod idle;
 mod mm;
 mod n2;
 pub mod sctp;
@@ -35,12 +37,15 @@ use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
 use librecn_common::log::{Level, Logger};
 use librecn_common::msg::flags;
+use librecn_nas::ie::SessionSet;
 use librecn_nas::ie::Tai;
 use librecn_ngap::{
     Cause, CauseNas, CauseProtocol, CauseRadioNetwork, Criticality, ID_INITIAL_UEMESSAGE, ID_NGRESET,
     ID_UECONTEXT_RELEASE_REQUEST, ID_UPLINK_NASTRANSPORT, procedure_name,
 };
-use librecn_sbi::pdu_session::{CreateSmContext, CreateSmContextResult, Slice, UpdateSmContextResult};
+use librecn_sbi::pdu_session::{
+    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, UpdateSmContext, UpdateSmContextResult, update,
+};
 use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
 use librecn_sbi::{DnnText, ServingNetwork, SupiOrSuci};
 use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, MsgBody};
@@ -78,6 +83,8 @@ pub struct Amf {
     bound: Arc<Mutex<Option<SocketAddr>>>,
     gnbs: HashMap<AssocId, Gnb>,
     ues: UeTable,
+    /// Idle UEs by 5G-TMSI.
+    idle: HashMap<u32, idle::Idle>,
     buffer: Box<[u8]>,
     log: Logger,
     alarms: Alarms,
@@ -95,6 +102,7 @@ impl Amf {
             socket: None,
             bound: Arc::default(),
             gnbs: HashMap::new(),
+            idle: HashMap::new(),
             buffer: vec![0; RECEIVE_BUFFER].into_boxed_slice(),
             log: Logger::default(),
             alarms: Alarms::new(),
@@ -210,8 +218,8 @@ impl Amf {
                 Ok(_) => {
                     let gone = self.ues.remove(amf_id);
                     let supi = gone.as_ref().and_then(|ue| ue.mm.supi().copied());
-                    if let Some(ue) = &gone {
-                        self.forget_sessions(ctx, ue);
+                    if let Some(ue) = gone {
+                        self.retire(ctx, ue);
                     }
                     let left = self.ues.len();
                     match supi {
@@ -280,7 +288,7 @@ impl Amf {
         // The gNB reuses a RAN-UE-NGAP-ID only for a new UE: the old context is stale.
         if let Some(stale) = self.ues.find(assoc, ran_id) {
             if let Some(ue) = self.ues.remove(stale) {
-                self.forget_sessions(ctx, &ue);
+                self.retire(ctx, ue);
             }
             log!(self.log, ctx, Info, "UE {stale}: replaced by a new Initial UE Message for RAN id {ran_id}");
         }
@@ -298,6 +306,7 @@ impl Amf {
         let amf_id = ue.amf_id;
         self.ues.get_mut(assoc, amf_id, ran_id).expect("just created").location = location;
         log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): Initial UE Message");
+        self.resume(ctx, amf_id, nas);
         self.on_nas(ctx, amf_id, nas);
     }
 
@@ -350,11 +359,7 @@ impl Amf {
         } else if let Some(result) = msg.body::<CreateSmContextResult>() {
             self.on_sm_created(ctx, amf_id, result);
         } else if let Some(result) = msg.body::<UpdateSmContextResult>() {
-            let (psi, outcome) = (result.pdu_session_id, result.outcome());
-            match outcome {
-                librecn_sbi::Outcome::Ok => log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} set up"),
-                _ => log!(self.log, ctx, Error, "UE {amf_id}: PDU session {psi} not updated: {outcome:?}"),
-            }
+            self.on_sm_updated(ctx, amf_id, result);
         }
     }
 
@@ -429,11 +434,20 @@ impl ExecutionObject for Amf {
             Err(e) => {
                 log!(self.log, ctx, Fatal, "cannot open N2 on {}: {e}", self.config.n2);
                 self.alarms.raise(ctx, ALARM_N2_DOWN, Severity::Critical, &format!("N2 closed: {e}"));
+                return;
             }
+        }
+        if let Err(e) = ctx.arm_timer(idle::SWEEP, 0) {
+            log!(self.log, ctx, Error, "no sweep timer, idle UEs will not expire: {e}");
         }
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
+        if msg.timer().is_some() {
+            self.sweep_idle(ctx);
+            let _ = ctx.arm_timer(idle::SWEEP, 0);
+            return;
+        }
         if msg.io().is_none() {
             return self.on_peer(ctx, msg);
         }
@@ -527,10 +541,37 @@ impl Effects for Port<'_, '_, '_> {
         self.ngap(n2::downlink_nas_transport(amf_id, ran_id, pdu), what);
     }
 
-    fn setup_context(&mut self, pdu: &[u8], context: &AsContext) {
+    fn setup_context(&mut self, pdu: &[u8], context: &AsContext, what: &'static str) {
         let (amf_id, ran_id, ..) = self.ids;
         let request = n2::initial_context_setup_request(amf_id, ran_id, self.config, context, pdu);
-        self.ngap(request, "Registration Accept in Initial Context Setup");
+        self.ngap(request, what);
+    }
+
+    fn sessions(&mut self) -> SessionSet {
+        let mut set = SessionSet::default();
+        for (psi, s) in self.sessions.iter().enumerate() {
+            if s.is_some_and(|s| s.sm_ctx.is_some()) {
+                set.insert(psi as u8);
+            }
+        }
+        set
+    }
+
+    fn resume_sessions(&mut self, reactivate: SessionSet, held_by_ue: Option<SessionSet>) {
+        for psi in 1..16u8 {
+            let Some(sm_ctx) = self.sessions[usize::from(psi)].and_then(|s| s.sm_ctx) else { continue };
+            if held_by_ue.is_some_and(|held| !held.contains(psi)) {
+                // The UE released it locally: so does the network.
+                self.sessions[usize::from(psi)] = None;
+                if let Some(smf) = self.smf.get(self.ctx) {
+                    let _ = self.ctx.send_value(smf, &ReleaseSmContext { sm_ctx });
+                }
+            } else if reactivate.contains(psi) {
+                request::<UpdateSmContext>(self.ctx, self.smf, self.log, self.ids.0, |m| {
+                    (m.sm_ctx, m.kind) = (sm_ctx, update::ACTIVATE);
+                });
+            }
+        }
     }
 
     fn session(&mut self, r: &SessionRequest<'_>) -> Result<(), u8> {

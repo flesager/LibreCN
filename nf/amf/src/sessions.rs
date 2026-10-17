@@ -4,7 +4,9 @@
 //! the gNB's answer goes back to the SMF. The AMF reads neither N1 nor N2.
 
 use librecn_common::log;
-use librecn_sbi::pdu_session::{CreateSmContextResult, ReleaseSmContext, UpdateSmContext, n2 as n2_kind};
+use librecn_sbi::pdu_session::{
+    CreateSmContextResult, ReleaseSmContext, UpdateSmContext, UpdateSmContextResult, update,
+};
 use librecn_scheduler::Context;
 
 use crate::ue::{AmfUeId, UeContext};
@@ -39,10 +41,28 @@ impl Amf {
             let mut nas = [0u8; 512];
             if let Some(n) = mm.seal_session(psi, n1, &mut nas, port) {
                 let ran_id = port.ids.1;
-                let request = n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, &nas[..n], slice, transfer);
+                let request =
+                    n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, Some(&nas[..n]), slice, transfer);
                 port.ngap(request, "PDU Session Resource Setup Request");
             }
         });
+    }
+
+    /// The SMF's answer to an update: for an activation, the gNB's setup again.
+    pub(crate) fn on_sm_updated(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, result: &UpdateSmContextResult) {
+        let (psi, outcome, transfer) = (result.pdu_session_id, result.outcome(), result.n2.get());
+        if outcome != librecn_sbi::Outcome::Ok {
+            return log!(self.log, ctx, Error, "UE {amf_id}: PDU session {psi} not updated: {outcome:?}");
+        }
+        if transfer.is_empty() {
+            return log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} set up");
+        }
+        let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
+        let Some(Some(session)) = ue.sessions.get(usize::from(psi)) else { return };
+        let (ran_id, assoc, stream, slice) = (ue.ran_id, ue.assoc, ue.stream, session.snssai);
+        let request = n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, None, slice, transfer);
+        self.send(ctx, assoc, stream, request, "PDU Session Resource Setup Request");
+        log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} reactivated");
     }
 
     /// The gNB's PDU Session Resource Setup Response: each transfer to the SMF.
@@ -53,20 +73,20 @@ impl Amf {
         setup: Vec<(u8, Vec<u8>)>,
         failed: Vec<(u8, Vec<u8>)>,
     ) {
-        let answers = setup.into_iter().map(|a| (a, n2_kind::SETUP_RESPONSE));
-        for ((psi, transfer), kind) in answers.chain(failed.into_iter().map(|a| (a, n2_kind::SETUP_FAILED))) {
+        let answers = setup.into_iter().map(|a| (a, update::SETUP_RESPONSE));
+        for ((psi, transfer), kind) in answers.chain(failed.into_iter().map(|a| (a, update::SETUP_FAILED))) {
             let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
             let Some(slot) = ue.sessions.get_mut(usize::from(psi)) else { continue };
             let Some(sm_ctx) = slot.and_then(|s| s.sm_ctx) else {
                 log!(self.log, ctx, Info, "UE {amf_id}: setup answer for unknown PDU session {psi}");
                 continue;
             };
-            if kind == n2_kind::SETUP_FAILED {
+            if kind == update::SETUP_FAILED {
                 *slot = None;
                 log!(self.log, ctx, Info, "UE {amf_id}: the gNB could not set PDU session {psi} up");
             }
             request::<UpdateSmContext>(ctx, &mut self.smf, &mut self.log, amf_id, |m| {
-                (m.sm_ctx, m.n2_kind) = (sm_ctx, kind);
+                (m.sm_ctx, m.kind) = (sm_ctx, kind);
                 m.n2.set(&transfer);
             });
         }
@@ -79,16 +99,17 @@ impl Amf {
         }
     }
 
-    /// Removes the UEs of a gNB, and their sessions; how many.
+    /// Removes the UEs of a gNB (the registered ones go idle); how many.
     pub(crate) fn forget_gnb(&mut self, ctx: &mut Context<'_>, assoc: crate::sctp::AssocId) -> usize {
         let gone = self.ues.remove_gnb(assoc);
-        for ue in &gone {
-            self.forget_sessions(ctx, ue);
+        let n = gone.len();
+        for ue in gone {
+            self.retire(ctx, ue);
         }
-        gone.len()
+        n
     }
 
-    fn release_sm_context(&mut self, ctx: &mut Context<'_>, sm_ctx: u32) {
+    pub(crate) fn release_sm_context(&mut self, ctx: &mut Context<'_>, sm_ctx: u32) {
         if let Some(smf) = self.smf.get(ctx) {
             let _ = ctx.send_value(smf, &ReleaseSmContext { sm_ctx });
         }

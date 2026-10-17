@@ -4,7 +4,7 @@
 use librecn_ngap::*;
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_sbi::pdu_session::{
-    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, UpdateSmContext, UpdateSmContextResult, n2,
+    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, UpdateSmContext, UpdateSmContextResult, update,
 };
 use librecn_sbi::{DnnText, Outcome, Supi};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
@@ -91,14 +91,27 @@ fn a_session_is_established_set_up_on_the_gnb_and_released() {
     assert_eq!(transfer.protocol_ies.0.len(), 4);
     assert!(c.logged("upf", "UE 10.45.0.2, uplink TEID 0x1"));
 
-    let mut update = UpdateSmContext::new_zeroed();
-    (update.sm_ctx, update.n2_kind) = (result.sm_ctx, n2::SETUP_RESPONSE);
-    update.n2.set(&response_transfer());
-    c.tb.inject_from(c.amf, c.smf, 43, &update).unwrap();
+    let mut request = UpdateSmContext::new_zeroed();
+    (request.sm_ctx, request.kind) = (result.sm_ctx, update::SETUP_RESPONSE);
+    request.n2.set(&response_transfer());
+    c.tb.inject_from(c.amf, c.smf, 43, &request).unwrap();
     c.tb.run_until_idle();
     let answer: UpdateSmContextResult = c.seen.take()[0].body().unwrap();
     assert_eq!((answer.outcome(), answer.pdu_session_id), (Outcome::Ok, 1));
     assert!(c.logged("upf", "downlink to 127.0.0.1 TEID 0x9"), "{:#?}", c.log.lines());
+
+    // The UE goes idle: no downlink; it comes back: N2 again for the same tunnel.
+    request.kind = update::DEACTIVATE;
+    c.tb.inject_from(c.amf, c.smf, 44, &request).unwrap();
+    c.tb.run_until_idle();
+    assert!(c.seen.take().is_empty(), "no answer to a deactivation");
+    assert!(c.logged("upf", "downlink deactivated"));
+    request.kind = update::ACTIVATE;
+    c.tb.inject_from(c.amf, c.smf, 45, &request).unwrap();
+    c.tb.run_until_idle();
+    let again: UpdateSmContextResult = c.seen.take()[0].body().unwrap();
+    assert_eq!((again.outcome(), again.pdu_session_id), (Outcome::Ok, 1));
+    assert_eq!(again.n2.get(), result.n2.get(), "the same setup as at establishment");
 
     c.tb.inject_from(c.amf, c.smf, 0, &ReleaseSmContext { sm_ctx: result.sm_ctx }).unwrap();
     c.tb.run_until_idle();

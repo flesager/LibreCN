@@ -1,0 +1,17 @@
+diff --git a/src/gnb/ngap/nnsf.cpp b/src/gnb/ngap/nnsf.cpp
+index 84ae6154..cf14d573 100644
+--- a/src/gnb/ngap/nnsf.cpp
++++ b/src/gnb/ngap/nnsf.cpp
+@@ -23,6 +23,12 @@ NgapAmfContext *NgapTask::selectAmf(int ueId, int32_t &requestedSliceType)
+             }
+         }
+     }
++    // A protected initial message (Service Request, Registration Request with
++    // a security context) has no slice the gNB can read: any connected AMF.
++    if (requestedSliceType == -1)
++        for (auto &amf : m_amfCtx)
++            if (amf.second->state == EAmfState::CONNECTED)
++                return amf.second;
+     return nullptr;
+ }
+ 

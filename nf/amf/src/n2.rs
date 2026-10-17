@@ -430,19 +430,20 @@ pub(crate) fn initial_context_setup_request(
 }
 
 /// PDU SESSION RESOURCE SETUP REQUEST for one session: the UE's NAS (the
-/// SMF's accept in DL NAS Transport) and the SMF's transfer for the gNB.
+/// SMF's accept in DL NAS Transport; none for a reactivation) and the
+/// SMF's transfer for the gNB.
 pub(crate) fn pdu_session_resource_setup_request(
     amf_id: AmfUeId,
     ran_id: RanUeId,
     pdu_session_id: u8,
-    nas: &[u8],
+    nas: Option<&[u8]>,
     slice: Snssai,
     transfer: &[u8],
 ) -> Result<Vec<u8>, String> {
     use AnonymousPDUSessionResourceSetupRequestProtocolIEsCriticality::reject;
     let item = PDUSessionResourceSetupItemSUReq::new(
         PDUSessionID(pdu_session_id),
-        Some(NASPDU(nas.into())),
+        nas.map(|nas| NASPDU(nas.into())),
         snssai(slice),
         transfer.to_vec().into(),
         None,

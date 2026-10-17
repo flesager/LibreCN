@@ -12,17 +12,25 @@
 //! UL NAS Transport (5GSM) ─▶ the SMF, through the EO
 //! ```
 //!
-//! A 5G-GUTI the AMF does not know (this release keeps no context once the
-//! UE leaves) is answered by an Identity Request for the SUCI. Retransmission
-//! timers (T3550, T3560, T3570) are not run yet: a UE that stops answering
-//! keeps its context until the gNB releases it.
+//! A registered UE keeps its context when its N2 connection goes (CM-IDLE,
+//! kept by the EO). It comes back with an initial message integrity
+//! protected with that context, the whole message ciphered in its NAS
+//! message container (§4.4.6): a Service Request (Service Accept in Initial
+//! Context Setup, sessions reactivated) or a Registration Request (accepted
+//! without a new authentication). A 5G-GUTI the AMF does not know is
+//! answered by an Identity Request for the SUCI. Retransmission timers
+//! (T3550, T3560, T3570) are not run yet.
 
 use std::fmt;
 
 use librecn_common::log::Level;
 use librecn_nas::Snssai;
-use librecn_nas::ie::{Dnn, Guti, IdentityType, MobileIdentity, NgKsi, SnssaiList, Tai, UeSecurityCapability};
-use librecn_nas::mm::{ABBA, Downlink, PAYLOAD_N1_SM, RegistrationKind, UlNasTransport, Uplink, cause, kind, name};
+use librecn_nas::ie::{
+    Dnn, Guti, IdentityType, MobileIdentity, NgKsi, SessionSet, SnssaiList, Tai, UeSecurityCapability,
+};
+use librecn_nas::mm::{
+    ABBA, Downlink, PAYLOAD_N1_SM, RegistrationKind, ServiceRequest, UlNasTransport, Uplink, cause, kind, name,
+};
 use librecn_nas::security::{self, Header, NEA0, NIA2, SecurityContext};
 use librecn_sbi::ue_authentication::{AuthenticateResult, ConfirmResult};
 use librecn_sbi::{Outcome, Supi, SupiOrSuci};
@@ -68,7 +76,12 @@ pub trait Effects {
     /// Sends a NAS PDU (already protected) to the UE; `what` names it for logs.
     fn send(&mut self, pdu: &[u8], what: &'static str);
     /// Sends a NAS PDU in an Initial Context Setup, with the AS context.
-    fn setup_context(&mut self, pdu: &[u8], context: &AsContext);
+    fn setup_context(&mut self, pdu: &[u8], context: &AsContext, what: &'static str);
+    /// The PDU sessions the network holds for the UE.
+    fn sessions(&mut self) -> SessionSet;
+    /// The UE is back: reactivate the user plane of `reactivate`, release
+    /// the sessions the UE no longer holds (if it said which it holds).
+    fn resume_sessions(&mut self, reactivate: SessionSet, held_by_ue: Option<SessionSet>);
     /// Hands a 5GSM message to the SMF; `Err` with a 5GMM cause if it cannot
     /// be forwarded (the message then goes back to the UE).
     fn session(&mut self, request: &SessionRequest<'_>) -> Result<(), u8>;
@@ -132,6 +145,38 @@ pub struct Mm {
     allowed: SnssaiList,
 }
 
+/// The type of an initial message (plain or integrity protected), if it is one.
+fn initial_kind(pdu: &[u8]) -> Option<u8> {
+    let inner = match security::header(pdu)? {
+        0 => pdu,
+        1 => security::skip_header(pdu).ok()?,
+        _ => return None,
+    };
+    inner.get(2).copied().filter(|k| [kind::REGISTRATION_REQUEST, kind::SERVICE_REQUEST].contains(k))
+}
+
+/// The 5G-TMSI an initial message names, if it is one of this AMF's (the
+/// UE may have an idle context here): a 5G-GUTI of this AMF in a
+/// Registration Request, the 5G-S-TMSI of a Service Request.
+pub fn initial_tmsi(pdu: &[u8], config: &AmfConfig) -> Option<u32> {
+    initial_kind(pdu)?;
+    let inner = if security::header(pdu)? == 0 { pdu } else { security::skip_header(pdu).ok()? };
+    let ours = |set: u16, pointer: u8| set == config.amf_set && pointer == config.amf_pointer;
+    match Uplink::decode(inner).ok()? {
+        Uplink::RegistrationRequest(r) => match r.identity {
+            MobileIdentity::Guti(g) if g.plmn == config.plmn && g.amf_region == config.amf_region => {
+                ours(g.amf_set, g.amf_pointer).then_some(g.tmsi)
+            }
+            _ => None,
+        },
+        Uplink::ServiceRequest(r) => match r.identity {
+            MobileIdentity::STmsi { amf_set, amf_pointer, tmsi } => ours(amf_set, amf_pointer).then_some(tmsi),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Plain messages accepted once a security context exists (§4.4.4.3).
 const PLAIN_ALLOWED: [u8; 7] = [
     kind::REGISTRATION_REQUEST,
@@ -152,16 +197,38 @@ impl Mm {
         self.supi.as_ref()
     }
 
+    /// The 5G-TMSI of the UE's 5G-GUTI, the key of its idle context.
+    pub fn tmsi(&self) -> Option<u32> {
+        self.guti.map(|g| g.tmsi)
+    }
+
     /// An uplink NAS PDU; `tai` is where the UE is. `pdu` is deciphered in place.
     pub fn on_uplink(&mut self, config: &AmfConfig, tai: Option<Tai>, pdu: &mut [u8], fx: &mut impl Effects) {
         let Some(header) = security::header(pdu) else {
             return fx.log(Level::Info, format_args!("uplink {} dropped", librecn_nas::describe(pdu)));
         };
         let protected = header != Header::Plain as u8;
+        let mut verified = false;
         let plain: &[u8] = match (&mut self.security, protected) {
             (Some(ctx), true) => match ctx.unprotect(pdu) {
-                Ok(plain) => plain,
-                Err(e) => return fx.log(Level::Info, format_args!("uplink discarded: {e}")),
+                Ok(plain) => {
+                    verified = true;
+                    plain
+                }
+                // An initial message the kept context does not check (§4.4.4.3).
+                Err(e) => match initial_kind(pdu) {
+                    Some(kind::REGISTRATION_REQUEST) => {
+                        fx.log(Level::Info, format_args!("Registration Request: {e}, the UE starts over"));
+                        self.security = None;
+                        security::skip_header(pdu).unwrap_or_default()
+                    }
+                    Some(kind::SERVICE_REQUEST) => {
+                        fx.log(Level::Info, format_args!("Service Request: {e}"));
+                        self.send(Downlink::ServiceReject { cause: cause::UE_IDENTITY_CANNOT_BE_DERIVED }, fx);
+                        return fx.release(Release::Normal);
+                    }
+                    _ => return fx.log(Level::Info, format_args!("uplink discarded: {e}")),
+                },
             },
             // An initial message protected with a context this AMF does not
             // have: only its cleartext IEs are used (§4.4.6).
@@ -186,13 +253,62 @@ impl Mm {
                 return self.send(Downlink::Status { cause }, fx);
             }
         };
-        let security = if protected { "protected" } else { "plain" };
+        let security = if verified {
+            "protected"
+        } else if protected {
+            "protected, unchecked"
+        } else {
+            "plain"
+        };
         fx.log(Level::Info, format_args!("uplink {} ({security})", name(message.kind())));
-        self.on_message(config, tai, message, fx);
+        // From an idle UE: the whole message is in the ciphered container.
+        let container = match message {
+            Uplink::RegistrationRequest(r) if verified && header == Header::Integrity as u8 => r.container,
+            Uplink::ServiceRequest(r) if verified && header == Header::Integrity as u8 => r.container,
+            _ => None,
+        };
+        if let (Some(container), Some(ctx)) = (container, &self.security) {
+            let mut whole = [0u8; DOWNLINK_MAX];
+            if let Some(whole) = whole.get_mut(..container.len()) {
+                whole.copy_from_slice(container);
+                ctx.decipher_container(whole);
+                match Uplink::decode(whole) {
+                    Ok(inner) if inner.kind() == message.kind() => {
+                        return self.on_message(config, tai, inner, true, fx);
+                    }
+                    _ => fx.log(Level::Info, format_args!("NAS message container unreadable: cleartext IEs used")),
+                }
+            }
+        }
+        self.on_message(config, tai, message, verified, fx);
     }
 
-    fn on_message(&mut self, config: &AmfConfig, tai: Option<Tai>, message: Uplink<'_>, fx: &mut impl Effects) {
+    /// `verified`: integrity checked with the current security context.
+    fn on_message(
+        &mut self,
+        config: &AmfConfig,
+        tai: Option<Tai>,
+        message: Uplink<'_>,
+        verified: bool,
+        fx: &mut impl Effects,
+    ) {
         match (self.state, message) {
+            // Back from idle: the kept context vouches for the UE (§5.5.1.3).
+            (State::Registered, Uplink::RegistrationRequest(request)) if verified => {
+                fx.log(Level::Info, format_args!("registration from idle ({:?}): no new authentication", request.kind));
+                if request.capability.is_some() {
+                    self.capability = request.capability;
+                }
+                self.requested = SnssaiList::default();
+                request.requested().for_each(|s| self.requested.push(s));
+                self.accept(config, tai, fx);
+            }
+            (State::Registered, Uplink::ServiceRequest(request)) if verified => self.on_service_request(&request, fx),
+            (_, Uplink::ServiceRequest(_)) => {
+                // No context vouches for this UE: it must register again (§5.6.1.5).
+                self.send(Downlink::ServiceReject { cause: cause::UE_IDENTITY_CANNOT_BE_DERIVED }, fx);
+                fx.release(Release::Normal);
+            }
             (_, Uplink::RegistrationRequest(request)) => {
                 // A new registration restarts 5GMM for this UE (§5.5.1.2.8).
                 *self = Mm::default();
@@ -239,12 +355,6 @@ impl Mm {
                 fx.log(Level::Info, format_args!("5GMM Status from the UE: cause #{cause}"))
             }
             (State::Registered, Uplink::UlNasTransport(t)) => self.on_transport(&t, fx),
-            // The AMF keeps no context for an idle UE: it must register again (§5.6.1.5).
-            (_, Uplink::Other(kind::SERVICE_REQUEST)) => {
-                self.send(Downlink::ServiceReject { cause: cause::UE_IDENTITY_CANNOT_BE_DERIVED }, fx);
-                fx.release(Release::Normal);
-            }
-            (_, Uplink::Other(_)) => self.send(Downlink::Status { cause: cause::MESSAGE_TYPE_NOT_IMPLEMENTED }, fx),
             (state, message) => {
                 fx.log(Level::Info, format_args!("{} unexpected in state {state:?}", name(message.kind())));
                 self.send(Downlink::Status { cause: cause::NOT_COMPATIBLE_WITH_PROTOCOL_STATE }, fx);
@@ -392,16 +502,38 @@ impl Mm {
         self.guti = Some(guti);
         self.allowed = allowed;
         self.state = State::Accepting;
-        // As Open5GS and free5GC: the Accept goes in Initial Context Setup,
-        // with K_gNB from the uplink NAS COUNT of Security Mode Complete.
-        let (Some(kamf), Some(security), Some(capability)) = (self.kamf, &self.security, self.capability) else {
-            return self.reject(cause::PROTOCOL_ERROR, fx);
-        };
-        let kgnb = kdf::kgnb(&kamf, security.last_uplink_count());
+        // As Open5GS and free5GC: the Accept goes in Initial Context Setup.
+        let Some(context) = self.as_context() else { return self.reject(cause::PROTOCOL_ERROR, fx) };
         let mut pdu = [0u8; DOWNLINK_MAX + 7];
         if let Some(n) = self.seal(Downlink::RegistrationAccept { guti, tai, allowed }, &mut pdu, fx) {
-            fx.setup_context(&pdu[..n], &AsContext { kgnb, capability, allowed });
+            fx.setup_context(&pdu[..n], &context, "Registration Accept in Initial Context Setup");
         }
+    }
+
+    /// The gNB's context: K_gNB from the uplink NAS COUNT of the message
+    /// that triggers it (Security Mode Complete, an initial message).
+    fn as_context(&self) -> Option<AsContext> {
+        let (Some(kamf), Some(security), Some(capability)) = (self.kamf, &self.security, self.capability) else {
+            return None;
+        };
+        Some(AsContext { kgnb: kdf::kgnb(&kamf, security.last_uplink_count()), capability, allowed: self.allowed })
+    }
+
+    /// A Service Request from idle, integrity checked (§5.6.1.4).
+    fn on_service_request(&mut self, request: &ServiceRequest<'_>, fx: &mut impl Effects) {
+        let sessions = fx.sessions();
+        let (reactivate, held) = (request.uplink_data, request.sessions);
+        fx.log(Level::Info, format_args!("back from idle: Service Request (type {})", request.service_type));
+        let Some(context) = self.as_context() else {
+            self.send(Downlink::ServiceReject { cause: cause::PROTOCOL_ERROR }, fx);
+            return fx.release(Release::Normal);
+        };
+        let held_by_both = SessionSet(sessions.0 & held.map_or(u16::MAX, |h| h.0));
+        let mut pdu = [0u8; DOWNLINK_MAX + 7];
+        if let Some(n) = self.seal(Downlink::ServiceAccept { sessions: held_by_both }, &mut pdu, fx) {
+            fx.setup_context(&pdu[..n], &context, "Service Accept in Initial Context Setup");
+        }
+        fx.resume_sessions(SessionSet(reactivate.0 & held_by_both.0), held);
     }
 
     /// A UL NAS Transport of a registered UE: its 5GSM message to the SMF.
@@ -530,6 +662,9 @@ mod tests {
         sessions: Vec<(u8, bool, Snssai, String, Vec<u8>)>,
         /// What `session` answers.
         refuse_sessions: Option<u8>,
+        /// What `sessions` answers, and what `resume_sessions` got.
+        network_sessions: SessionSet,
+        resumed: Vec<(SessionSet, Option<SessionSet>)>,
         released: Option<Release>,
         logs: Vec<String>,
     }
@@ -538,9 +673,15 @@ mod tests {
         fn send(&mut self, pdu: &[u8], _what: &'static str) {
             self.sent.push(pdu.to_vec());
         }
-        fn setup_context(&mut self, pdu: &[u8], context: &AsContext) {
+        fn setup_context(&mut self, pdu: &[u8], context: &AsContext, _what: &'static str) {
             self.sent.push(pdu.to_vec());
             self.contexts.push(*context);
+        }
+        fn sessions(&mut self) -> SessionSet {
+            self.network_sessions
+        }
+        fn resume_sessions(&mut self, reactivate: SessionSet, held_by_ue: Option<SessionSet>) {
+            self.resumed.push((reactivate, held_by_ue));
         }
         fn session(&mut self, r: &SessionRequest<'_>) -> Result<(), u8> {
             let dnn = r.dnn.map(|d| d.to_string()).unwrap_or_default();
@@ -602,6 +743,19 @@ mod tests {
             let kamf = kdf::kamf(&kdf::kseaf(&kausf, SNN), "999700000000001", &ABBA);
             (self.k_enc, self.k_int) = kdf::nas_keys(&kamf, NEA2, NIA2);
             (kdf::res_star(&v.ck, &v.ik, SNN, &rand, &v.res), kamf)
+        }
+
+        /// An initial message from idle: `cleartext` IEs, the whole message
+        /// ciphered in its NAS message container, integrity protected (§4.4.6).
+        fn initial(&mut self, cleartext: &[u8], whole: &[u8]) -> Vec<u8> {
+            let mut container = whole.to_vec();
+            nea2(&self.k_enc, self.ul, 1, Direction::Uplink, &mut container);
+            let plain = [cleartext, &[0x71], &(container.len() as u16).to_be_bytes(), &container].concat();
+            let mut pdu = [&[0x7e, 1, 0, 0, 0, 0, self.ul as u8][..], &plain].concat();
+            let mac = nia2(&self.k_int, self.ul, 1, Direction::Uplink, &pdu[6..]);
+            pdu[2..6].copy_from_slice(&mac);
+            self.ul += 1;
+            pdu
         }
 
         /// Protects and ciphers an uplink message.
@@ -778,6 +932,80 @@ mod tests {
         refused.set_outcome(Outcome::UserNotFound);
         mm.on_authenticate_result(&refused, &mut fx);
         assert_eq!(fx.sent.last().unwrap(), &hex("7e004403"), "Registration Reject, illegal UE");
+    }
+
+    /// A UE registered, as `a_ue_registers_with_5g_aka_and_nas_security`
+    /// leaves it; the AMF's next downlink count is 2.
+    fn registered() -> (AmfConfig, Mm, Recorder, Ue) {
+        let (config, mut mm, mut fx) = (config(), Mm::default(), Recorder::default());
+        mm.on_uplink(&config, tai(), &mut registration_request(), &mut fx);
+        let (result, confirm) = challenge([0x23; 16]);
+        mm.on_authenticate_result(&result, &mut fx);
+        let mut ue = Ue { k_int: [0; 16], k_enc: [0; 16], ul: 0 };
+        let (res_star, _) = ue.answer(&fx.sent.pop().unwrap());
+        mm.on_uplink(&config, tai(), &mut [&hex("7e0057 2d10")[..], &res_star].concat(), &mut fx);
+        mm.on_confirm_result(&config, &confirm, &mut fx);
+        let whole = hex("7e004179 000d 0199f907 0000 0000 0000000010 2e04f0f0f0f0 2f020101");
+        let complete = [&hex("7e005e 71")[..], &(whole.len() as u16).to_be_bytes(), &whole].concat();
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCipheredNewContext, &complete), &mut fx);
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
+        assert_eq!(mm.state(), State::Registered);
+        (config, mm, Recorder::default(), ue)
+    }
+
+    /// The Service Request of an idle UE: data for PDU session 1, holding 1.
+    const SERVICE_REQUEST: &str = "7e004c 10 0007 f4004000c0ffee 4002 0200 5002 0200";
+    const SERVICE_CLEARTEXT: &str = "7e004c 10 0007 f4004000c0ffee";
+
+    #[test]
+    fn an_idle_ue_comes_back_with_a_service_request() {
+        let (config, mut mm, mut fx, mut ue) = registered();
+        assert_eq!(initial_tmsi(&ue.initial(&hex(SERVICE_CLEARTEXT), &hex(SERVICE_REQUEST)), &config), Some(0xc0ffee));
+        ue.ul -= 1;
+        fx.network_sessions = SessionSet(0x06); // sessions 1 and 2; the UE holds only 1
+        let mut request = ue.initial(&hex(SERVICE_CLEARTEXT), &hex(SERVICE_REQUEST));
+        mm.on_uplink(&config, tai(), &mut request, &mut fx);
+        assert_eq!(ue.open(&fx.sent.pop().unwrap(), 2), hex("7e004e 50020200"), "Service Accept: session 1");
+        let context = fx.contexts.pop().expect("in Initial Context Setup");
+        let kamf = mm.kamf.unwrap();
+        assert_eq!(context.kgnb, kdf::kgnb(&kamf, 2), "from the Service Request's count");
+        assert_eq!(fx.resumed, [(SessionSet(0x02), Some(SessionSet(0x02)))], "reactivate 1, 2 is gone at the UE");
+        assert_eq!((mm.state(), fx.released), (State::Registered, None));
+    }
+
+    #[test]
+    fn a_service_request_that_fails_the_integrity_check_is_rejected() {
+        let (config, mut mm, mut fx, mut ue) = registered();
+        let mut request = ue.initial(&hex(SERVICE_CLEARTEXT), &hex(SERVICE_REQUEST));
+        request[3] ^= 1;
+        mm.on_uplink(&config, tai(), &mut request, &mut fx);
+        assert_eq!(ue.open(&fx.sent.pop().unwrap(), 2), hex("7e004d09"), "Service Reject #9");
+        assert_eq!(fx.released, Some(Release::Normal));
+        assert!(fx.resumed.is_empty() && fx.contexts.is_empty());
+    }
+
+    #[test]
+    fn a_registration_from_idle_needs_no_new_authentication() {
+        let (config, mut mm, mut fx, mut ue) = registered();
+        // Mobility registration with the 5G-GUTI, slices in the container only.
+        let cleartext = hex("7e004102 000b f299f907 010040 00c0ffee 2e04f0f0f0f0");
+        let whole = hex("7e004102 000b f299f907 010040 00c0ffee 2e04f0f0f0f0 2f020101");
+        let mut request = ue.initial(&cleartext, &whole);
+        assert_eq!(initial_tmsi(&request, &config), Some(0xc0ffee));
+        mm.on_uplink(&config, tai(), &mut request, &mut fx);
+        assert!(fx.authenticate.is_empty(), "no AUSF round trip");
+        let accept = ue.open(&fx.sent.pop().unwrap(), 2);
+        assert_eq!(accept[..3], hex("7e0042")[..], "Registration Accept");
+        assert_eq!(fx.contexts.len(), 1);
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
+        assert_eq!(mm.state(), State::Registered);
+
+        // A Registration Request the kept context does not check: a full registration.
+        let mut forged = ue.initial(&cleartext, &whole);
+        forged[4] ^= 1;
+        mm.on_uplink(&config, tai(), &mut forged, &mut fx);
+        assert_eq!(fx.sent.pop().unwrap(), hex("7e005b01"), "Identity Request for the SUCI, in clear");
+        assert!(initial_tmsi(&hex("7e004101 000b f299f907 010041 00c0ffee"), &config).is_none(), "another AMF");
     }
 
     /// The selected algorithms octet of the Security Mode Command, for a UE

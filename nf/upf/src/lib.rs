@@ -220,16 +220,13 @@ impl Upf {
 
     fn on_modify(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &N4Modify) {
         let gnb = SocketAddrV4::new(Ipv4Addr::from(request.gnb_addr), librecn_gtpu::PORT);
-        let outcome = if self.sessions.modify(request.seid, gnb, request.dl_teid) {
-            log!(
-                self.log,
-                ctx,
-                Info,
-                "session {:#x}: downlink to {} TEID {:#x}",
-                request.seid,
-                gnb.ip(),
-                request.dl_teid
-            );
+        let dl = (request.dl_teid != 0).then_some((gnb, request.dl_teid));
+        let outcome = if self.sessions.modify(request.seid, dl) {
+            let (seid, teid) = (request.seid, request.dl_teid);
+            match dl {
+                Some(_) => log!(self.log, ctx, Info, "session {seid:#x}: downlink to {} TEID {teid:#x}", gnb.ip()),
+                None => log!(self.log, ctx, Info, "session {seid:#x}: downlink deactivated"),
+            }
             Outcome::Ok
         } else {
             Outcome::ContextNotFound

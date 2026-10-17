@@ -74,9 +74,10 @@ impl Sessions {
         Ok(session)
     }
 
-    /// Sets the downlink tunnel; false if `seid` is unknown.
-    pub fn modify(&mut self, seid: u64, gnb: SocketAddrV4, dl_teid: u32) -> bool {
-        self.by_seid.get_mut(&seid).map(|s| s.dl = Some((gnb, dl_teid))).is_some()
+    /// Sets the downlink tunnel, or clears it (the UE is idle); false if
+    /// `seid` is unknown.
+    pub fn modify(&mut self, seid: u64, dl: Option<(SocketAddrV4, u32)>) -> bool {
+        self.by_seid.get_mut(&seid).map(|s| s.dl = dl).is_some()
     }
 
     pub fn delete(&mut self, seid: u64) -> Option<Session> {
@@ -112,8 +113,10 @@ mod tests {
         assert_ne!(a.ul_teid, b.ul_teid);
         assert_eq!(s.establish(3, Ipv4Addr::new(10, 45, 0, 4)), Err(Refusal::Full));
         let gnb = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2152);
-        assert!(s.modify(1, gnb, 9) && !s.modify(7, gnb, 9));
+        assert!(s.modify(1, Some((gnb, 9))) && !s.modify(7, Some((gnb, 9))));
         assert_eq!(s.by_teid(a.ul_teid).unwrap().dl, Some((gnb, 9)));
+        assert!(s.modify(1, None) && s.by_ue(ue).unwrap().dl.is_none());
+        s.modify(1, Some((gnb, 9)));
         assert_eq!(s.by_ue(ue).unwrap().ul_teid, a.ul_teid);
         assert!(s.delete(1).is_some());
         assert!(s.by_teid(a.ul_teid).is_none() && s.by_ue(ue).is_none() && s.len() == 1);

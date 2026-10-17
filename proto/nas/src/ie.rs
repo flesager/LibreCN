@@ -302,7 +302,13 @@ pub enum MobileIdentity<'a> {
     /// first octet).
     Imei(&'a [u8]),
     Imeisv(&'a [u8]),
-    /// 5G-S-TMSI, MAC address, EUI-64, ...
+    /// 5G-S-TMSI: the 5G-GUTI without PLMN and AMF Region (Service Request).
+    STmsi {
+        amf_set: u16,
+        amf_pointer: u8,
+        tmsi: u32,
+    },
+    /// MAC address, EUI-64, ...
     Other(u8),
 }
 
@@ -326,6 +332,14 @@ impl<'a> MobileIdentity<'a> {
             2 => MobileIdentity::Guti(Guti::decode(v)?),
             3 => MobileIdentity::Imei(v),
             5 => MobileIdentity::Imeisv(v),
+            4 => {
+                let v: &[u8; 7] = v.try_into().map_err(|_| Error::Invalid("5G-S-TMSI"))?;
+                MobileIdentity::STmsi {
+                    amf_set: u16::from(v[1]) << 2 | u16::from(v[2] >> 6),
+                    amf_pointer: v[2] & 0x3f,
+                    tmsi: u32::from_be_bytes([v[3], v[4], v[5], v[6]]),
+                }
+            }
             other => MobileIdentity::Other(other),
         })
     }
@@ -349,6 +363,9 @@ impl fmt::Display for MobileIdentity<'_> {
             MobileIdentity::Imeisv(v) => {
                 f.write_str("imeisv-")?;
                 digits(f, v)
+            }
+            MobileIdentity::STmsi { amf_set, amf_pointer, tmsi } => {
+                write!(f, "5G-S-TMSI {amf_set}:{amf_pointer} {tmsi:08x}")
             }
             MobileIdentity::Other(kind) => write!(f, "identity of type {kind}"),
         }
@@ -404,6 +421,40 @@ impl fmt::Display for Dnn<'_> {
             f.write_str(&String::from_utf8_lossy(label))?;
         }
         Ok(())
+    }
+}
+
+/// PDU session IDs as a bitmap (PDU session status, uplink data status,
+/// §9.11.3.44, §9.11.3.57): bit `n` is PDU session `n`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionSet(pub u16);
+
+impl SessionSet {
+    /// From the IE value (the first octet holds sessions 0 to 7).
+    pub(crate) fn decode(v: &[u8]) -> Result<Self> {
+        match v {
+            [a, b, ..] => Ok(SessionSet(u16::from(*a) | u16::from(*b) << 8)),
+            _ => Err(Error::Invalid("PDU session bitmap")),
+        }
+    }
+
+    pub(crate) fn octets(self) -> [u8; 2] {
+        self.0.to_le_bytes()
+    }
+
+    pub fn contains(self, pdu_session_id: u8) -> bool {
+        pdu_session_id < 16 && self.0 & 1 << pdu_session_id != 0
+    }
+
+    pub fn insert(&mut self, pdu_session_id: u8) {
+        if pdu_session_id < 16 {
+            self.0 |= 1 << pdu_session_id;
+        }
+    }
+
+    /// The PDU session IDs (1 to 15) in the set.
+    pub fn iter(self) -> impl Iterator<Item = u8> {
+        (1..16).filter(move |&p| self.contains(p))
     }
 }
 
@@ -463,6 +514,14 @@ mod tests {
         assert_eq!(MobileIdentity::decode(&buf).unwrap(), MobileIdentity::Guti(guti));
         assert_eq!(guti.to_string(), "5G-GUTI 999/70 1:1023:5 00000007");
         // UERANSIM's IMEISV 4370816125816151 (even: filler in the last octet).
+        let v = hex("f4 0040 01020304");
+        let stmsi = MobileIdentity::decode(&v).unwrap();
+        assert_eq!(stmsi, MobileIdentity::STmsi { amf_set: 1, amf_pointer: 0, tmsi: 0x01020304 });
+        assert_eq!(stmsi.to_string(), "5G-S-TMSI 1:0 01020304");
+        let mut set = SessionSet::decode(&[0x02, 0x80]).unwrap();
+        assert_eq!(set.iter().collect::<Vec<_>>(), [1, 15]);
+        set.insert(3);
+        assert_eq!(set.octets(), [0x0a, 0x80]);
         let imeisv = hex("45 73 80 61 21 85 61 51 f1");
         assert_eq!(MobileIdentity::decode(&imeisv).unwrap().to_string(), "imeisv-4370816125816151");
     }

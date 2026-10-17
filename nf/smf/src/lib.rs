@@ -28,7 +28,7 @@ use librecn_nas::Snssai;
 use librecn_nas::sm::cause;
 use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult,
-    ReleaseSmContext, UpdateSmContext, UpdateSmContextResult, n2,
+    ReleaseSmContext, UpdateSmContext, UpdateSmContextResult, update,
 };
 use librecn_sbi::{Outcome, Supi};
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Message};
@@ -47,8 +47,8 @@ struct SmContext {
     amf: EoId,
     /// The AMF's request waiting for the UPF (its `corr_id`).
     waiting: Option<u32>,
-    /// The UPF answered N4Establish.
-    established: bool,
+    /// The UPF's uplink tunnel endpoint, once it answered N4Establish.
+    n3: Option<(Ipv4Addr, u32)>,
 }
 
 /// The SMF EO.
@@ -147,7 +147,7 @@ impl Smf {
             ue_ip,
             amf: to.0,
             waiting: Some(to.1),
-            established: false,
+            n3: None,
         };
         self.contexts.insert(id, context);
     }
@@ -163,17 +163,10 @@ impl Smf {
             self.remove(ctx, id);
             return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });
         }
-        c.established = true;
+        let n3 = (Ipv4Addr::from(result.n3_addr), result.ul_teid);
+        c.n3 = Some(n3);
         let (pti, slice, ue_ip) = (c.pti, c.slice, c.ue_ip);
-        let (ul, dl) = self.config.ambr_mbps;
-        let setup = n2sm::Setup {
-            upf: Ipv4Addr::from(result.n3_addr),
-            teid: result.ul_teid,
-            qfi: session::DEFAULT_QFI,
-            five_qi: self.config.five_qi,
-            ambr_bps: (u64::from(ul) * 1_000_000, u64::from(dl) * 1_000_000),
-        };
-        let n2 = match n2sm::setup_request_transfer(&setup) {
+        let n2 = match self.setup_transfer(n3) {
             Ok(n2) => n2,
             Err(e) => {
                 log!(self.log, ctx, Error, "{supi}: {e}");
@@ -188,45 +181,89 @@ impl Smf {
             Info,
             "{supi}: PDU session {psi} to {}, UE {ue_ip}, N3 {} TEID {:#x}",
             self.config.dnn,
-            setup.upf,
-            setup.teid
+            n3.0,
+            n3.1
         );
         self.create_result(ctx, to, psi, id, &n1, &n2);
+    }
+
+    /// The PDU Session Resource Setup Request Transfer for the UPF's tunnel `n3`.
+    fn setup_transfer(&self, n3: (Ipv4Addr, u32)) -> Result<Vec<u8>, String> {
+        let (ul, dl) = self.config.ambr_mbps;
+        n2sm::setup_request_transfer(&n2sm::Setup {
+            upf: n3.0,
+            teid: n3.1,
+            qfi: session::DEFAULT_QFI,
+            five_qi: self.config.five_qi,
+            ambr_bps: (u64::from(ul) * 1_000_000, u64::from(dl) * 1_000_000),
+        })
+    }
+
+    fn n4_modify(&mut self, ctx: &mut Context<'_>, id: u32, gnb: Ipv4Addr, teid: u32) -> librecn_scheduler::Result<()> {
+        let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
+            let mut m = ctx.alloc::<N4Modify>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
+            *m = N4Modify { seid: u64::from(id), gnb_addr: gnb.octets(), dl_teid: teid };
+            ctx.send(m)
+        });
+        if sent.is_err() {
+            self.upf.forget();
+        }
+        sent
     }
 
     fn on_update(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &UpdateSmContext) {
         let to = (msg.from(), msg.corr_id());
         let id = request.sm_ctx;
         let Some(c) = self.contexts.get_mut(&id) else {
-            return self.update_result(ctx, to, 0, Outcome::ContextNotFound);
+            if request.kind != update::DEACTIVATE {
+                self.update_result(ctx, to, 0, Outcome::ContextNotFound, &[]);
+            }
+            return;
         };
-        let (psi, supi) = (c.pdu_session_id, c.supi);
-        if request.n2_kind == n2::SETUP_FAILED {
+        let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3);
+        match (request.kind, n3) {
+            (update::DEACTIVATE, _) => {
+                log!(self.log, ctx, Info, "{supi}: PDU session {psi} deactivated (the UE is idle)");
+                c.amf = to.0;
+                let _ = self.n4_modify(ctx, id, Ipv4Addr::UNSPECIFIED, 0);
+                return;
+            }
+            (update::ACTIVATE, Some(n3)) => {
+                c.amf = to.0;
+                return match self.setup_transfer(n3) {
+                    Ok(n2) => {
+                        log!(self.log, ctx, Info, "{supi}: PDU session {psi} activated");
+                        self.update_result(ctx, to, psi, Outcome::Ok, &n2)
+                    }
+                    Err(e) => {
+                        log!(self.log, ctx, Error, "{supi}: {e}");
+                        self.update_result(ctx, to, psi, Outcome::Unavailable, &[])
+                    }
+                };
+            }
+            (update::ACTIVATE, None) => return self.update_result(ctx, to, psi, Outcome::ContextNotFound, &[]),
+            _ => {}
+        }
+        if request.kind == update::SETUP_FAILED {
             let why = n2sm::unsuccessful_transfer(request.n2.get());
             log!(self.log, ctx, Info, "{supi}: the gNB could not set PDU session {psi} up: {why}");
             self.remove(ctx, id);
-            return self.update_result(ctx, to, psi, Outcome::Ok);
+            return self.update_result(ctx, to, psi, Outcome::Ok, &[]);
         }
         let (gnb, teid) = match n2sm::setup_response_transfer(request.n2.get()) {
             Ok(tunnel) => tunnel,
             Err(e) => {
                 log!(self.log, ctx, Error, "{supi}: PDU session {psi}: {e}");
-                return self.update_result(ctx, to, psi, Outcome::InvalidRequest);
+                return self.update_result(ctx, to, psi, Outcome::InvalidRequest, &[]);
             }
         };
-        c.waiting = Some(to.1);
-        let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
-            let mut m = ctx.alloc::<N4Modify>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
-            *m = N4Modify { seid: u64::from(id), gnb_addr: gnb.octets(), dl_teid: teid };
-            ctx.send(m)
-        });
-        if let Err(e) = sent {
-            self.upf.forget();
+        (c.waiting, c.amf) = (Some(to.1), to.0);
+        if let Err(e) = self.n4_modify(ctx, id, gnb, teid) {
             log!(self.log, ctx, Error, "cannot reach the UPF: {e}");
             if let Some(c) = self.contexts.get_mut(&id) {
                 c.waiting = None;
             }
-            return self.update_result(ctx, to, psi, Outcome::Unavailable);
+            return self.update_result(ctx, to, psi, Outcome::Unavailable, &[]);
         }
         log!(self.log, ctx, Info, "{supi}: PDU session {psi} downlink to {gnb} TEID {teid:#x}");
     }
@@ -235,14 +272,15 @@ impl Smf {
         let Some(c) = self.contexts.get_mut(&msg.corr_id()) else { return };
         let Some(corr) = c.waiting.take() else { return };
         let (to, psi) = ((c.amf, corr), c.pdu_session_id);
-        self.update_result(ctx, to, psi, result.outcome());
+        self.update_result(ctx, to, psi, result.outcome(), &[]);
     }
 
-    fn update_result(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), psi: u8, outcome: Outcome) {
+    fn update_result(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), psi: u8, outcome: Outcome, n2: &[u8]) {
         let sent = ctx.alloc::<UpdateSmContextResult>(to.0).and_then(|r| {
             let mut r = r.with_corr_id(to.1).with_flags(flags::RESPONSE);
             r.pdu_session_id = psi;
             r.set_outcome(outcome);
+            r.n2.set(n2);
             ctx.send(r)
         });
         if let Err(e) = sent {
@@ -254,7 +292,7 @@ impl Smf {
     fn remove(&mut self, ctx: &mut Context<'_>, id: u32) {
         let Some(c) = self.contexts.remove(&id) else { return };
         self.pool.release(c.ue_ip);
-        if c.established
+        if c.n3.is_some()
             && let Some(upf) = self.upf.get(ctx)
         {
             let _ = ctx.send_value(upf, &N4Delete { seid: u64::from(id) });

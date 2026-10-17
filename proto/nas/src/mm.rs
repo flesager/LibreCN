@@ -3,7 +3,9 @@
 //! A plain 5GMM message is the extended protocol discriminator, a security
 //! header type of 0, the message type, then the IEs.
 
-use crate::ie::{Dnn, Guti, IdentityType, MobileIdentity, NgKsi, Nssai, SnssaiList, Tai, UeSecurityCapability};
+use crate::ie::{
+    Dnn, Guti, IdentityType, MobileIdentity, NgKsi, Nssai, SessionSet, SnssaiList, Tai, UeSecurityCapability,
+};
 use crate::{EPD_5GMM, Error, Reader, Result, Writer};
 
 /// Message types (§9.7).
@@ -16,6 +18,7 @@ pub mod kind {
     pub const DEREGISTRATION_ACCEPT_UE: u8 = 0x46;
     pub const SERVICE_REQUEST: u8 = 0x4c;
     pub const SERVICE_REJECT: u8 = 0x4d;
+    pub const SERVICE_ACCEPT: u8 = 0x4e;
     pub const AUTHENTICATION_REQUEST: u8 = 0x56;
     pub const AUTHENTICATION_RESPONSE: u8 = 0x57;
     pub const AUTHENTICATION_REJECT: u8 = 0x58;
@@ -41,6 +44,7 @@ pub fn name(kind: u8) -> &'static str {
         kind::DEREGISTRATION_ACCEPT_UE => "Deregistration Accept",
         kind::SERVICE_REQUEST => "Service Request",
         kind::SERVICE_REJECT => "Service Reject",
+        kind::SERVICE_ACCEPT => "Service Accept",
         kind::AUTHENTICATION_REQUEST => "Authentication Request",
         kind::AUTHENTICATION_RESPONSE => "Authentication Response",
         kind::AUTHENTICATION_REJECT => "Authentication Reject",
@@ -124,39 +128,35 @@ impl RegistrationRequest<'_> {
     }
 }
 
+/// The IEs of a Service Request (§8.2.16) the AMF uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ServiceRequest<'a> {
+    pub ngksi: NgKsi,
+    /// Service type (§9.11.3.50): 0 signalling, 1 data, 2 mobile terminated...
+    pub service_type: u8,
+    pub identity: MobileIdentity<'a>,
+    /// Sessions with uplink data to send: their user plane to reactivate.
+    pub uplink_data: SessionSet,
+    /// Sessions the UE holds.
+    pub sessions: Option<SessionSet>,
+    /// The whole request, when this one carries only the cleartext IEs (§4.4.6).
+    pub container: Option<&'a [u8]>,
+}
+
 /// The uplink 5GMM messages the AMF handles, decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Uplink<'a> {
     RegistrationRequest(RegistrationRequest<'a>),
     RegistrationComplete,
-    AuthenticationResponse {
-        res_star: Option<&'a [u8]>,
-    },
-    AuthenticationFailure {
-        cause: u8,
-        auts: Option<&'a [u8; 14]>,
-    },
-    SecurityModeComplete {
-        imeisv: Option<MobileIdentity<'a>>,
-        container: Option<&'a [u8]>,
-    },
-    SecurityModeReject {
-        cause: u8,
-    },
-    IdentityResponse {
-        identity: MobileIdentity<'a>,
-    },
-    DeregistrationRequest {
-        switch_off: bool,
-        ngksi: NgKsi,
-        identity: MobileIdentity<'a>,
-    },
+    AuthenticationResponse { res_star: Option<&'a [u8]> },
+    AuthenticationFailure { cause: u8, auts: Option<&'a [u8; 14]> },
+    SecurityModeComplete { imeisv: Option<MobileIdentity<'a>>, container: Option<&'a [u8]> },
+    SecurityModeReject { cause: u8 },
+    IdentityResponse { identity: MobileIdentity<'a> },
+    DeregistrationRequest { switch_off: bool, ngksi: NgKsi, identity: MobileIdentity<'a> },
     UlNasTransport(UlNasTransport<'a>),
-    Status {
-        cause: u8,
-    },
-    /// Understood but not decoded: Service Request.
-    Other(u8),
+    ServiceRequest(ServiceRequest<'a>),
+    Status { cause: u8 },
 }
 
 impl<'a> Uplink<'a> {
@@ -213,7 +213,7 @@ impl<'a> Uplink<'a> {
             }
             kind::STATUS => Uplink::Status { cause: r.u8()? },
             kind::UL_NAS_TRANSPORT => Uplink::UlNasTransport(ul_nas_transport(r)?),
-            kind::SERVICE_REQUEST => Uplink::Other(kind),
+            kind::SERVICE_REQUEST => Uplink::ServiceRequest(service_request(r)?),
             _ => return Err(Error::UnknownMessage(kind)),
         };
         Ok(message)
@@ -231,8 +231,8 @@ impl<'a> Uplink<'a> {
             Uplink::IdentityResponse { .. } => kind::IDENTITY_RESPONSE,
             Uplink::DeregistrationRequest { .. } => kind::DEREGISTRATION_REQUEST_UE,
             Uplink::UlNasTransport(_) => kind::UL_NAS_TRANSPORT,
+            Uplink::ServiceRequest(_) => kind::SERVICE_REQUEST,
             Uplink::Status { .. } => kind::STATUS,
-            Uplink::Other(kind) => *kind,
         }
     }
 }
@@ -260,6 +260,27 @@ fn registration_request(mut r: Reader<'_>) -> Result<RegistrationRequest<'_>> {
         match iei {
             0x2e => request.capability = Some(UeSecurityCapability::decode(v)?),
             0x2f => request.requested_nssai = Some(v),
+            0x71 => request.container = Some(v),
+            _ => {}
+        }
+    }
+    Ok(request)
+}
+
+fn service_request(mut r: Reader<'_>) -> Result<ServiceRequest<'_>> {
+    let octet = r.u8()?;
+    let mut request = ServiceRequest {
+        ngksi: NgKsi::from_nibble(octet & 0x0f),
+        service_type: octet >> 4,
+        identity: MobileIdentity::decode(r.lve()?)?,
+        uplink_data: SessionSet::default(),
+        sessions: None,
+        container: None,
+    };
+    while let Some((iei, v)) = r.optional(&[])? {
+        match iei {
+            0x40 => request.uplink_data = SessionSet::decode(v)?,
+            0x50 => request.sessions = Some(SessionSet::decode(v)?),
             0x71 => request.container = Some(v),
             _ => {}
         }
@@ -320,6 +341,10 @@ pub enum Downlink<'a> {
     ServiceReject {
         cause: u8,
     },
+    /// With the sessions the network holds (the UE releases the others).
+    ServiceAccept {
+        sessions: SessionSet,
+    },
     Status {
         cause: u8,
     },
@@ -346,6 +371,7 @@ impl Downlink<'_> {
             Downlink::RegistrationReject { .. } => kind::REGISTRATION_REJECT,
             Downlink::DeregistrationAccept => kind::DEREGISTRATION_ACCEPT_UE,
             Downlink::ServiceReject { .. } => kind::SERVICE_REJECT,
+            Downlink::ServiceAccept { .. } => kind::SERVICE_ACCEPT,
             Downlink::Status { .. } => kind::STATUS,
             Downlink::DlNasTransport { .. } => kind::DL_NAS_TRANSPORT,
         }
@@ -382,6 +408,7 @@ impl Downlink<'_> {
             Downlink::RegistrationReject { cause } | Downlink::ServiceReject { cause } | Downlink::Status { cause } => {
                 w.u8(cause)
             }
+            Downlink::ServiceAccept { sessions } => w.tlv(0x50, |w| w.bytes(&sessions.octets())),
             Downlink::DlNasTransport { pdu_session_id, container, cause } => {
                 w.u8(PAYLOAD_N1_SM);
                 w.lve(|w| w.bytes(container));
@@ -434,7 +461,12 @@ mod tests {
             panic!()
         };
         assert_eq!((ngksi.value, g.tmsi, g.amf_set, g.amf_pointer), (0, 0x01020304, 1, 0));
-        assert_eq!(Uplink::decode(&hex("7e004c")).unwrap(), Uplink::Other(kind::SERVICE_REQUEST));
+        // UERANSIM's Service Request from idle, cleartext IEs: ngKSI 0, data, 5G-S-TMSI.
+        let sr = hex("7e004c 10 0007 f4004001020304 4002 0200 5002 0200 7100 027e00");
+        let Uplink::ServiceRequest(r) = Uplink::decode(&sr).unwrap() else { panic!() };
+        assert_eq!((r.ngksi.value, r.service_type), (0, 1));
+        assert!(matches!(r.identity, MobileIdentity::STmsi { tmsi: 0x01020304, .. }));
+        assert_eq!((r.uplink_data.0, r.sessions, r.container), (0x02, Some(SessionSet(0x02)), Some(&hex("7e00")[..])));
         // UERANSIM's PDU session request: N1 SM container, PSI 1, initial, SST 1, DNN "internet".
         let ul = hex("7e0067 01 0003 2e0101 12 01 81 22 01 01 25 09 08696e7465726e6574");
         let Uplink::UlNasTransport(t) = Uplink::decode(&ul).unwrap() else { panic!() };
@@ -476,6 +508,10 @@ mod tests {
         assert_eq!(encode(Downlink::RegistrationReject { cause: 111 }, &mut buf), "7e00446f");
         assert_eq!(encode(Downlink::IdentityRequest(IdentityType::Suci), &mut buf), "7e005b01");
         assert_eq!(encode(Downlink::DeregistrationAccept, &mut buf), "7e0046");
+        assert_eq!(
+            encode(Downlink::ServiceAccept { sessions: SessionSet(0x02) }, &mut buf),
+            "7e004e 50020200".replace(' ', "")
+        );
         let n1 = hex("2e0101c3 1b");
         let dl = Downlink::DlNasTransport { pdu_session_id: 1, container: &n1, cause: Some(90) };
         assert_eq!(encode(dl, &mut buf), h("7e0068 01 0005 2e0101c31b 1201 585a"));

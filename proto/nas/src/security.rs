@@ -101,6 +101,13 @@ impl SecurityContext {
         self.ul_count.saturating_sub(1)
     }
 
+    /// Deciphers, in place, the NAS message container of the initial message
+    /// just accepted by [`unprotect`](Self::unprotect): the UE ciphered the
+    /// whole message with that message's count (§4.4.6).
+    pub fn decipher_container(&self, container: &mut [u8]) {
+        self.cipher(self.last_uplink_count(), Direction::Uplink, container);
+    }
+
     fn cipher(&self, count: u32, direction: Direction, data: &mut [u8]) {
         if self.ciphering == NEA2 {
             nea2(&self.k_enc, count, BEARER, direction, data);

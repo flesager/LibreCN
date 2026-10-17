@@ -5,6 +5,9 @@
 //! AMF ◀─ CreateSmContextResult (N1 accept + N2 setup) ── SMF ◀─ N4EstablishResult (N3 tunnel)
 //! AMF ── UpdateSmContext (N2: the gNB's tunnel) ───────▶ SMF ── N4Modify ─────▶ UPF
 //! AMF ◀─ UpdateSmContextResult ───────────────────────── SMF ◀─ N4ModifyResult
+//! AMF ── UpdateSmContext (deactivate: the UE is idle) ─▶ SMF ── N4Modify ─────▶ UPF (no downlink)
+//! AMF ── UpdateSmContext (activate: the UE is back) ───▶ SMF
+//! AMF ◀─ UpdateSmContextResult (N2 setup again) ──────── SMF
 //! AMF ── ReleaseSmContext ─────────────────────────────▶ SMF ── N4Delete ─────▶ UPF
 //! ```
 //!
@@ -89,22 +92,27 @@ impl MsgBody for CreateSmContextResult {
     const MSG_ID: u32 = id(family::PDU_SESSION, 2);
 }
 
-/// What an [`UpdateSmContext`]'s N2 container is.
-pub mod n2 {
-    /// PDU Session Resource Setup Response Transfer.
+/// What an [`UpdateSmContext`] is about.
+pub mod update {
+    /// N2: PDU Session Resource Setup Response Transfer.
     pub const SETUP_RESPONSE: u8 = 1;
-    /// PDU Session Resource Setup Unsuccessful Transfer.
+    /// N2: PDU Session Resource Setup Unsuccessful Transfer.
     pub const SETUP_FAILED: u8 = 2;
+    /// The UE went idle: no downlink tunnel (upCnxState DEACTIVATED). No answer.
+    pub const DEACTIVATE: u8 = 3;
+    /// The UE is back: N2 to set the session up again (upCnxState ACTIVATING).
+    pub const ACTIVATE: u8 = 4;
 }
 
-/// AMF → SMF: Nsmf_PDUSession_UpdateSMContext with the gNB's N2 answer.
+/// AMF → SMF: Nsmf_PDUSession_UpdateSMContext.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct UpdateSmContext {
     pub sm_ctx: u32,
-    /// [`n2`] kind.
-    pub n2_kind: u8,
+    /// [`update`] kind.
+    pub kind: u8,
     _pad: u8,
+    /// The gNB's N2 answer, for the setup kinds.
     pub n2: Container,
 }
 
@@ -112,12 +120,13 @@ impl MsgBody for UpdateSmContext {
     const MSG_ID: u32 = id(family::PDU_SESSION, 3);
 }
 
-/// SMF → AMF.
+/// SMF → AMF; with N2 (PDU Session Resource Setup Request Transfer) when activating.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct UpdateSmContextResult {
     outcome: u8,
     pub pdu_session_id: u8,
+    pub n2: Container,
 }
 
 impl MsgBody for UpdateSmContextResult {
@@ -170,7 +179,8 @@ impl MsgBody for N4EstablishResult {
     const MSG_ID: u32 = id(family::PDU_SESSION, 7);
 }
 
-/// SMF → UPF: the downlink tunnel endpoint, the gNB's.
+/// SMF → UPF: the downlink tunnel endpoint, the gNB's; TEID 0: none (the
+/// UE is idle, downlink packets are dropped).
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct N4Modify {

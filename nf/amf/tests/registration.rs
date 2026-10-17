@@ -226,6 +226,19 @@ impl Ue {
         gnb.send(0, self.stream, NGAP_PPID, &uplink_nas(self.amf_id, 1, nas)).unwrap();
     }
 
+    /// An initial message from idle (§4.4.6): `cleartext` IEs, the whole
+    /// message ciphered in its container, integrity protected.
+    fn initial(&mut self, cleartext: &[u8], whole: &[u8]) -> Vec<u8> {
+        let mut container = whole.to_vec();
+        nea2(&self.k_enc, self.ul, 1, Direction::Uplink, &mut container);
+        let plain = [cleartext, &[0x71], &(container.len() as u16).to_be_bytes(), &container].concat();
+        let mut pdu = [&[0x7e, 1, 0, 0, 0, 0, self.ul as u8][..], &plain].concat();
+        let mac = nia2(&self.k_int, self.ul, 1, Direction::Uplink, &pdu[6..]);
+        pdu[2..6].copy_from_slice(&mac);
+        self.ul += 1;
+        pdu
+    }
+
     /// Protects (header type 2 or 4: ciphered) and sends.
     fn uplink_protected(&mut self, gnb: &SctpSocket, header: u8, plain: &[u8]) {
         let mut pdu = [&[0x7e, header, 0, 0, 0, 0, self.ul as u8][..], plain].concat();
@@ -301,7 +314,7 @@ fn a_ue_registers_then_deregisters() {
 }
 
 #[test]
-fn a_registered_ue_gets_a_pdu_session_released_with_it() {
+fn a_registered_ue_gets_a_pdu_session_kept_when_its_gnb_goes() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();
     ue.register(&mut s, &gnb);
@@ -329,17 +342,79 @@ fn a_registered_ue_gets_a_pdu_session_released_with_it() {
     assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x77"), "{:#?}", s.log.lines());
     assert!(s.logged("amf-1", &format!("UE {}: PDU session 1 set up", ue.amf_id)));
 
-    // The UE goes with its gNB: the session goes at the SMF and the UPF.
+    // Its gNB goes: the UE is idle, its session kept, the downlink off.
     drop(gnb);
-    let released = "imsi-208930000000001: PDU session 1 released, 0 left";
     for _ in 0..20 {
-        if s.logged("smf", released) {
+        if s.logged("upf", "downlink deactivated") {
             break;
         }
         s.pump();
     }
-    assert!(s.logged("smf", released), "{:#?}", s.log.lines());
-    assert!(s.logged("upf", "deleted, 0 left"));
+    assert!(s.logged("amf-1", "idle (5G-TMSI"), "{:#?}", s.log.lines());
+    assert!(s.logged("smf", "imsi-208930000000001: PDU session 1 deactivated (the UE is idle)"));
+    assert!(!s.logged("smf", "released"), "the session stays");
+}
+
+fn release_request(amf_id: u64, ran_id: u32) -> Vec<u8> {
+    let ie =
+        |id: ProtocolIEID, value: Any| AnonymousUEContextReleaseRequestProtocolIEs::new(id, Criticality::reject, value);
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)).unwrap()),
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)).unwrap()),
+        ie(ID_CAUSE, wrap(&Cause::radioNetwork(CauseRadioNetwork::user_inactivity)).unwrap()),
+    ];
+    let message = wrap(&UEContextReleaseRequest::new(UEContextReleaseRequestProtocolIEs(ies))).unwrap();
+    encode(&NGAPPDU::initiatingMessage(InitiatingMessage::new(
+        ID_UECONTEXT_RELEASE_REQUEST,
+        Criticality::ignore,
+        message,
+    )))
+    .unwrap()
+}
+
+#[test]
+fn an_idle_ue_comes_back_and_its_session_is_reactivated() {
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    let accept = ue.register(&mut s, &gnb);
+    let tmsi = accept[15..19].to_vec();
+    let n1 = hex("2e 01 01 c1 ffff 91 a1");
+    let transport = [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81")].concat();
+    ue.uplink_protected(&gnb, 2, &transport);
+    ue.downlink(&mut s, &gnb);
+    gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, 1, 0x77)).unwrap();
+    s.pump();
+
+    // The gNB releases the UE: it goes idle, its session's downlink off.
+    let first = ue.amf_id;
+    gnb.send(0, ue.stream, NGAP_PPID, &release_request(first, 1)).unwrap();
+    let (_, pdu) = s.receive(&gnb);
+    let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
+    gnb.send(0, ue.stream, NGAP_PPID, &release_complete(first, 1)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", &format!("UE {first}: idle")), "{:#?}", s.log.lines());
+    assert!(s.logged("upf", "downlink deactivated"));
+
+    // Back with a Service Request (data for session 1) on a new RAN id.
+    let cleartext = [&hex("7e004c 10 0007 f4 0040")[..], &tmsi].concat();
+    let whole = [&cleartext[..], &hex("4002 0200 5002 0200")].concat();
+    let request = ue.initial(&cleartext, &whole);
+    gnb.send(0, 2, NGAP_PPID, &initial_ue_message(2, &request)).unwrap();
+    let (carrier, service_accept) = ue.downlink(&mut s, &gnb);
+    assert!(matches!(carrier, Carrier::ContextSetup), "{carrier:?}");
+    assert_eq!(service_accept, hex("7e004e 50020200"), "Service Accept, session 1 kept");
+    assert_ne!(ue.amf_id, first, "a new N2 context");
+    gnb.send(0, ue.stream, NGAP_PPID, &context_setup_response(ue.amf_id, 2)).unwrap();
+    let (stream, pdu) = s.receive(&gnb);
+    let setup: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
+    let list =
+        &setup.protocol_ies.0.iter().find(|ie| ie.id == ID_PDUSESSION_RESOURCE_SETUP_LIST_SUREQ.0).unwrap().value;
+    let item = open::<PDUSessionResourceSetupListSUReq>(list).unwrap().0.remove(0);
+    assert!(item.p_dusession_nas_pdu.is_none(), "a reactivation: no NAS");
+    gnb.send(0, stream, NGAP_PPID, &session_setup_response(ue.amf_id, 2, 1, 0x88)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", "resumed after"), "{:#?}", s.log.lines());
+    assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x88"), "{:#?}", s.log.lines());
 }
 
 #[test]
