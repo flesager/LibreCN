@@ -17,6 +17,7 @@
 //! smf = "smf"                   # the SMF's EO name
 //! ciphering = ["NEA2", "NEA0"]  # NAS ciphering by preference
 //! t3512_s = 3240                # periodic registration (54 min: sent as 1 h)
+//! network_name = { full = "LibreCN", short = "LibreCN" }   # optional: shown by the UEs
 //! ```
 //!
 //! Every field is optional; the defaults are test values matching UERANSIM's
@@ -35,6 +36,13 @@ use serde::Deserialize;
 struct PlmnParams {
     mcc: String,
     mnc: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NameParams {
+    full: String,
+    short: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +67,7 @@ struct Params {
     smf: String,
     ciphering: Vec<String>,
     t3512_s: u32,
+    network_name: Option<NameParams>,
 }
 
 impl Default for Params {
@@ -76,6 +85,7 @@ impl Default for Params {
             smf: "smf".into(),
             ciphering: vec!["NEA2".into(), "NEA0".into()],
             t3512_s: 3240,
+            network_name: None,
         }
     }
 }
@@ -110,6 +120,8 @@ pub struct AmfConfig {
     /// T3512, the periodic registration timer given to the UEs, as sent (a
     /// GPRS timer 3 value: the parameter rounded up to what it can say).
     pub t3512: u8,
+    /// The network's full and short names, sent to each UE once registered.
+    pub network_name: Option<(String, Option<String>)>,
 }
 
 impl AmfConfig {
@@ -139,6 +151,13 @@ impl AmfConfig {
         }
         if p.t3512_s < 2 {
             return Err("t3512_s: 2 s at least".into());
+        }
+        if let Some(n) = &p.network_name
+            && (n.full.is_empty()
+                || n.full.len() > 40
+                || n.short.as_ref().is_some_and(|s| s.is_empty() || s.len() > 20))
+        {
+            return Err("network_name: full of 1 to 40 characters, short of 1 to 20".into());
         }
         let slices = p
             .slices
@@ -171,6 +190,7 @@ impl AmfConfig {
             smf: p.smf,
             ciphering,
             t3512: librecn_nas::ie::gprs_timer_3(p.t3512_s),
+            network_name: p.network_name.map(|n| (n.full, n.short)),
         })
     }
 

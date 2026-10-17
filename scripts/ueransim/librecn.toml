@@ -12,6 +12,8 @@ listen = "127.0.0.1:0"
 [[nf]]
 kind = "amf"
 name = "amf-1"
+[nf.params]
+network_name = { full = "LibreCN test network", short = "LibreCN" }
 
 [[nf]]
 kind = "ausf"

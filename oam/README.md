@@ -86,6 +86,7 @@ server answers 503 at once. Today:
 | SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
 | AMF | `GET ues` | `{"connected", "registered", "idle", "ues": [...]}`, the first 64 UEs (`supi`, `cm`, `state`, `tmsi`, `sessions`) |
 | AMF | `GET ues/{supi}` | that UE, or 404 |
+| AMF | `POST ues/{supi}/guti` | a new 5G-GUTI for the connected UE (Configuration Update Command, acknowledged): 202, 409 if idle or in another procedure, 404 |
 | AMF | `DELETE ues/{supi}`, body `{"reregister": true}` optional | the network deregisters the UE: 202 if it is connected (Deregistration Request), 200 if idle (locally), 409 if in another procedure, 404 |
 
 The GUI's Subscribers view uses them.

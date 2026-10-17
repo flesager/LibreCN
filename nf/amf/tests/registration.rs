@@ -626,6 +626,11 @@ fn an_unknown_subscriber_is_rejected() {
     assert!(s.logged("udm", "no authentication vector for suci-0-208-93-0000-0-0-0000000009: UserNotFound"));
 }
 
+/// A 5G-TMSI as the web API shows it.
+fn tmsi_text(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// A web API request to the AMF; its status and JSON.
 fn manage(s: &mut Setup, ids: &Ids, method: Method, path: &str, body: &str) -> (u16, serde_json::Value) {
     let mut request = Manage::new_zeroed();
@@ -835,4 +840,25 @@ fn downlink_data_for_a_connected_ue_whose_session_is_down_sets_it_up_without_pag
     s.pump();
     assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x9a"), "{:#?}", s.log.lines());
     assert!(!s.logged("smf", "released"), "the session lives");
+}
+
+#[test]
+fn the_web_api_gives_a_connected_ue_a_new_5g_guti() {
+    let (mut s, gnb, ids) = core_and_ids(1024);
+    let mut ue = Ue::default();
+    let accept = ue.register(&mut s, &gnb);
+    let old = tmsi_text(&accept[15..19]);
+    let (status, _) = manage(&mut s, &ids, Method::Post, "ues/imsi-208930000000001/guti", "");
+    assert_eq!(status, 202);
+    let (carrier, command) = ue.downlink(&mut s, &gnb);
+    assert!(matches!(carrier, Carrier::DownlinkNas));
+    assert_eq!(command[..4], hex("7e0054d1")[..], "Configuration Update Command, acknowledgement requested");
+    let new = tmsi_text(&command[command.len() - 4..]);
+    assert_ne!(new, old);
+    ue.uplink_protected(&gnb, 2, &hex("7e0055"));
+    s.pump();
+    let (_, listed) = manage(&mut s, &ids, Method::Get, "ues/imsi-208930000000001", "");
+    assert_eq!(listed["tmsi"], new, "the new 5G-GUTI, once acknowledged");
+    assert!(s.logged("amf-1", "5G-GUTI reallocated"), "{:#?}", s.log.lines());
+    assert_eq!(manage(&mut s, &ids, Method::Post, "ues/imsi-208930000000009/guti", "").0, 404);
 }

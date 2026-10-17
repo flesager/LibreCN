@@ -4,7 +4,9 @@
 //! - `GET ues/{supi}`: one UE;
 //! - `DELETE ues/{supi}`, body `{"reregister": true}` optional: the network
 //!   deregisters the UE (TS 23.502 §4.2.2.3.3). A connected UE is told
-//!   (Deregistration Request); an idle one is deregistered locally.
+//!   (Deregistration Request); an idle one is deregistered locally;
+//! - `POST ues/{supi}/guti`: a new 5G-GUTI for the connected UE
+//!   (Configuration Update Command, TS 24.501 §5.4.4).
 
 use librecn_common::log;
 use librecn_common::manage::{Manage, Method, send_reply};
@@ -50,6 +52,9 @@ impl Amf {
                     None => (404, json!({ "error": format!("no UE {supi:?}") })),
                 }
             }
+            (Some(Method::Post), ("ues", rest)) if rest.ends_with("/guti") => {
+                self.reallocate_guti(ctx, &rest[..rest.len() - "/guti".len()])
+            }
             (Some(Method::Delete), ("ues", supi)) => {
                 let body: Value = serde_json::from_str(request.body()).unwrap_or(Value::Null);
                 let reregister = body.get("reregister").and_then(Value::as_bool).unwrap_or(false);
@@ -59,6 +64,23 @@ impl Amf {
         };
         if let Err(e) = send_reply(ctx, msg, status, &answer.to_string()) {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
+        }
+    }
+
+    /// A new 5G-GUTI for connected UE `supi`: an HTTP status and answer.
+    fn reallocate_guti(&mut self, ctx: &mut Context<'_>, supi: &str) -> (u16, Value) {
+        let connected = self.ues.iter().find(|ue| ue.mm.supi().is_some_and(|s| s.as_str() == supi)).map(|ue| ue.amf_id);
+        let Some(amf_id) = connected else {
+            let idle = self.idle.values().any(|i| i.supi().is_some_and(|s| s.as_str() == supi));
+            let why = if idle { "is idle" } else { "is not connected" };
+            return (if idle { 409 } else { 404 }, json!({ "error": format!("{supi} {why}") }));
+        };
+        let mut started = false;
+        self.with_mm(ctx, amf_id, |mm, _, _, port| started = mm.reallocate_guti(port));
+        if started {
+            (202, json!({ "reallocating": supi }))
+        } else {
+            (409, json!({ "error": format!("{supi} is in another procedure") }))
         }
     }
 

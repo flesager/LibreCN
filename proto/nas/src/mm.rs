@@ -21,6 +21,8 @@ pub mod kind {
     pub const SERVICE_REQUEST: u8 = 0x4c;
     pub const SERVICE_REJECT: u8 = 0x4d;
     pub const SERVICE_ACCEPT: u8 = 0x4e;
+    pub const CONFIGURATION_UPDATE_COMMAND: u8 = 0x54;
+    pub const CONFIGURATION_UPDATE_COMPLETE: u8 = 0x55;
     pub const AUTHENTICATION_REQUEST: u8 = 0x56;
     pub const AUTHENTICATION_RESPONSE: u8 = 0x57;
     pub const AUTHENTICATION_REJECT: u8 = 0x58;
@@ -49,6 +51,8 @@ pub fn name(kind: u8) -> &'static str {
         kind::SERVICE_REQUEST => "Service Request",
         kind::SERVICE_REJECT => "Service Reject",
         kind::SERVICE_ACCEPT => "Service Accept",
+        kind::CONFIGURATION_UPDATE_COMMAND => "Configuration Update Command",
+        kind::CONFIGURATION_UPDATE_COMPLETE => "Configuration Update Complete",
         kind::AUTHENTICATION_REQUEST => "Authentication Request",
         kind::AUTHENTICATION_RESPONSE => "Authentication Response",
         kind::AUTHENTICATION_REJECT => "Authentication Reject",
@@ -180,6 +184,8 @@ pub enum Uplink<'a> {
     },
     /// The UE accepts the network's deregistration.
     DeregistrationAccept,
+    /// The UE took the new configuration (acknowledgement requested).
+    ConfigurationUpdateComplete,
     UlNasTransport(UlNasTransport<'a>),
     ServiceRequest(ServiceRequest<'a>),
     Status {
@@ -240,6 +246,7 @@ impl<'a> Uplink<'a> {
                 }
             }
             kind::DEREGISTRATION_ACCEPT_NETWORK => Uplink::DeregistrationAccept,
+            kind::CONFIGURATION_UPDATE_COMPLETE => Uplink::ConfigurationUpdateComplete,
             kind::STATUS => Uplink::Status { cause: r.u8()? },
             kind::UL_NAS_TRANSPORT => Uplink::UlNasTransport(ul_nas_transport(r)?),
             kind::SERVICE_REQUEST => Uplink::ServiceRequest(service_request(r)?),
@@ -260,6 +267,7 @@ impl<'a> Uplink<'a> {
             Uplink::IdentityResponse { .. } => kind::IDENTITY_RESPONSE,
             Uplink::DeregistrationRequest { .. } => kind::DEREGISTRATION_REQUEST_UE,
             Uplink::DeregistrationAccept => kind::DEREGISTRATION_ACCEPT_NETWORK,
+            Uplink::ConfigurationUpdateComplete => kind::CONFIGURATION_UPDATE_COMPLETE,
             Uplink::UlNasTransport(_) => kind::UL_NAS_TRANSPORT,
             Uplink::ServiceRequest(_) => kind::SERVICE_REQUEST,
             Uplink::Status { .. } => kind::STATUS,
@@ -384,6 +392,14 @@ pub enum Downlink<'a> {
     ServiceReject {
         cause: u8,
     },
+    /// Generic UE configuration update (§8.2.19): a new 5G-GUTI, the
+    /// network's names; `acknowledge`: the UE answers Complete.
+    ConfigurationUpdateCommand {
+        acknowledge: bool,
+        guti: Option<Guti>,
+        full_name: Option<&'a str>,
+        short_name: Option<&'a str>,
+    },
     /// With the sessions the network holds (the UE releases the others).
     ServiceAccept {
         sessions: SessionSet,
@@ -398,6 +414,15 @@ pub enum Downlink<'a> {
         container: &'a [u8],
         cause: Option<u8>,
     },
+}
+
+/// A network name (TS 24.008 §10.5.3.5a), coded in UCS-2: no country
+/// initials, no spare bits.
+fn network_name(name: &str, w: &mut Writer<'_>) {
+    w.u8(0x90);
+    for unit in name.encode_utf16() {
+        w.bytes(&unit.to_be_bytes());
+    }
 }
 
 /// ABBA (§9.11.3.10): 0x0000 for this release of TS 33.501.
@@ -415,6 +440,7 @@ impl Downlink<'_> {
             Downlink::DeregistrationAccept => kind::DEREGISTRATION_ACCEPT_UE,
             Downlink::DeregistrationRequest { .. } => kind::DEREGISTRATION_REQUEST_NETWORK,
             Downlink::ServiceReject { .. } => kind::SERVICE_REJECT,
+            Downlink::ConfigurationUpdateCommand { .. } => kind::CONFIGURATION_UPDATE_COMMAND,
             Downlink::ServiceAccept { .. } => kind::SERVICE_ACCEPT,
             Downlink::Status { .. } => kind::STATUS,
             Downlink::DlNasTransport { .. } => kind::DL_NAS_TRANSPORT,
@@ -457,6 +483,18 @@ impl Downlink<'_> {
                 w.u8(cause)
             }
             Downlink::ServiceAccept { sessions } => w.tlv(0x50, |w| w.bytes(&sessions.octets())),
+            Downlink::ConfigurationUpdateCommand { acknowledge, guti, full_name, short_name } => {
+                // Configuration update indication (§9.11.3.18): ACK requested.
+                w.u8(0xd0 | u8::from(acknowledge));
+                if let Some(guti) = guti {
+                    w.tlve(0x77, |w| guti.encode(w));
+                }
+                for (iei, name) in [(0x43, full_name), (0x45, short_name)] {
+                    if let Some(name) = name {
+                        w.tlv(iei, |w| network_name(name, w));
+                    }
+                }
+            }
             // De-registration type (§9.11.3.20): not switch off, re-registration
             // required or not, 3GPP access; the spare half octet.
             Downlink::DeregistrationRequest { reregister } => w.u8(u8::from(reregister) << 2 | 0x01),
@@ -528,6 +566,7 @@ mod tests {
         assert_eq!(t.snssai, Some(Snssai { sst: 1, sd: None }));
         assert!(t.dnn.unwrap().is("internet"));
         assert_eq!(Uplink::decode(&hex("7e0048")), Ok(Uplink::DeregistrationAccept));
+        assert_eq!(Uplink::decode(&hex("7e0055")), Ok(Uplink::ConfigurationUpdateComplete));
         assert_eq!(Uplink::decode(&hex("7e0099")), Err(Error::UnknownMessage(0x99)));
         assert_eq!(Uplink::decode(&hex("7e0041 01 0005 01")), Err(Error::Truncated));
         assert_eq!(Uplink::decode(&hex("2e0041")), Err(Error::Invalid("plain 5GMM header")));
@@ -566,6 +605,21 @@ mod tests {
         assert_eq!(encode(Downlink::RegistrationReject { cause: 111 }, &mut buf), "7e00446f");
         assert_eq!(encode(Downlink::IdentityRequest(IdentityType::Suci), &mut buf), "7e005b01");
         assert_eq!(encode(Downlink::DeregistrationAccept, &mut buf), "7e0046");
+        let reallocation = Downlink::ConfigurationUpdateCommand {
+            acknowledge: true,
+            guti: Some(guti),
+            full_name: None,
+            short_name: None,
+        };
+        assert_eq!(encode(reallocation, &mut buf), h("7e0054 d1 77000b f299f907 01 0040 01020304"));
+        let names = Downlink::ConfigurationUpdateCommand {
+            acknowledge: false,
+            guti: None,
+            full_name: Some("LibreCN"),
+            short_name: Some("LC"),
+        };
+        let full = "004c 0069 0062 0072 0065 0043 004e".replace(' ', "");
+        assert_eq!(encode(names, &mut buf), h(&format!("7e0054 d0 430f90{full} 4505 90004c0043")), "UCS-2 names");
         assert_eq!(encode(Downlink::DeregistrationRequest { reregister: true }, &mut buf), "7e004705");
         assert_eq!(encode(Downlink::DeregistrationRequest { reregister: false }, &mut buf), "7e004701");
         assert_eq!(

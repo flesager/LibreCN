@@ -149,6 +149,7 @@ fn timer_name(message: &Downlink<'_>) -> &'static str {
         Downlink::IdentityRequest(_) => "T3570",
         Downlink::RegistrationAccept { .. } => "T3550",
         Downlink::DeregistrationRequest { .. } => "T3522",
+        Downlink::ConfigurationUpdateCommand { .. } => "T3555",
         _ => "T3560",
     }
 }
@@ -176,6 +177,8 @@ pub struct Mm {
     /// A registration from idle without follow-on request: once complete,
     /// the UE goes back to idle (§5.5.1.3.4).
     release_when_complete: bool,
+    /// The 5G-GUTI being given (Configuration Update Command sent).
+    new_guti: Option<Guti>,
 }
 
 /// The type of an initial message (plain or integrity protected), if it is one.
@@ -333,6 +336,7 @@ impl Mm {
                 | (State::SecurityMode, Uplink::SecurityModeComplete { .. } | Uplink::SecurityModeReject { .. })
                 | (State::Accepting, Uplink::RegistrationComplete)
                 | (State::Deregistering, Uplink::DeregistrationAccept)
+                | (State::Registered, Uplink::ConfigurationUpdateComplete)
                 | (_, Uplink::RegistrationRequest(_) | Uplink::DeregistrationRequest { .. })
         );
         if answers && self.retransmit.take().is_some() {
@@ -389,6 +393,15 @@ impl Mm {
                 if let (Some(supi), Some(guti)) = (&self.supi, &self.guti) {
                     fx.log(Level::Info, format_args!("registered: {supi}, {guti}"));
                 }
+                if let Some((full, short)) = &config.network_name {
+                    let names = Downlink::ConfigurationUpdateCommand {
+                        acknowledge: false,
+                        guti: None,
+                        full_name: Some(full),
+                        short_name: short.as_deref(),
+                    };
+                    self.send(names, fx);
+                }
                 if std::mem::take(&mut self.release_when_complete) {
                     fx.log(Level::Info, format_args!("registration updated, no follow-on request: back to idle"));
                     fx.release(Release::Normal);
@@ -403,6 +416,13 @@ impl Mm {
                 self.state = State::Deregistered;
                 fx.release(Release::Deregister);
             }
+            (State::Registered, Uplink::ConfigurationUpdateComplete) => match self.new_guti.take() {
+                Some(guti) => {
+                    fx.log(Level::Info, format_args!("5G-GUTI reallocated: {guti}"));
+                    self.guti = Some(guti);
+                }
+                None => fx.log(Level::Debug, format_args!("Configuration Update Complete for nothing pending")),
+            },
             (State::Deregistering, Uplink::DeregistrationAccept) => {
                 fx.log(Level::Info, format_args!("deregistered by the network"));
                 self.state = State::Deregistered;
@@ -608,6 +628,10 @@ impl Mm {
             // The UE most likely has its 5G-GUTI (§5.5.1.2.8).
             fx.log(Level::Info, format_args!("{timer} expired 5 times: registered without Registration Complete"));
             self.state = State::Registered;
+        } else if let Downlink::ConfigurationUpdateCommand { .. } = message {
+            // The old 5G-GUTI stays (§5.4.4.5).
+            fx.log(Level::Info, format_args!("{timer} expired 5 times: the 5G-GUTI stays as it was"));
+            self.new_guti = None;
         } else if let Downlink::DeregistrationRequest { .. } = message {
             // The deregistration completes locally (§5.5.2.3.4).
             fx.log(Level::Info, format_args!("{timer} expired 5 times: deregistered by the network, locally"));
@@ -618,6 +642,25 @@ impl Mm {
             self.state = State::Deregistered;
             fx.release(Release::Normal);
         }
+    }
+
+    /// Gives the registered UE a new 5G-GUTI (§5.4.4), acknowledged; the
+    /// new one is the UE's once it answers. False if the UE is in another
+    /// procedure.
+    pub fn reallocate_guti(&mut self, fx: &mut impl Effects) -> bool {
+        let Some(old) = self.guti.filter(|_| self.state == State::Registered && self.retransmit.is_none()) else {
+            return false;
+        };
+        let guti = Guti { tmsi: fx.tmsi(), ..old };
+        self.new_guti = Some(guti);
+        let command = Downlink::ConfigurationUpdateCommand {
+            acknowledge: true,
+            guti: Some(guti),
+            full_name: None,
+            short_name: None,
+        };
+        self.expect(command, fx);
+        true
     }
 
     /// The network deregisters the registered UE (§5.5.2.3); `reregister`:
@@ -1179,6 +1222,39 @@ mod tests {
         let accept = ue.open(&fx.sent.pop().unwrap(), 2);
         assert!(accept.windows(4).any(|w| w == hex("50020200")), "the network's sessions the UE holds: 1");
         assert_eq!(fx.resumed, [(SessionSet(0), Some(SessionSet(0x02)))], "nothing to reactivate, session 2 released");
+    }
+
+    #[test]
+    fn the_network_names_follow_a_registration_and_a_new_5g_guti_is_acknowledged() {
+        let (_, mut mm, mut fx, mut ue) = registered();
+        let params = serde_json::json!({ "network_name": { "full": "LibreCN", "short": "LC" } });
+        let config = AmfConfig::from_params("amf", &params).unwrap();
+        let cleartext = hex("7e00410a 000b f299f907 010040 00c0ffee 2e04f0f0f0f0");
+        mm.on_uplink(&config, tai(), &mut ue.initial(&cleartext, &cleartext), &mut fx);
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
+        let names = ue.open(&fx.sent.pop().unwrap(), 3);
+        assert_eq!(names[..4], hex("7e0054d0")[..], "Configuration Update Command, no acknowledgement");
+        assert!(names.ends_with(&hex("4505 90004c0043")), "the short name");
+        assert!(!fx.timer, "nothing to wait for");
+
+        let old = mm.tmsi();
+        assert!(mm.reallocate_guti(&mut fx));
+        let command = ue.open(&fx.sent.pop().unwrap(), 4);
+        assert_eq!(command[..4], hex("7e0054d1")[..], "acknowledgement requested");
+        assert!(command.windows(4).any(|w| w == 0xc0ffee_u32.to_be_bytes()), "the Recorder's 5G-TMSI");
+        assert!(fx.timer, "T3555 runs");
+        assert!(!mm.reallocate_guti(&mut fx), "one at a time");
+        assert_eq!(mm.tmsi(), old, "not before the UE answers");
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0055")), &mut fx);
+        assert_eq!((mm.tmsi(), fx.timer), (Some(0xc0ffee), false));
+
+        // Unanswered: sent five times, then the 5G-GUTI stays.
+        mm.guti = mm.guti.map(|g| Guti { tmsi: 7, ..g });
+        assert!(mm.reallocate_guti(&mut fx));
+        for _ in 0..5 {
+            expire(&mut mm, &mut fx);
+        }
+        assert_eq!((mm.tmsi(), mm.state(), fx.released), (Some(7), State::Registered, None));
     }
 
     /// The NAS timer fires, as the EO delivers it: no longer running.

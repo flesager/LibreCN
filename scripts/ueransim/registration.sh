@@ -5,7 +5,10 @@
 # in Initial Context Setup and Complete; it then establishes its PDU session
 # (SMF, UPF, PDU Session Resource Setup), and a second one on the second DNN
 # (ims; both in ue.yaml: on the host, UERANSIM's UE bars its own nr-cli
-# ps-establish, its RRC thread missing the 100 ms UAC check). Without root, the UE cannot create
+# ps-establish, its RRC thread missing the 100 ms UAC check). The UE gets the
+# network's names, then a new 5G-GUTI (POST on the AMF's web API, a
+# Configuration Update Command it acknowledges; nr-cli status shows it).
+# Without root, the UE cannot create
 # its TUN interface: the user plane is not checked here. The UE releases its
 # session (nr-cli ps-release) and UERANSIM sets it up again; the network then
 # releases it (DELETE on the SMF's web API). The network then deregisters the
@@ -33,9 +36,14 @@ wait_for "$out/gnb.log" "NG Setup procedure is successful"
 wait_for "$out/core.log" "PDU session 1 set up" || true
 cli() { "$bin/nr-cli" imsi-999700000000001 -e "$1" >> "$out/cli.log" 2>&1 || true; }
 wait_for "$out/core.log" "PDU session 2 set up" || true
+web=$(grep -o 'http://127.0.0.1:[0-9]*' "$out/core.log" | head -1)
+# A new 5G-GUTI (Configuration Update Command, acknowledged).
+curl -s -X POST "$web/api/nfs/amf-1/ues/imsi-999700000000001/guti" >> "$out/cli.log"
+wait_for "$out/core.log" "5G-GUTI reallocated" || true
+guti=$(grep -o "5G-GUTI reallocated: 5G-GUTI [0-9/]* [0-9:]* [0-9a-f]*" "$out/core.log" | head -1 | awk '{print $NF}')
+"$bin/nr-cli" imsi-999700000000001 -e status > "$out/info.log" 2>&1 || true
 cli "ps-release 1"
 wait_count "$out/core.log" "PDU session 1 set up" 2 || true
-web=$(grep -o 'http://127.0.0.1:[0-9]*' "$out/core.log" | head -1)
 id=$(curl -s "$web/api/nfs/smf/sessions" | tr '{' '\n' | grep '"pdu_session_id":1,' | grep -o '"id":[0-9]*' | cut -d: -f2)
 curl -s -X DELETE "$web/api/nfs/smf/sessions/$id" >> "$out/cli.log"
 wait_count "$out/core.log" "PDU session 1 released\$" 2 || true
@@ -47,13 +55,15 @@ sleep 0.5
 cli "deregister switch-off"
 wait_for "$out/core.log" "released, 0 UE(s) left" || true
 
-for f in gnb ue cli core; do echo "--- $f"; cat "$out/$f.log"; done
+for f in gnb ue cli info core; do echo "--- $f"; cat "$out/$f.log"; done
 grep -q "Initial Registration is successful" "$out/ue.log" \
   && grep -q "SUCI of Profile A" "$out/core.log" \
   && grep -q "registered: imsi-999700000000001" "$out/core.log" \
   && grep -q "PDU Session establishment is successful PSI\[1\]" "$out/ue.log" \
   && grep -q "PDU Session establishment is successful PSI\[2\]" "$out/ue.log" \
   && grep -q "PDU session 2 to ims, UE 10.46.0.2" "$out/core.log" \
+  && [ "$(grep -c "Configuration Update Command received" "$out/ue.log")" -ge 2 ] \
+  && [ -n "$guti" ] && grep -qi "$guti" "$out/info.log" \
   && [ "$(grep -c "UE 1: PDU session 1 set up" "$out/core.log")" -ge 2 ] \
   && grep -q "PDU session 1: PDU Session Release Request" "$out/core.log" \
   && grep -q "PDU session 1 released by the network" "$out/core.log" \

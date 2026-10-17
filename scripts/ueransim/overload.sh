@@ -17,7 +17,7 @@ wait_count() { for _ in $(seq 100); do [ "$(grep -c "$2" "$1")" -ge "$3" ] && re
 
 # The registration check's core, with 3 subscribers and room for 2 UEs.
 sed -e 's/^opc = "E8ED289DEBA952E4283B54E88E6183CA"$/&\ncount = 3/' \
-    -e 's/^name = "amf-1"$/&\n[nf.params]\nmax_ues = 2/' scripts/ueransim/librecn.toml > "$out/core.toml"
+    -e 's/^network_name = .*$/&\nmax_ues = 2/' scripts/ueransim/librecn.toml > "$out/core.toml"
 grep -q "max_ues = 2" "$out/core.toml" && grep -q "count = 3" "$out/core.toml" || { echo "core config not derived"; exit 1; }
 
 cargo build -q --release -p librecn
