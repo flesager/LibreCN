@@ -5,13 +5,14 @@ use std::time::Duration;
 
 use librecn_ausf::{Ausf, LIFETIME};
 use librecn_oam::{CapturedLog, LogSink};
-use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
+use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult, method};
 use librecn_sbi::{Outcome, ServingNetwork, SupiOrSuci};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
 use librecn_scheduler::{EoConfig, EoId};
-use librecn_security::kdf;
 use librecn_security::milenage::Milenage;
+use librecn_security::{eap_aka, kdf};
 use librecn_udm::Udm;
+use zerocopy::FromZeros;
 
 const K: &str = "465B5CE8B199B49FAA5F0A2EE238A6BC";
 const OPC: &str = "E8ED289DEBA952E4283B54E88E6183CA";
@@ -31,10 +32,16 @@ struct Core {
 }
 
 fn core() -> Core {
+    core_with("5g-aka")
+}
+
+/// The same, the subscriber authenticated with `auth`.
+fn core_with(auth: &str) -> Core {
     let mut tb = TestBed::new();
     let (sink, log) = LogSink::capture();
     tb.add(LogSink::config(), sink).unwrap();
-    let subscribers = serde_json::json!({ "subscribers": [{ "supi": "imsi-999700000000001", "k": K, "opc": OPC }] });
+    let subscribers =
+        serde_json::json!({ "subscribers": [{ "supi": "imsi-999700000000001", "k": K, "opc": OPC, "auth": auth }] });
     let (cfg, udm) = Udm::from_params("udm", &subscribers).unwrap();
     tb.add(cfg, udm).unwrap();
     let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::Value::Null).unwrap();
@@ -79,7 +86,18 @@ impl Core {
     }
 
     fn confirm(&mut self, auth_ctx: u32, res_star: [u8; 16]) -> ConfirmResult {
-        self.tb.inject_from(self.amf, self.ausf, 8, &Confirm { auth_ctx, res_star }).unwrap();
+        let mut confirm = Confirm::new_zeroed();
+        (confirm.auth_ctx, confirm.res_star) = (auth_ctx, res_star);
+        self.tb.inject_from(self.amf, self.ausf, 8, &confirm).unwrap();
+        self.tb.run_until_idle();
+        self.seen.take()[0].body().unwrap()
+    }
+
+    fn confirm_eap(&mut self, auth_ctx: u32, eap: &[u8]) -> ConfirmResult {
+        let mut confirm = Confirm::new_zeroed();
+        confirm.auth_ctx = auth_ctx;
+        confirm.eap.set(eap);
+        self.tb.inject_from(self.amf, self.ausf, 8, &confirm).unwrap();
         self.tb.run_until_idle();
         self.seen.take()[0].body().unwrap()
     }
@@ -146,4 +164,39 @@ fn unconfirmed_challenges_expire() {
     c.tb.advance(LIFETIME + Duration::from_secs(6));
     assert!(c.log.lines().iter().any(|l| l.msg == "1 authentication context(s) expired"), "{:#?}", c.log.lines());
     assert_eq!(c.confirm(challenge.auth_ctx, res_star).outcome(), Outcome::ContextNotFound);
+}
+
+/// The UE's side of EAP-AKA': RES and K_aut from the challenge's RAND and
+/// AUTN (in its EAP-Request), and K_SEAF to compare.
+fn eap_ue(request: &[u8]) -> ([u8; 8], [u8; 32], [u8; 32], u8) {
+    // AT_RAND and AT_AUTN are the first two attributes, after the 8-octet header.
+    let (rand, autn): ([u8; 16], [u8; 16]) = (request[12..28].try_into().unwrap(), request[32..48].try_into().unwrap());
+    let m = Milenage::new(&hex(K), &hex(OPC));
+    let v = m.f2345(&rand);
+    let sqn_xor_ak: [u8; 6] = autn[..6].try_into().unwrap();
+    let (ck_p, ik_p) = eap_aka::ck_ik_prime(&v.ck, &v.ik, SNN, &sqn_xor_ak);
+    let keys = eap_aka::keys(&ck_p, &ik_p, "999700000000001");
+    (v.res, keys.k_aut, kdf::kseaf(&keys.kausf, SNN), request[1])
+}
+
+#[test]
+fn an_eap_aka_prime_subscriber_answers_an_eap_challenge() {
+    let mut c = core_with("eap-aka-prime");
+    let challenge = c.authenticate(info(SUCI));
+    assert_eq!((challenge.outcome(), challenge.method), (Outcome::Ok, method::EAP_AKA_PRIME));
+    let request = challenge.eap.get().to_vec();
+    assert_eq!(request[0], eap_aka::code::REQUEST);
+    assert!(request.windows(SNN.len()).any(|w| w == SNN.as_bytes()), "AT_KDF_INPUT: the serving network name");
+    let (res, k_aut, kseaf, id) = eap_ue(&request);
+
+    // A wrong RES, then the right one (a new challenge each time).
+    let wrong = c.confirm_eap(challenge.auth_ctx, &eap_aka::answer(id, &[0; 8], &k_aut));
+    assert_eq!((wrong.outcome(), wrong.eap), (Outcome::AuthenticationRejected, eap_aka::failure(id)));
+    let challenge = c.authenticate(info(SUCI));
+    let (res2, k_aut, kseaf2, id) = eap_ue(challenge.eap.get());
+    assert_ne!(res, res2, "a fresh RAND");
+    let result = c.confirm_eap(challenge.auth_ctx, &eap_aka::answer(id, &res2, &k_aut));
+    assert_eq!((result.outcome(), result.supi.as_str()), (Outcome::Ok, "imsi-999700000000001"));
+    assert_eq!((result.kseaf, result.eap), (kseaf2, eap_aka::success(id)), "K_SEAF from EMSK; EAP-Success");
+    assert_ne!(kseaf, kseaf2);
 }

@@ -3,7 +3,7 @@
 //!
 //! | Request | Answer |
 //! |---|---|
-//! | `GET subscribers` | `[{"supi", "amf", "sqn"}]`, by SUPI |
+//! | `GET subscribers` | `[{"supi", "amf", "sqn", "auth"}]`, by SUPI |
 //! | `POST subscribers` | adds one subscriber or an array (fields of `[[nf.params.subscribers]]`): 201, or 409 if one exists |
 //! | `DELETE subscribers/{supi}` | removes it: 200, or 404 |
 
@@ -33,7 +33,8 @@ pub fn handle(subscribers: &mut HashMap<String, Subscriber>, method: Method, pat
             let list: Vec<_> = list
                 .into_iter()
                 .map(|(supi, s)| {
-                    json!({ "supi": supi, "amf": format!("{:02X}{:02X}", s.amf[0], s.amf[1]), "sqn": format!("{:012X}", s.sqn) })
+                    json!({ "supi": supi, "amf": format!("{:02X}{:02X}", s.amf[0], s.amf[1]),
+                            "sqn": format!("{:012X}", s.sqn), "auth": s.auth() })
                 })
                 .collect();
             answer(200, json!(list))
@@ -92,7 +93,11 @@ mod tests {
         assert_eq!(handle(&mut subs, Method::Post, "subscribers", &two).status, 201);
         assert_eq!(
             list(&mut subs),
-            r#"[{"amf":"8000","sqn":"000000000000","supi":"imsi-1"},{"amf":"8000","sqn":"000000000020","supi":"imsi-2"},{"amf":"9000","sqn":"000000000000","supi":"imsi-3"}]"#,
+            concat!(
+                r#"[{"amf":"8000","auth":"5g-aka","sqn":"000000000000","supi":"imsi-1"},"#,
+                r#"{"amf":"8000","auth":"5g-aka","sqn":"000000000020","supi":"imsi-2"},"#,
+                r#"{"amf":"9000","auth":"5g-aka","sqn":"000000000000","supi":"imsi-3"}]"#
+            ),
             "by SUPI, without keys"
         );
 

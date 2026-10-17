@@ -748,6 +748,13 @@ impl Effects for Port<'_, '_, '_> {
         })
     }
 
+    fn confirm_eap(&mut self, auth_ctx: u32, eap: &[u8]) -> bool {
+        request::<Confirm>(self.ctx, self.ausf, self.log, self.ids.0, |m| {
+            m.auth_ctx = auth_ctx;
+            m.eap.set(eap);
+        })
+    }
+
     fn release(&mut self, why: Release) {
         self.release = Some(why);
     }

@@ -1,0 +1,16 @@
+diff --git a/src/lib/nas/eap.cpp b/src/lib/nas/eap.cpp
+index 79e33e19..d2df29b8 100644
+--- a/src/lib/nas/eap.cpp
++++ b/src/lib/nas/eap.cpp
+@@ -240,8 +240,9 @@ std::unique_ptr<eap::Eap> eap::DecodeEapPdu(const OctetView &stream)
+             auto attributeLength = stream.readI();
+             readBytes += 1;
+ 
+-            // Valid length must be at least 2 octets
+-            if (attributeLength < 2)
++            // The length counts 4-octet units, type and length included: one
++            // unit at least (AT_KDF is one, RFC 9048 section 3.2)
++            if (attributeLength < 1)
+                 return nullptr;
+ 
+             // decode attribute value

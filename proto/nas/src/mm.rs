@@ -160,8 +160,10 @@ pub struct ServiceRequest<'a> {
 pub enum Uplink<'a> {
     RegistrationRequest(RegistrationRequest<'a>),
     RegistrationComplete,
+    /// RES* (5G AKA), or the UE's EAP-Response (EAP-AKA').
     AuthenticationResponse {
         res_star: Option<&'a [u8]>,
+        eap: Option<&'a [u8]>,
     },
     AuthenticationFailure {
         cause: u8,
@@ -205,13 +207,15 @@ impl<'a> Uplink<'a> {
             kind::REGISTRATION_REQUEST => Uplink::RegistrationRequest(registration_request(r)?),
             kind::REGISTRATION_COMPLETE => Uplink::RegistrationComplete,
             kind::AUTHENTICATION_RESPONSE => {
-                let mut res_star = None;
+                let (mut res_star, mut eap) = (None, None);
                 while let Some((iei, v)) = r.optional(&[])? {
-                    if iei == 0x2d {
-                        res_star = Some(v);
+                    match iei {
+                        0x2d => res_star = Some(v),
+                        0x78 => eap = Some(v),
+                        _ => {}
                     }
                 }
-                Uplink::AuthenticationResponse { res_star }
+                Uplink::AuthenticationResponse { res_star, eap }
             }
             kind::AUTHENTICATION_FAILURE => {
                 let cause = r.u8()?;
@@ -361,7 +365,15 @@ pub enum Downlink<'a> {
         rand: [u8; 16],
         autn: [u8; 16],
     },
-    AuthenticationReject,
+    /// EAP-AKA': the AUSF's EAP-Request, in the EAP message IE.
+    AuthenticationRequestEap {
+        ngksi: u8,
+        eap: Eap,
+    },
+    /// With EAP-Failure for EAP-AKA'.
+    AuthenticationReject {
+        eap: Option<[u8; 4]>,
+    },
     IdentityRequest(IdentityType),
     SecurityModeCommand {
         ciphering: u8,
@@ -370,6 +382,8 @@ pub enum Downlink<'a> {
         replayed: UeSecurityCapability,
         /// Ask for the whole initial message again (RINMR, §9.11.3.12).
         retransmit_initial: bool,
+        /// EAP-AKA': EAP-Success.
+        eap: Option<[u8; 4]>,
     },
     RegistrationAccept {
         guti: Guti,
@@ -416,6 +430,26 @@ pub enum Downlink<'a> {
     },
 }
 
+/// An EAP packet the AMF carries (EAP message IE, §9.11.2.2): length and bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Eap {
+    len: u8,
+    bytes: [u8; 128],
+}
+
+impl Eap {
+    /// `None` if longer than 128 octets.
+    pub fn new(packet: &[u8]) -> Option<Self> {
+        let mut eap = Eap { len: u8::try_from(packet.len()).ok()?, bytes: [0; 128] };
+        eap.bytes.get_mut(..packet.len())?.copy_from_slice(packet);
+        Some(eap)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len).min(128)]
+    }
+}
+
 /// A network name (TS 24.008 §10.5.3.5a), coded in UCS-2: no country
 /// initials, no spare bits.
 fn network_name(name: &str, w: &mut Writer<'_>) {
@@ -432,7 +466,8 @@ impl Downlink<'_> {
     pub fn kind(&self) -> u8 {
         match self {
             Downlink::AuthenticationRequest { .. } => kind::AUTHENTICATION_REQUEST,
-            Downlink::AuthenticationReject => kind::AUTHENTICATION_REJECT,
+            Downlink::AuthenticationRequestEap { .. } => kind::AUTHENTICATION_REQUEST,
+            Downlink::AuthenticationReject { .. } => kind::AUTHENTICATION_REJECT,
             Downlink::IdentityRequest(_) => kind::IDENTITY_REQUEST,
             Downlink::SecurityModeCommand { .. } => kind::SECURITY_MODE_COMMAND,
             Downlink::RegistrationAccept { .. } => kind::REGISTRATION_ACCEPT,
@@ -460,11 +495,14 @@ impl Downlink<'_> {
                 w.tlv(0x20, |w| w.bytes(&autn));
             }
             Downlink::IdentityRequest(identity) => w.u8(identity as u8),
-            Downlink::SecurityModeCommand { ciphering, integrity, ngksi, replayed, retransmit_initial } => {
+            Downlink::SecurityModeCommand { ciphering, integrity, ngksi, replayed, retransmit_initial, eap } => {
                 w.u8(ciphering << 4 | integrity & 0xf);
                 w.u8(NgKsi { mapped: false, value: ngksi }.nibble());
                 w.lv(|w| w.bytes(replayed.as_bytes()));
                 w.u8(0xe1); // IMEISV requested
+                if let Some(eap) = eap {
+                    w.tlve(0x78, |w| w.bytes(&eap));
+                }
                 w.tlv(0x36, |w| w.u8(u8::from(retransmit_initial) << 1));
             }
             Downlink::RegistrationAccept { guti, tai, allowed, sessions, t3512 } => {
@@ -506,7 +544,17 @@ impl Downlink<'_> {
                     w.bytes(&[0x58, cause]);
                 }
             }
-            Downlink::AuthenticationReject | Downlink::DeregistrationAccept => {}
+            Downlink::AuthenticationRequestEap { ngksi, eap } => {
+                w.u8(ngksi & 0x7);
+                w.lv(|w| w.bytes(&ABBA));
+                w.tlve(0x78, |w| w.bytes(eap.as_bytes()));
+            }
+            Downlink::AuthenticationReject { eap } => {
+                if let Some(eap) = eap {
+                    w.tlve(0x78, |w| w.bytes(&eap));
+                }
+            }
+            Downlink::DeregistrationAccept => {}
         }
         w.finish()
     }
@@ -539,7 +587,10 @@ mod tests {
     #[test]
     fn uplink_messages_are_decoded_and_bad_ones_refused() {
         let res = hex("7e0057 2d10 00112233445566778899aabbccddeeff");
-        assert_eq!(Uplink::decode(&res).unwrap(), Uplink::AuthenticationResponse { res_star: Some(&res[5..]) });
+        assert_eq!(
+            Uplink::decode(&res).unwrap(),
+            Uplink::AuthenticationResponse { res_star: Some(&res[5..]), eap: None }
+        );
         let failure = hex("7e0059 15 300e 0102030405060708090a0b0c0d0e");
         let Uplink::AuthenticationFailure { cause: 21, auts: Some(auts) } = Uplink::decode(&failure).unwrap() else {
             panic!()
@@ -587,8 +638,14 @@ mod tests {
             h(&format!("7e0056 00 020000 21{} 2010{}", "aa".repeat(16), "bb".repeat(16)))
         );
         let replayed = UeSecurityCapability::decode(&[0xf0, 0xf0]).unwrap();
-        let smc =
-            Downlink::SecurityModeCommand { ciphering: 2, integrity: 2, ngksi: 0, replayed, retransmit_initial: true };
+        let smc = Downlink::SecurityModeCommand {
+            ciphering: 2,
+            integrity: 2,
+            ngksi: 0,
+            replayed,
+            retransmit_initial: true,
+            eap: None,
+        };
         assert_eq!(encode(smc, &mut buf), h("7e005d 22 00 02f0f0 e1 360102"));
         let plmn = Plmn::new("999", "70").unwrap();
         let guti = Guti { plmn, amf_region: 1, amf_set: 1, amf_pointer: 0, tmsi: 0x01020304 };
@@ -629,7 +686,14 @@ mod tests {
         let n1 = hex("2e0101c3 1b");
         let dl = Downlink::DlNasTransport { pdu_session_id: 1, container: &n1, cause: Some(90) };
         assert_eq!(encode(dl, &mut buf), h("7e0068 01 0005 2e0101c31b 1201 585a"));
-        assert_eq!(Downlink::AuthenticationReject.encode(&mut [0u8; 2]), Err(Error::BufferTooSmall));
+        assert_eq!(Downlink::AuthenticationReject { eap: None }.encode(&mut [0u8; 2]), Err(Error::BufferTooSmall));
+        let reject = Downlink::AuthenticationReject { eap: Some([4, 7, 0, 4]) };
+        assert_eq!(encode(reject, &mut buf), h("7e0058 78 0004 04070004"), "with EAP-Failure");
+        let request = Downlink::AuthenticationRequestEap { ngksi: 1, eap: Eap::new(&[1, 7, 0, 4]).unwrap() };
+        assert_eq!(encode(request, &mut buf), h("7e0056 01 020000 78 0004 01070004"));
+        let eap = hex("7e0057 78 0004 02070004");
+        let response = Uplink::AuthenticationResponse { res_star: None, eap: Some(&eap[6..]) };
+        assert_eq!(Uplink::decode(&eap).unwrap(), response);
     }
 
     fn hex_of(b: &[u8]) -> String {

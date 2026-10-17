@@ -122,7 +122,8 @@ Notes on these runs:
 - **The load generator of part 1 takes LibreCN to 20 000 UEs** (40 000 with the second batch). `max_ues`, 1024 by default, is the AMF's parameter for its UE table. The UDM's subscribers can be a range (`count`).
 - **UERANSIM is patched** (`scripts/ueransim/patches/`) for two bugs of v3.3.0's gNB:
   - 0001: the gNB routed no security-protected initial message to an AMF, so no UE could come back from idle;
-  - 0002: a data race on the gNB's map of simulated radio links crashed it (segfault) when hundreds of UEs attached at once.
+  - 0002: a data race on the gNB's map of simulated radio links crashed it (segfault) when hundreds of UEs attached at once;
+  - 0003: the UE could not read AT_KDF, so no EAP-AKA' authentication worked (not used by these runs).
 
 ## 4. Memory (`scripts/load.sh`, the `memory` lines)
 

@@ -1,4 +1,6 @@
-//! 5G AKA (TS 33.501 §6.1.3.2) between AMF (SEAF), AUSF and UDM.
+//! Primary authentication between AMF (SEAF), AUSF and UDM: 5G AKA
+//! (TS 33.501 §6.1.3.2) or EAP-AKA' (§6.1.3.1), as the UDM chooses for the
+//! subscriber.
 //!
 //! ```text
 //! AMF ── Authenticate ──────▶ AUSF ── GetAuthData ──▶ UDM
@@ -7,14 +9,45 @@
 //! AMF ◀─ ConfirmResult ────── AUSF
 //! ```
 //!
-//! The AUSF keeps XRES* and K_SEAF until the AMF confirms with RES*: K_SEAF
-//! and the SUPI reach the AMF only after the UE proved itself.
+//! The AUSF keeps XRES* (XRES and K_aut for EAP-AKA') and K_SEAF until the
+//! AMF confirms with the UE's RES* (its EAP-Response): K_SEAF and the SUPI
+//! reach the AMF only after the UE proved itself. For EAP-AKA', the AMF
+//! carries the EAP packets without reading them.
 
 use librecn_common::msg::{family, id};
 use librecn_scheduler::MsgBody;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::{Outcome, ServingNetwork, Supi, SupiOrSuci};
+
+/// Authentication methods.
+pub mod method {
+    pub const FIVE_G_AKA: u8 = 0;
+    pub const EAP_AKA_PRIME: u8 = 1;
+}
+
+/// An EAP packet: length and bytes.
+#[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct EapPacket {
+    len: u16,
+    bytes: [u8; 126],
+}
+
+impl EapPacket {
+    /// False (and empty) if `bytes` is longer than the packet holds.
+    pub fn set(&mut self, bytes: &[u8]) -> bool {
+        let fits = bytes.len() <= self.bytes.len();
+        let n = if fits { bytes.len() } else { 0 };
+        self.bytes[..n].copy_from_slice(&bytes[..n]);
+        self.len = n as u16;
+        fits
+    }
+
+    pub fn get(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len).min(self.bytes.len())]
+    }
+}
 
 /// Who to authenticate, for which network (AuthenticationInfo, TS 29.509
 /// §6.1.6.2.2; AuthenticationInfoRequest, TS 29.503 §6.3.6.2.2).
@@ -59,29 +92,34 @@ impl MsgBody for Authenticate {
     const MSG_ID: u32 = id(family::UE_AUTHENTICATION, 1);
 }
 
-/// AUSF → AMF: the 5G AKA challenge (5gAuthData, TS 29.509 §6.1.6.2.3).
+/// AUSF → AMF: the challenge (5gAuthData, TS 29.509 §6.1.6.2.3): RAND,
+/// AUTN and HXRES* for 5G AKA; for EAP-AKA', the EAP-Request.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct AuthenticateResult {
     outcome: u8,
-    _pad: [u8; 3],
+    /// [`method`].
+    pub method: u8,
+    _pad: [u8; 2],
     /// The AUSF's context, to confirm.
     pub auth_ctx: u32,
     pub rand: [u8; 16],
     pub autn: [u8; 16],
     pub hxres_star: [u8; 16],
+    pub eap: EapPacket,
 }
 
 impl MsgBody for AuthenticateResult {
     const MSG_ID: u32 = id(family::UE_AUTHENTICATION, 2);
 }
 
-/// AMF → AUSF: 5G AKA confirmation with the UE's RES*.
+/// AMF → AUSF: the UE's RES* (5G AKA) or its EAP-Response (EAP-AKA').
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct Confirm {
     pub auth_ctx: u32,
     pub res_star: [u8; 16],
+    pub eap: EapPacket,
 }
 
 impl MsgBody for Confirm {
@@ -95,6 +133,8 @@ pub struct ConfirmResult {
     outcome: u8,
     pub supi: Supi,
     pub kseaf: [u8; 32],
+    /// EAP-AKA': EAP-Success or EAP-Failure, for the UE; zeros for 5G AKA.
+    pub eap: [u8; 4],
 }
 
 impl MsgBody for ConfirmResult {
@@ -112,17 +152,24 @@ impl MsgBody for GetAuthData {
     const MSG_ID: u32 = id(family::UE_AUTHENTICATION, 5);
 }
 
-/// UDM → AUSF: a 5G home environment authentication vector and the SUPI
-/// (AuthenticationInfoResult, TS 29.503 §6.3.6.2.3).
+/// UDM → AUSF: an authentication vector and the SUPI
+/// (AuthenticationInfoResult, TS 29.503 §6.3.6.2.3). 5G AKA: XRES* and
+/// K_AUSF; EAP-AKA': XRES (its first `xres_len` octets), CK' and IK'.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct AuthData {
     outcome: u8,
+    /// [`method`].
+    pub method: u8,
+    pub xres_len: u8,
     pub supi: Supi,
     pub rand: [u8; 16],
     pub autn: [u8; 16],
     pub xres_star: [u8; 16],
     pub kausf: [u8; 32],
+    pub xres: [u8; 16],
+    pub ck_prime: [u8; 16],
+    pub ik_prime: [u8; 16],
 }
 
 impl MsgBody for AuthData {
@@ -154,6 +201,10 @@ mod tests {
     fn bodies_are_small_and_zeroed_bodies_read_as_ok_without_resync() {
         assert_eq!(std::mem::size_of::<AuthInfo>(), 256);
         assert!(std::mem::size_of::<ConfirmResult>() <= 128 && std::mem::size_of::<AuthData>() <= 256);
+        assert!(std::mem::size_of::<Confirm>() <= 256 && std::mem::size_of::<AuthenticateResult>() <= 256);
+        let mut eap = EapPacket::new_zeroed();
+        assert!(eap.set(&[1, 2, 3]) && eap.get() == [1, 2, 3]);
+        assert!(!eap.set(&[0; 127]) && eap.get().is_empty());
         let mut result = AuthenticateResult::new_zeroed();
         assert_eq!(result.outcome(), Outcome::Ok);
         result.set_outcome(Outcome::UserNotFound);

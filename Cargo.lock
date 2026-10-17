@@ -544,6 +544,7 @@ dependencies = [
  "librecn-udm",
  "serde",
  "serde_json",
+ "zerocopy",
 ]
 
 [[package]]

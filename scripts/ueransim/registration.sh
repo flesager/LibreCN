@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Interop check with UERANSIM: NG Setup, then UERANSIM's UE registers with
 # LibreCN (AMF, AUSF, UDM), its SUCI concealed with ECIES Profile A and
-# deciphered by the UDM: 5G AKA, NAS security mode, Registration Accept
+# deciphered by the UDM: EAP-AKA' (the subscriber's method; patch 0003 lets
+# UERANSIM's UE read AT_KDF), NAS security mode, Registration Accept
 # in Initial Context Setup and Complete; it then establishes its PDU session
 # (SMF, UPF, PDU Session Resource Setup), and a second one on the second DNN
 # (ims; both in ue.yaml: on the host, UERANSIM's UE bars its own nr-cli
@@ -20,6 +21,9 @@ set -eu
 cd "$(dirname "$0")/../.."
 bin=${UERANSIM:-../UERANSIM/build}
 [ -x "$bin/nr-gnb" ] && [ -x "$bin/nr-ue" ] && [ -x "$bin/nr-cli" ] || { echo "no UERANSIM in $bin"; exit 1; }
+patch=scripts/ueransim/patches/0003-ue-decode-EAP-attributes-of-one-unit-AT_KDF.patch
+git -C "$bin/../src" apply --check -R "$PWD/$patch" 2>/dev/null \
+  || { echo "UERANSIM's UE lacks $patch (EAP-AKA'): git -C $bin/../src apply, then rebuild"; exit 1; }
 out=$(mktemp -d)
 trap 'kill $core $gnb $ue 2>/dev/null || true; rm -rf "$out"' EXIT
 
@@ -58,6 +62,7 @@ wait_for "$out/core.log" "released, 0 UE(s) left" || true
 for f in gnb ue cli info core; do echo "--- $f"; cat "$out/$f.log"; done
 grep -q "Initial Registration is successful" "$out/ue.log" \
   && grep -q "SUCI of Profile A" "$out/core.log" \
+  && grep -q "EAP-AKA' challenge" "$out/core.log" \
   && grep -q "registered: imsi-999700000000001" "$out/core.log" \
   && grep -q "PDU Session establishment is successful PSI\[1\]" "$out/ue.log" \
   && grep -q "PDU Session establishment is successful PSI\[2\]" "$out/ue.log" \

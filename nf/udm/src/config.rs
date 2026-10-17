@@ -13,6 +13,7 @@
 //! sqn = "000000000000"  # optional: the last SQN used
 //! count = 1             # optional: this many subscribers from this SUPI on,
 //!                       # the same keys (test fleets)
+//! auth = "5g-aka"       # optional: or "eap-aka-prime"
 //! [[nf.params.home_network_keys]]   # optional: SUCI Profile A (ECIES, X25519)
 //! id = 1                # the SUCI's home network public key identifier
 //! private_key = "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d"
@@ -31,12 +32,28 @@ pub struct Subscriber {
     pub amf: [u8; 2],
     /// The last sequence number used, 48 bits.
     pub sqn: u64,
+    /// Authenticated with EAP-AKA' rather than 5G AKA.
+    pub eap_aka_prime: bool,
+}
+
+impl Subscriber {
+    /// Its authentication method, as configured.
+    pub fn auth(&self) -> &'static str {
+        if self.eap_aka_prime { "eap-aka-prime" } else { "5g-aka" }
+    }
 }
 
 impl std::fmt::Debug for Subscriber {
     /// Without the keys.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Subscriber {{ amf: {:02x}{:02x}, sqn: {:#x} }}", self.amf[0], self.amf[1], self.sqn)
+        write!(
+            f,
+            "Subscriber {{ amf: {:02x}{:02x}, sqn: {:#x}, auth: {} }}",
+            self.amf[0],
+            self.amf[1],
+            self.sqn,
+            self.auth()
+        )
     }
 }
 
@@ -52,6 +69,9 @@ struct SubscriberParams {
     sqn: Option<String>,
     #[serde(default = "one")]
     count: u32,
+    /// "5g-aka" (the default) or "eap-aka-prime".
+    #[serde(default)]
+    auth: Option<String>,
 }
 
 fn one() -> u32 {
@@ -140,11 +160,17 @@ fn parse(s: SubscriberParams) -> Result<Vec<(String, Subscriber)>, String> {
         Some(h) => hex::<6>(h).ok_or_else(|| what("sqn: 12 hex digits"))?.iter().fold(0, |a, &b| a << 8 | u64::from(b)),
         None => 0,
     };
+    let eap_aka_prime = match s.auth.as_deref() {
+        None | Some("5g-aka") => false,
+        Some("eap-aka-prime") => true,
+        Some(other) => return Err(what(&format!("auth {other:?}: \"5g-aka\" or \"eap-aka-prime\""))),
+    };
     let subscriber = Subscriber {
         k: hex(&s.k).ok_or_else(|| what("k: 32 hex digits"))?,
         opc: hex(&s.opc).ok_or_else(|| what("opc: 32 hex digits"))?,
         amf: hex(&s.amf).ok_or_else(|| what("amf: 4 hex digits"))?,
         sqn,
+        eap_aka_prime,
     };
     let digits = &s.supi[5..];
     let first: u64 = digits.parse().map_err(|_| what("the SUPI must be imsi-<digits>"))?;
@@ -181,7 +207,7 @@ mod tests {
         let subs = from_params(&params).unwrap();
         let s = &subs["imsi-999700000000001"];
         assert_eq!((s.k[0], s.opc[15], s.amf, s.sqn), (0x46, 0xca, [0x80, 0], 0x40));
-        assert_eq!(format!("{s:?}"), "Subscriber { amf: 8000, sqn: 0x40 }", "no keys in logs");
+        assert_eq!(format!("{s:?}"), "Subscriber { amf: 8000, sqn: 0x40, auth: 5g-aka }", "no keys in logs");
         assert!(from_params(&serde_json::Value::Null).unwrap().is_empty());
 
         let bad = |f: &str, v: &str| {
@@ -192,6 +218,10 @@ mod tests {
         assert!(bad("k", "00").contains("k: 32 hex digits"));
         assert!(bad("supi", "nai-x@y").contains("imsi-<digits>"));
         assert!(bad("sqn", "zz0000000000").contains("sqn"));
+        assert!(bad("auth", "eap-tls").contains("eap-aka-prime"));
+        let mut eap = params.clone();
+        eap["subscribers"][0]["auth"] = "eap-aka-prime".into();
+        assert!(from_params(&eap).unwrap()["imsi-999700000000001"].eap_aka_prime);
         assert!(bad("supi", "imsi-").contains("imsi-<digits>"));
     }
 

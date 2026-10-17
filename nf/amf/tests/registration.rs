@@ -54,7 +54,8 @@ fn core_and_ids(smf_capacity: usize) -> (Setup, SctpSocket, Ids) {
     let mut ids = None;
     let mut s = amf_with("208", "93", |tb| {
         let subscriber = serde_json::json!({ "supi": "imsi-208930000000001", "k": K, "opc": OPC, "count": 8 });
-        let (cfg, udm) = Udm::from_params("udm", &serde_json::json!({ "subscribers": [subscriber] })).unwrap();
+        let eap = serde_json::json!({ "supi": "imsi-208930000000101", "k": K, "opc": OPC, "auth": "eap-aka-prime" });
+        let (cfg, udm) = Udm::from_params("udm", &serde_json::json!({ "subscribers": [subscriber, eap] })).unwrap();
         tb.add(cfg, udm).unwrap();
         let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::Value::Null).unwrap();
         tb.add(cfg, ausf).unwrap();
@@ -861,4 +862,39 @@ fn the_web_api_gives_a_connected_ue_a_new_5g_guti() {
     assert_eq!(listed["tmsi"], new, "the new 5G-GUTI, once acknowledged");
     assert!(s.logged("amf-1", "5G-GUTI reallocated"), "{:#?}", s.log.lines());
     assert_eq!(manage(&mut s, &ids, Method::Post, "ues/imsi-208930000000009/guti", "").0, 404);
+}
+
+#[test]
+fn an_eap_aka_prime_subscriber_registers() {
+    use librecn_security::eap_aka;
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    // imsi-208930000000101: MSIN 0000000101 in BCD.
+    let request = REGISTRATION_REQUEST.replace("0000000010", "0000001010");
+    gnb.send(0, 1, NGAP_PPID, &initial_ue_message(1, &hex(&request))).unwrap();
+    let (_, auth) = ue.downlink(&mut s, &gnb);
+    assert_eq!(auth[..4], hex("7e0056 00")[..], "Authentication Request");
+    assert_eq!(auth[7], 0x78, "the EAP message, no RAND or AUTN IE");
+    let eap = &auth[10..];
+    assert_eq!((eap[0], eap[4], eap[5]), (eap_aka::code::REQUEST, eap_aka::TYPE, eap_aka::subtype::CHALLENGE));
+
+    // The UE: from AT_RAND and AT_AUTN, RES, K_aut and the NAS keys.
+    let key = |h: &str| -> [u8; 16] { hex(h).try_into().unwrap() };
+    let m = Milenage::new(&key(K), &key(OPC));
+    let (rand, autn): ([u8; 16], [u8; 16]) = (eap[12..28].try_into().unwrap(), eap[32..48].try_into().unwrap());
+    let v = m.f2345(&rand);
+    let sqn_xor_ak: [u8; 6] = autn[..6].try_into().unwrap();
+    let (ck_p, ik_p) = eap_aka::ck_ik_prime(&v.ck, &v.ik, SNN, &sqn_xor_ak);
+    let keys = eap_aka::keys(&ck_p, &ik_p, "208930000000101");
+    let kamf = kdf::kamf(&kdf::kseaf(&keys.kausf, SNN), "208930000000101", &[0, 0]);
+    (ue.k_enc, ue.k_int) = kdf::nas_keys(&kamf, 2, 2);
+    let answer = eap_aka::answer(eap[1], &v.res, &keys.k_aut);
+    let response = [&hex("7e0057 78")[..], &(answer.len() as u16).to_be_bytes(), &answer].concat();
+    ue.uplink(&gnb, &response);
+
+    let (_, command) = ue.downlink(&mut s, &gnb);
+    let success = eap_aka::success(eap[1]);
+    let expected = [&hex("7e005d 22 00 04f0f0f0f0 e1 78 0004")[..], &success, &hex("360102")].concat();
+    assert_eq!(command, expected, "Security Mode Command with EAP-Success, checked with the EAP-AKA' keys");
+    assert!(s.logged("ausf", "imsi-208930000000101 authenticated"), "{:#?}", s.log.lines());
 }

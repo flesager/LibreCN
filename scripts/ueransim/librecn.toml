@@ -26,6 +26,7 @@ name = "udm"
 supi = "imsi-999700000000001"
 k = "465B5CE8B199B49FAA5F0A2EE238A6BC"
 opc = "E8ED289DEBA952E4283B54E88E6183CA"
+auth = "eap-aka-prime"  # the Docker and scale checks keep 5G AKA
 [[nf.params.home_network_keys]]  # SUCI Profile A: TS 33.501 Annex C.4.3's key, the UE's public key
 id = 1
 private_key = "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d"

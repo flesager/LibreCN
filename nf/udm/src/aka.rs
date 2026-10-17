@@ -74,13 +74,21 @@ fn bcd_digits<'a>(bcd: &[u8], out: &'a mut [u8; 20]) -> Option<&'a str> {
 const IND_BITS: u32 = 5;
 const SQN_MASK: u64 = (1 << 48) - 1;
 
-/// A 5G HE AV: RAND, AUTN, XRES*, K_AUSF.
+/// An authentication vector: RAND, AUTN, and what the method needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Vector {
     pub rand: [u8; 16],
     pub autn: [u8; 16],
-    pub xres_star: [u8; 16],
-    pub kausf: [u8; 32],
+    pub method: Method,
+}
+
+/// The method's part of a vector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    /// A 5G HE AV (TS 33.501 §6.1.3.2): XRES*, K_AUSF.
+    FiveGAka { xres_star: [u8; 16], kausf: [u8; 32] },
+    /// An EAP-AKA' AV (§6.1.3.1): XRES, CK', IK'.
+    EapAkaPrime { xres: [u8; 8], ck_prime: [u8; 16], ik_prime: [u8; 16] },
 }
 
 /// Resynchronises the subscriber's SQN on the UE's (TS 33.102 §6.3.5): the
@@ -111,12 +119,16 @@ pub fn vector(sub: &mut Subscriber, serving_network: &ServingNetwork, rand: [u8;
     autn[6..8].copy_from_slice(&sub.amf);
     autn[8..].copy_from_slice(&mac_a);
     let snn = serving_network.as_str();
-    Vector {
-        rand,
-        autn,
-        xres_star: kdf::res_star(&v.ck, &v.ik, snn, &rand, &v.res),
-        kausf: kdf::kausf(&v.ck, &v.ik, snn, &sqn_xor_ak),
-    }
+    let method = if sub.eap_aka_prime {
+        let (ck_prime, ik_prime) = librecn_security::eap_aka::ck_ik_prime(&v.ck, &v.ik, snn, &sqn_xor_ak);
+        Method::EapAkaPrime { xres: v.res, ck_prime, ik_prime }
+    } else {
+        Method::FiveGAka {
+            xres_star: kdf::res_star(&v.ck, &v.ik, snn, &rand, &v.res),
+            kausf: kdf::kausf(&v.ck, &v.ik, snn, &sqn_xor_ak),
+        }
+    };
+    Vector { rand, autn, method }
 }
 
 #[cfg(test)]
@@ -133,6 +145,7 @@ mod tests {
             opc: hex("e8ed289deba952e4283b54e88e6183ca"),
             amf: [0x80, 0],
             sqn: 0,
+            eap_aka_prime: false,
         }
     }
 
@@ -184,10 +197,15 @@ mod tests {
         let sqn_xor_ak: [u8; 6] = std::array::from_fn(|i| [0, 0, 0, 0, 0, 0x20][i] ^ ak[i]);
         assert_eq!(v.autn[..6], sqn_xor_ak);
         assert_eq!(v.autn[6..], hex::<10>("80000cf661619e1a630c"));
-        assert_eq!(v.xres_star, hex("494971b7c0300cf47df7412c1889aee1"));
-        assert_eq!(v.kausf, hex("4f2a3c0449084e104f39d0fe2af0c40ebc59ffbbd1eae27f314324b192f4e841"));
+        let Method::FiveGAka { xres_star, kausf } = v.method else { panic!("5G AKA") };
+        assert_eq!(xres_star, hex("494971b7c0300cf47df7412c1889aee1"));
+        assert_eq!(kausf, hex("4f2a3c0449084e104f39d0fe2af0c40ebc59ffbbd1eae27f314324b192f4e841"));
         vector(&mut sub, &snn, [0; 16]);
         assert_eq!(sub.sqn, 0x40);
+        sub.eap_aka_prime = true;
+        let v = vector(&mut sub, &snn, hex("23553cbe9637a89d218ae64dae47bf35"));
+        let Method::EapAkaPrime { xres, .. } = v.method else { panic!("the subscriber's method") };
+        assert_eq!(xres.len(), 8, "Milenage's RES");
     }
 
     #[test]

@@ -117,7 +117,7 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | PLMN | AMF: `plmn = { mcc = "999", mnc = "70" }` | gNB and UE: `mcc`, `mnc`. The AMF refuses a gNB that broadcasts no TA with its PLMN |
 | Slices | AMF and SMF: `slices = [{ sst = 1 }]` | gNB: `slices`; UE: `sessions[].slice` |
 | AMF address | AMF: `n2` | gNB: `amfConfigs` |
-| Subscriber | UDM: `[[nf.params.subscribers]]` with `supi`, `k`, `opc` (`amf`, `sqn`, `count` optional) | UE: `supi`, `key`, `op` with `opType: OPC`, `amf` |
+| Subscriber | UDM: `[[nf.params.subscribers]]` with `supi`, `k`, `opc` (`amf`, `sqn`, `count`, `auth` = `5g-aka` or `eap-aka-prime` optional) | UE: `supi`, `key`, `op` with `opType: OPC`, `amf` |
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
 

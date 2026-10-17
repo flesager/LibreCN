@@ -1,4 +1,5 @@
-//! 5GMM for one UE (TS 24.501 §5): registration with 5G AKA, NAS security
+//! 5GMM for one UE (TS 24.501 §5): registration with 5G AKA or EAP-AKA'
+//! (the method the home network chose; the AMF carries the EAP packets), NAS security
 //! mode control, identification, deregistration by the UE or the network.
 //!
 //! Pure logic on domain values: the EO hands in the UE's uplink NAS PDUs
@@ -35,7 +36,7 @@ use librecn_nas::ie::{
     Dnn, Guti, IdentityType, MobileIdentity, NgKsi, SessionSet, SnssaiList, Tai, UeSecurityCapability,
 };
 use librecn_nas::mm::{
-    ABBA, Downlink, PAYLOAD_N1_SM, RegistrationKind, ServiceRequest, UlNasTransport, Uplink, cause, kind, name,
+    ABBA, Downlink, Eap, PAYLOAD_N1_SM, RegistrationKind, ServiceRequest, UlNasTransport, Uplink, cause, kind, name,
 };
 use librecn_nas::security::{self, Header, NEA0, NIA2, SecurityContext};
 use librecn_sbi::ue_authentication::{AuthenticateResult, ConfirmResult};
@@ -102,6 +103,8 @@ pub trait Effects {
     fn authenticate(&mut self, who: &SupiOrSuci, resync: Option<([u8; 16], [u8; 14])>) -> bool;
     /// Confirms 5G AKA with the UE's RES*. False if the AUSF cannot be reached.
     fn confirm(&mut self, auth_ctx: u32, res_star: &[u8; 16]) -> bool;
+    /// Confirms EAP-AKA' with the UE's EAP-Response. False if the AUSF cannot be reached.
+    fn confirm_eap(&mut self, auth_ctx: u32, eap: &[u8]) -> bool;
     /// Releases the UE's N2 context, after the PDUs already sent.
     fn release(&mut self, why: Release);
     /// A fresh, unpredictable 5G-TMSI.
@@ -141,6 +144,8 @@ struct Challenge {
     auth_ctx: u32,
     rand: [u8; 16],
     hxres_star: [u8; 16],
+    /// EAP-AKA': the UE answers with an EAP-Response, checked by the AUSF.
+    eap: bool,
 }
 
 /// The timer guarding a message (§10.2), for logs.
@@ -179,6 +184,8 @@ pub struct Mm {
     release_when_complete: bool,
     /// The 5G-GUTI being given (Configuration Update Command sent).
     new_guti: Option<Guti>,
+    /// EAP-AKA': the AUSF's EAP-Success, for the Security Mode Command.
+    eap_success: Option<[u8; 4]>,
 }
 
 /// The type of an initial message (plain or integrity protected), if it is one.
@@ -370,7 +377,9 @@ impl Mm {
                 self.suci = SupiOrSuci::format(format_args!("{suci}"));
                 self.authenticate(None, fx);
             }
-            (State::Challenged, Uplink::AuthenticationResponse { res_star }) => self.on_response(res_star, fx),
+            (State::Challenged, Uplink::AuthenticationResponse { res_star, eap }) => {
+                self.on_response(res_star, eap, fx)
+            }
             (State::Challenged, Uplink::AuthenticationFailure { cause, auts }) => self.on_failure(cause, auts, fx),
             (State::SecurityMode, Uplink::SecurityModeComplete { imeisv, container }) => {
                 if let Some(imeisv) = imeisv {
@@ -495,21 +504,39 @@ impl Mm {
         // A KSI the UE does not hold already (§5.4.1.3.2).
         self.ngksi = if self.ue_ngksi >= NgKsi::NONE { 0 } else { (self.ue_ngksi + 1) % NgKsi::NONE };
         let (rand, autn) = (result.rand, result.autn);
-        self.challenge = Some(Challenge { auth_ctx: result.auth_ctx, rand, hxres_star: result.hxres_star });
+        let eap = result.method == librecn_sbi::ue_authentication::method::EAP_AKA_PRIME;
+        self.challenge = Some(Challenge { auth_ctx: result.auth_ctx, rand, hxres_star: result.hxres_star, eap });
         self.state = State::Challenged;
+        if eap {
+            let Some(request) = Eap::new(result.eap.get()) else { return self.reject(cause::PROTOCOL_ERROR, fx) };
+            fx.log(Level::Info, format_args!("EAP-AKA' challenge"));
+            return self.expect(Downlink::AuthenticationRequestEap { ngksi: self.ngksi, eap: request }, fx);
+        }
         self.expect(Downlink::AuthenticationRequest { ngksi: self.ngksi, rand, autn }, fx);
     }
 
-    fn on_response(&mut self, res_star: Option<&[u8]>, fx: &mut impl Effects) {
+    fn on_response(&mut self, res_star: Option<&[u8]>, eap: Option<&[u8]>, fx: &mut impl Effects) {
         let Some(challenge) = self.challenge else { return };
+        if challenge.eap {
+            // The AUSF checks the EAP-Response (AT_MAC, RES).
+            let Some(eap) = eap else {
+                fx.log(Level::Info, format_args!("Authentication Response without EAP message"));
+                return self.reject_authentication(None, fx);
+            };
+            self.state = State::Confirming;
+            if !fx.confirm_eap(challenge.auth_ctx, eap) {
+                self.reject(cause::PROTOCOL_ERROR, fx);
+            }
+            return;
+        }
         let Some(res_star) = res_star.and_then(|r| <&[u8; 16]>::try_from(r).ok()) else {
             fx.log(Level::Info, format_args!("Authentication Response without RES*"));
-            return self.reject_authentication(fx);
+            return self.reject_authentication(None, fx);
         };
         // The SEAF's check before asking the home network (TS 33.501 §6.1.3.2.0).
         if kdf::hres_star(&challenge.rand, res_star) != challenge.hxres_star {
             fx.log(Level::Info, format_args!("RES* does not match HXRES*"));
-            return self.reject_authentication(fx);
+            return self.reject_authentication(None, fx);
         }
         self.state = State::Confirming;
         if !fx.confirm(challenge.auth_ctx, res_star) {
@@ -524,7 +551,7 @@ impl Mm {
                 self.resynchronised = true;
                 self.authenticate(Some((c.rand, *auts)), fx);
             }
-            _ => self.reject_authentication(fx),
+            _ => self.reject_authentication(None, fx),
         }
     }
 
@@ -533,10 +560,13 @@ impl Mm {
         if self.state != State::Confirming {
             return fx.log(Level::Debug, format_args!("late AUSF confirmation dropped"));
         }
+        // EAP-AKA': the AUSF's EAP-Success or EAP-Failure, for the UE.
+        let eap = (result.eap[0] != 0).then_some(result.eap);
         if result.outcome() != Outcome::Ok {
             fx.log(Level::Info, format_args!("authentication not confirmed: {:?}", result.outcome()));
-            return self.reject_authentication(fx);
+            return self.reject_authentication(eap, fx);
         }
+        self.eap_success = eap;
         let (Some(imsi), Some(capability)) = (result.supi.imsi(), self.capability) else {
             return self.reject(cause::ILLEGAL_UE, fx);
         };
@@ -554,6 +584,7 @@ impl Mm {
             replayed: capability,
             // The initial message was not checked: ask for all of it (§4.4.6).
             retransmit_initial: true,
+            eap: self.eap_success,
         };
         self.expect(command, fx);
     }
@@ -762,9 +793,10 @@ impl Mm {
         fx.release(Release::Normal);
     }
 
-    fn reject_authentication(&mut self, fx: &mut impl Effects) {
+    /// Authentication Reject, with the AUSF's EAP-Failure for EAP-AKA'.
+    fn reject_authentication(&mut self, eap: Option<[u8; 4]>, fx: &mut impl Effects) {
         self.state = State::Deregistered;
-        self.send(Downlink::AuthenticationReject, fx);
+        self.send(Downlink::AuthenticationReject { eap }, fx);
         fx.release(Release::AuthenticationFailure);
     }
 
@@ -826,6 +858,7 @@ mod tests {
         contexts: Vec<AsContext>,
         authenticate: Vec<(String, bool)>,
         confirm: Vec<(u32, [u8; 16])>,
+        confirm_eap: Vec<(u32, Vec<u8>)>,
         /// PDU session ID, initial, slice, DNN, container.
         sessions: Vec<(u8, bool, Snssai, String, Vec<u8>)>,
         /// What `session` answers.
@@ -869,6 +902,10 @@ mod tests {
         }
         fn confirm(&mut self, auth_ctx: u32, res_star: &[u8; 16]) -> bool {
             self.confirm.push((auth_ctx, *res_star));
+            true
+        }
+        fn confirm_eap(&mut self, auth_ctx: u32, eap: &[u8]) -> bool {
+            self.confirm_eap.push((auth_ctx, eap.to_vec()));
             true
         }
         fn release(&mut self, why: Release) {

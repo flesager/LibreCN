@@ -72,7 +72,10 @@ fn subscribers_are_provisioned_listed_and_removed_on_the_web_api() {
 
     let (status, body) = http(&mut tb, addr, "GET", "/api/nfs/udm/subscribers", "");
     assert_eq!(status, 200);
-    assert_eq!(body, r#"[{"amf":"8000","sqn":"000000000020","supi":"imsi-999700000000001"}]"#, "SQN used once");
+    assert_eq!(
+        body, r#"[{"amf":"8000","auth":"5g-aka","sqn":"000000000020","supi":"imsi-999700000000001"}]"#,
+        "SQN used once"
+    );
     assert_eq!(http(&mut tb, addr, "POST", "/api/nfs/udm/subscribers", subscriber).0, 409);
 
     let (status, _) = http(&mut tb, addr, "DELETE", "/api/nfs/udm/subscribers/imsi-999700000000001", "");

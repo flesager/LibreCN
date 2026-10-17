@@ -97,8 +97,17 @@ impl Udm {
             let mut reply = reply.with_corr_id(msg.corr_id()).with_flags(flags::RESPONSE);
             match answer {
                 Ok((supi, v)) => {
-                    (reply.supi, reply.rand, reply.autn, reply.xres_star, reply.kausf) =
-                        (supi, v.rand, v.autn, v.xres_star, v.kausf);
+                    (reply.supi, reply.rand, reply.autn) = (supi, v.rand, v.autn);
+                    match v.method {
+                        aka::Method::FiveGAka { xres_star, kausf } => {
+                            (reply.xres_star, reply.kausf) = (xres_star, kausf)
+                        }
+                        aka::Method::EapAkaPrime { xres, ck_prime, ik_prime } => {
+                            reply.method = librecn_sbi::ue_authentication::method::EAP_AKA_PRIME;
+                            reply.xres[..8].copy_from_slice(&xres);
+                            (reply.xres_len, reply.ck_prime, reply.ik_prime) = (8, ck_prime, ik_prime);
+                        }
+                    }
                 }
                 Err(outcome) => reply.set_outcome(outcome),
             }
