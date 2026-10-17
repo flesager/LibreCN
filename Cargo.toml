@@ -10,8 +10,10 @@ members = [
     "proto/security",
     "proto/sbi",
     "nf/amf",
+    "nf/smf",
     "nf/ausf",
     "nf/udm",
+    "nf/upf",
 ]
 exclude = ["proto/ngap/codegen"]
 

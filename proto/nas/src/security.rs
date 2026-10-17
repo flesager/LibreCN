@@ -96,6 +96,11 @@ impl SecurityContext {
         SecurityContext { ngksi, ciphering, integrity, k_enc, k_int, ul_count: 0, dl_count: 0 }
     }
 
+    /// The NAS COUNT of the last uplink message accepted (0 before any).
+    pub fn last_uplink_count(&self) -> u32 {
+        self.ul_count.saturating_sub(1)
+    }
+
     fn cipher(&self, count: u32, direction: Direction, data: &mut [u8]) {
         if self.ciphering == NEA2 {
             nea2(&self.k_enc, count, BEARER, direction, data);

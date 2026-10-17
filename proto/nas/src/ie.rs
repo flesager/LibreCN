@@ -75,7 +75,7 @@ pub struct Snssai {
 
 impl Snssai {
     /// From an S-NSSAI value without its length.
-    fn decode(v: &[u8]) -> Result<Self> {
+    pub(crate) fn decode(v: &[u8]) -> Result<Self> {
         match v.len() {
             1 | 2 => Ok(Snssai { sst: v[0], sd: None }),
             4 | 5 | 8 => Ok(Snssai { sst: v[0], sd: Some([v[1], v[2], v[3]]) }),
@@ -83,7 +83,7 @@ impl Snssai {
         }
     }
 
-    fn encode(&self, w: &mut Writer<'_>) {
+    pub(crate) fn encode(&self, w: &mut Writer<'_>) {
         w.lv(|w| {
             w.u8(self.sst);
             if let Some(sd) = self.sd {
@@ -355,6 +355,58 @@ impl fmt::Display for MobileIdentity<'_> {
     }
 }
 
+/// A DNN (§9.11.2.1B) as received: APN labels, each prefixed by its
+/// length (TS 23.003 §9.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dnn<'a>(pub &'a [u8]);
+
+impl<'a> Dnn<'a> {
+    /// The labels; `None` for one overrunning the value.
+    fn labels(self) -> impl Iterator<Item = Option<&'a [u8]>> {
+        let mut rest = self.0;
+        std::iter::from_fn(move || {
+            let (&n, tail) = rest.split_first()?;
+            let label = tail.get(..usize::from(n));
+            rest = if label.is_some() { &tail[usize::from(n)..] } else { &[] };
+            Some(label)
+        })
+    }
+
+    /// Whether this is the DNN `name` (dotted labels, ASCII case ignored).
+    pub fn is(self, name: &str) -> bool {
+        let mut mine = self.labels();
+        let mut theirs = name.split('.');
+        loop {
+            match (mine.next(), theirs.next()) {
+                (None, None) => return !self.0.is_empty(),
+                (Some(Some(a)), Some(b)) if a.eq_ignore_ascii_case(b.as_bytes()) => {}
+                _ => return false,
+            }
+        }
+    }
+
+    pub(crate) fn encode(name: &str, w: &mut Writer<'_>) {
+        for label in name.split('.') {
+            w.u8(label.len().min(63) as u8);
+            w.bytes(&label.as_bytes()[..label.len().min(63)]);
+        }
+    }
+}
+
+impl fmt::Display for Dnn<'_> {
+    /// Dotted labels.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, label) in self.labels().enumerate() {
+            let Some(label) = label else { return f.write_str("?") };
+            if i > 0 {
+                f.write_str(".")?;
+            }
+            f.write_str(&String::from_utf8_lossy(label))?;
+        }
+        Ok(())
+    }
+}
+
 /// A tracking area: PLMN and 24-bit TAC.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Tai {
@@ -413,6 +465,20 @@ mod tests {
         // UERANSIM's IMEISV 4370816125816151 (even: filler in the last octet).
         let imeisv = hex("45 73 80 61 21 85 61 51 f1");
         assert_eq!(MobileIdentity::decode(&imeisv).unwrap().to_string(), "imeisv-4370816125816151");
+    }
+
+    #[test]
+    fn dnns_are_compared_label_by_label() {
+        let mut buf = [0u8; 16];
+        let mut w = Writer::new(&mut buf);
+        Dnn::encode("internet.mnc070", &mut w);
+        let n = w.finish().unwrap();
+        assert_eq!(buf[..n], hex("08 696e7465726e6574 06 6d6e63303730")[..]);
+        let dnn = Dnn(&buf[..n]);
+        assert!(dnn.is("internet.mnc070") && dnn.is("INTERNET.mnc070") && !dnn.is("internet"));
+        assert_eq!(dnn.to_string(), "internet.mnc070");
+        assert!(!Dnn(&hex("09 696e74")).is("int") && !Dnn(&[]).is(""));
+        assert_eq!(Dnn(&hex("09 696e74")).to_string(), "?");
     }
 
     #[test]

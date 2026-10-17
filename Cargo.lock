@@ -464,7 +464,9 @@ dependencies = [
  "librecn-common",
  "librecn-oam",
  "librecn-scheduler",
+ "librecn-smf",
  "librecn-udm",
+ "librecn-upf",
  "serde",
  "serde_json",
  "signal-hook",
@@ -485,7 +487,9 @@ dependencies = [
  "librecn-sbi",
  "librecn-scheduler",
  "librecn-security",
+ "librecn-smf",
  "librecn-udm",
+ "librecn-upf",
  "proptest",
  "rasn",
  "serde",
@@ -577,6 +581,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "librecn-smf"
+version = "0.1.0"
+dependencies = [
+ "librecn-common",
+ "librecn-nas",
+ "librecn-ngap",
+ "librecn-oam",
+ "librecn-sbi",
+ "librecn-scheduler",
+ "librecn-upf",
+ "rasn",
+ "serde",
+ "serde_json",
+ "zerocopy",
+]
+
+[[package]]
 name = "librecn-udm"
 version = "0.1.0"
 dependencies = [
@@ -586,6 +607,17 @@ dependencies = [
  "librecn-scheduler",
  "librecn-security",
  "rustix",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "librecn-upf"
+version = "0.1.0"
+dependencies = [
+ "librecn-common",
+ "librecn-sbi",
+ "librecn-scheduler",
  "serde",
  "serde_json",
 ]

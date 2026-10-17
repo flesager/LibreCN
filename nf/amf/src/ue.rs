@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::config::Plmn;
+use crate::config::{Plmn, Snssai};
 use crate::mm::Mm;
 use crate::sctp::AssocId;
 
@@ -24,6 +24,14 @@ pub struct Location {
     pub cell: (Plmn, u64),
 }
 
+/// A PDU session of the UE, as the AMF knows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PduSession {
+    pub snssai: Snssai,
+    /// The SMF's context, once it answered.
+    pub sm_ctx: Option<u32>,
+}
+
 /// One UE context.
 #[derive(Clone, Debug)]
 pub struct UeContext {
@@ -38,6 +46,8 @@ pub struct UeContext {
     pub releasing: bool,
     /// Its 5GMM context, which lives as long as the N2 context for now.
     pub mm: Mm,
+    /// PDU sessions by PDU session ID (1 to 15).
+    pub sessions: [Option<PduSession>; 16],
 }
 
 /// Why an id pair does not match a context (TS 38.413 §10.6 causes).
@@ -84,7 +94,16 @@ impl UeTable {
         self.next = if self.next == AMF_UE_ID_MAX { 1 } else { self.next + 1 };
         // Spread UEs over streams 1.. (stream 0 is for non-UE signalling).
         let stream = if streams > 1 { 1 + (amf_id % u64::from(streams - 1)) as u16 } else { 0 };
-        let ue = UeContext { amf_id, ran_id, assoc, stream, location: None, releasing: false, mm: Mm::default() };
+        let ue = UeContext {
+            amf_id,
+            ran_id,
+            assoc,
+            stream,
+            location: None,
+            releasing: false,
+            mm: Mm::default(),
+            sessions: [None; 16],
+        };
         Some(self.ues.entry(amf_id).or_insert(ue))
     }
 
@@ -110,11 +129,9 @@ impl UeTable {
         self.ues.remove(&amf_id)
     }
 
-    /// Removes every context of a gNB (association lost, NG Reset). Returns how many.
-    pub fn remove_gnb(&mut self, assoc: AssocId) -> usize {
-        let before = self.ues.len();
-        self.ues.retain(|_, ue| ue.assoc != assoc);
-        before - self.ues.len()
+    /// Removes every context of a gNB (association lost, NG Reset).
+    pub fn remove_gnb(&mut self, assoc: AssocId) -> Vec<UeContext> {
+        self.ues.extract_if(|_, ue| ue.assoc == assoc).map(|(_, ue)| ue).collect()
     }
 }
 
@@ -132,7 +149,7 @@ mod tests {
         assert_eq!(t.create(8, 5, 1).unwrap().stream, 0, "single-stream association");
         assert!(t.create(8, 6, 4).is_none(), "full");
         assert_eq!(t.find(7, 101), Some(b.amf_id));
-        assert_eq!(t.remove_gnb(7), 2);
+        assert_eq!(t.remove_gnb(7).len(), 2);
         assert_eq!(t.len(), 1);
     }
 

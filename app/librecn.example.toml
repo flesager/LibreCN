@@ -38,6 +38,26 @@ udm = "udm"
 max_contexts = 1024
 
 [[nf]]
+kind = "upf"
+name = "upf"
+pool = "cp"
+[nf.params]                   # all optional: these are the defaults
+n3 = "127.0.0.2"              # GTP-U address for the gNBs (not UERANSIM's 127.0.0.1)
+max_sessions = 1024
+
+[[nf]]
+kind = "smf"
+name = "smf"
+pool = "cp"
+[nf.params]                   # all optional: these are the defaults
+upf = "upf"
+dnn = "internet"
+pool = "10.45.0.0/16"         # UE addresses; 10.45.0.1 is the UPF's N6 side
+slices = [{ sst = 1 }]
+five_qi = 9
+ambr_mbps = { uplink = 1000, downlink = 1000 }
+
+[[nf]]
 kind = "amf"
 name = "amf-1"
 pool = "cp"
@@ -51,6 +71,7 @@ relative_capacity = 255
 slices = [{ sst = 1 }]
 max_ues = 1024
 ausf = "ausf"
+smf = "smf"
 ciphering = ["NEA2", "NEA0"]
 
 [[nf]]

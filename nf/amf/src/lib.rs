@@ -1,24 +1,27 @@
 //! AMF, the access and mobility management function, hosted in one EO.
 //!
 //! This release covers N2 (SCTP one-to-many, NG Setup, NG Reset, Error
-//! Indication, UE-associated signalling) and registration: 5G AKA through
-//! the AUSF, NAS security, Registration Accept, UE-originating
-//! deregistration.
+//! Indication, UE-associated signalling), registration (5G AKA through the
+//! AUSF, NAS security, Registration Accept in Initial Context Setup,
+//! UE-originating deregistration) and PDU session establishment through the
+//! SMF (PDU Session Resource Setup).
 //!
 //! - [`sctp`], the transport;
 //! - `n2`, NGAP ↔ domain values (the only module seeing ASN.1);
 //! - `setup`, the NG Setup decision, on domain values;
 //! - `ue`, UE contexts and AMF-UE-NGAP-ID allocation;
 //! - `mm`, 5GMM for one UE, on domain values;
+//! - `sessions`, PDU sessions between the UE, the SMF and the gNB;
 //! - [`config`], identity and addresses, from the deployment `params`.
 //!
-//! The AUSF is reached by EO messages (`librecn-sbi`); the `corr_id` of a
-//! request is the UE's AMF-UE-NGAP-ID.
+//! The AUSF and the SMF are reached by EO messages (`librecn-sbi`); the
+//! `corr_id` of a request is the UE's AMF-UE-NGAP-ID.
 
 pub mod config;
 mod mm;
 mod n2;
 pub mod sctp;
+mod sessions;
 mod setup;
 mod ue;
 
@@ -37,16 +40,17 @@ use librecn_ngap::{
     Cause, CauseNas, CauseProtocol, CauseRadioNetwork, Criticality, ID_INITIAL_UEMESSAGE, ID_NGRESET,
     ID_UECONTEXT_RELEASE_REQUEST, ID_UPLINK_NASTRANSPORT, procedure_name,
 };
+use librecn_sbi::pdu_session::{CreateSmContext, CreateSmContextResult, Slice, UpdateSmContextResult};
 use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
-use librecn_sbi::{ServingNetwork, SupiOrSuci};
-use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message};
+use librecn_sbi::{DnnText, ServingNetwork, SupiOrSuci};
+use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, MsgBody};
 
 use config::AmfConfig;
-use mm::{Effects, Release};
+use mm::{AsContext, Effects, Release, SessionRequest};
 use n2::Incoming;
 use sctp::{AssocId, NGAP_PPID, Received, SctpSocket};
 use setup::RanNodeId;
-use ue::{AmfUeId, Location, Mismatch, RanUeId, UeTable};
+use ue::{AmfUeId, Location, Mismatch, PduSession, RanUeId, UeTable};
 
 /// Largest NGAP message accepted (a larger one is dropped and logged).
 const RECEIVE_BUFFER: usize = 64 * 1024;
@@ -69,6 +73,7 @@ pub struct Amf {
     config: AmfConfig,
     serving_network: ServingNetwork,
     ausf: Service,
+    smf: Service,
     socket: Option<(SctpSocket, IoToken)>,
     bound: Arc<Mutex<Option<SocketAddr>>>,
     gnbs: HashMap<AssocId, Gnb>,
@@ -85,6 +90,7 @@ impl Amf {
             ues: UeTable::new(config.max_ues),
             serving_network: config.serving_network(),
             ausf: Service::named(config.ausf.clone()),
+            smf: Service::named(config.smf.clone()),
             config,
             socket: None,
             bound: Arc::default(),
@@ -102,9 +108,9 @@ impl Amf {
     }
 
     /// N2 traffic arrives through the SCTP socket, not the mailbox: small
-    /// lanes, and buffers for the AUSF's answers.
+    /// lanes, and buffers for the AUSF's and the SMF's answers.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_io(1).max_timers(4).system_capacity(16).buffers(&[(256, 64)])
+        EoConfig::new(name).max_io(1).max_timers(4).system_capacity(16).buffers(&[(256, 64), (2048, 16)])
     }
 
     /// The N2 address actually bound, once the EO started (port 0: chosen by the kernel).
@@ -139,7 +145,7 @@ impl Amf {
                 self.gnbs.insert(assoc, Gnb { node: None, streams: outbound_streams });
             }
             Received::Down { assoc } => {
-                let released = self.ues.remove_gnb(assoc);
+                let released = self.forget_gnb(ctx, assoc);
                 match self.gnbs.remove(&assoc).and_then(|g| g.node) {
                     Some((node, name)) => {
                         let label = name.unwrap_or_else(|| node.to_string());
@@ -170,7 +176,7 @@ impl Amf {
         match n2::decode(data) {
             Incoming::NgSetup(request) => self.on_ng_setup(ctx, assoc, request),
             Incoming::NgReset if set_up => {
-                let released = self.ues.remove_gnb(assoc);
+                let released = self.forget_gnb(ctx, assoc);
                 self.send(ctx, assoc, 0, n2::ng_reset_acknowledge(), "NG Reset Acknowledge");
                 log!(self.log, ctx, Info, "NG Reset from association {assoc}: {released} UE(s) released, acknowledged");
             }
@@ -202,7 +208,11 @@ impl Amf {
             }
             Incoming::ReleaseComplete { amf_id, ran_id } => match self.ues.get_mut(assoc, amf_id, ran_id) {
                 Ok(_) => {
-                    let supi = self.ues.remove(amf_id).and_then(|ue| ue.mm.supi().copied());
+                    let gone = self.ues.remove(amf_id);
+                    let supi = gone.as_ref().and_then(|ue| ue.mm.supi().copied());
+                    if let Some(ue) = &gone {
+                        self.forget_sessions(ctx, ue);
+                    }
                     let left = self.ues.len();
                     match supi {
                         Some(supi) => log!(self.log, ctx, Info, "UE {amf_id} ({supi}): released, {left} UE(s) left"),
@@ -211,6 +221,20 @@ impl Amf {
                 }
                 // A late Complete for a context already gone: nothing to do (criticality ignore).
                 Err(_) => log!(self.log, ctx, Debug, "UE Context Release Complete for unknown UE {amf_id}"),
+            },
+            Incoming::ContextSetup { amf_id, ran_id, failure } => {
+                match (self.ues.get_mut(assoc, amf_id, ran_id), failure) {
+                    (Ok(_), None) => log!(self.log, ctx, Info, "UE {amf_id}: Initial Context Setup done"),
+                    (Ok(_), Some(cause)) => {
+                        log!(self.log, ctx, Error, "UE {amf_id}: Initial Context Setup failed ({cause})");
+                        self.release(ctx, amf_id, Cause::nas(CauseNas::unspecified));
+                    }
+                    (Err(mismatch), _) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
+                }
+            }
+            Incoming::SessionSetup { amf_id, ran_id, setup, failed } => match self.ues.get_mut(assoc, amf_id, ran_id) {
+                Ok(_) => self.on_session_setup(ctx, amf_id, setup, failed),
+                Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
             },
             Incoming::Malformed(e) => {
                 log!(self.log, ctx, Error, "malformed NGAP from association {assoc}: {e}");
@@ -255,7 +279,9 @@ impl Amf {
     ) {
         // The gNB reuses a RAN-UE-NGAP-ID only for a new UE: the old context is stale.
         if let Some(stale) = self.ues.find(assoc, ran_id) {
-            self.ues.remove(stale);
+            if let Some(ue) = self.ues.remove(stale) {
+                self.forget_sessions(ctx, &ue);
+            }
             log!(self.log, ctx, Info, "UE {stale}: replaced by a new Initial UE Message for RAN id {ran_id}");
         }
         let streams = self.gnbs.get(&assoc).map_or(1, |g| g.streams);
@@ -291,7 +317,10 @@ impl Amf {
             socket: self.socket.as_ref().map(|(s, _)| s),
             log: &mut self.log,
             ausf: &mut self.ausf,
+            smf: &mut self.smf,
+            config: &self.config,
             serving_network: &self.serving_network,
+            sessions: &mut ue.sessions,
             ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
             release: None,
         };
@@ -311,13 +340,21 @@ impl Amf {
         self.with_mm(ctx, amf_id, |mm, config, tai, port| mm.on_uplink(config, tai, pdu, port));
     }
 
-    /// An answer of the AUSF, for the UE its `corr_id` names.
-    fn on_ausf(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>) {
+    /// An answer of the AUSF or the SMF, for the UE its `corr_id` names.
+    fn on_peer(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>) {
         let amf_id = AmfUeId::from(msg.corr_id());
         if let Some(result) = msg.body::<AuthenticateResult>() {
             self.with_mm(ctx, amf_id, |mm, _, _, port| mm.on_authenticate_result(result, port));
         } else if let Some(result) = msg.body::<ConfirmResult>() {
             self.with_mm(ctx, amf_id, |mm, config, _, port| mm.on_confirm_result(config, result, port));
+        } else if let Some(result) = msg.body::<CreateSmContextResult>() {
+            self.on_sm_created(ctx, amf_id, result);
+        } else if let Some(result) = msg.body::<UpdateSmContextResult>() {
+            let (psi, outcome) = (result.pdu_session_id, result.outcome());
+            match outcome {
+                librecn_sbi::Outcome::Ok => log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} set up"),
+                _ => log!(self.log, ctx, Error, "UE {amf_id}: PDU session {psi} not updated: {outcome:?}"),
+            }
         }
     }
 
@@ -398,7 +435,7 @@ impl ExecutionObject for Amf {
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if msg.io().is_none() {
-            return self.on_ausf(ctx, msg);
+            return self.on_peer(ctx, msg);
         }
         let mut buffer = std::mem::take(&mut self.buffer);
         for _ in 0..MESSAGES_PER_TURN {
@@ -429,42 +466,51 @@ impl ExecutionObject for Amf {
     }
 }
 
-/// 5GMM's effects for one UE: NAS over N2, requests to the AUSF, logs.
+/// Sends a request to a peer NF (AUSF, SMF) about UE `amf_id`, its
+/// `corr_id`. False, logged, if the peer cannot be reached.
+fn request<T: MsgBody>(
+    ctx: &mut Context<'_>,
+    peer: &mut Service,
+    log: &mut Logger,
+    amf_id: AmfUeId,
+    fill: impl FnOnce(&mut T),
+) -> bool {
+    let Some(to) = peer.get(ctx) else {
+        log!(log, ctx, Error, "no {:?} EO", peer.name());
+        return false;
+    };
+    let sent = ctx.alloc::<T>(to).and_then(|m| {
+        let mut m = m.with_corr_id(amf_id as u32).with_flags(flags::REQUEST);
+        fill(&mut m);
+        ctx.send(m)
+    });
+    if let Err(e) = &sent {
+        peer.forget();
+        log!(log, ctx, Error, "cannot reach {:?}: {e}", peer.name());
+    }
+    sent.is_ok()
+}
+
+/// 5GMM's effects for one UE: NAS over N2, requests to the AUSF and the SMF, logs.
 struct Port<'a, 'c, 's> {
     ctx: &'a mut Context<'c>,
     socket: Option<&'s SctpSocket>,
     log: &'a mut Logger,
     ausf: &'a mut Service,
+    smf: &'a mut Service,
+    config: &'a AmfConfig,
     serving_network: &'a ServingNetwork,
+    sessions: &'a mut [Option<PduSession>; 16],
     /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
     ids: (AmfUeId, RanUeId, AssocId, u16),
     release: Option<Release>,
 }
 
 impl Port<'_, '_, '_> {
-    /// Sends a request to the AUSF, `corr_id` the AMF-UE-NGAP-ID.
-    fn request_ausf<T: librecn_scheduler::MsgBody>(&mut self, fill: impl FnOnce(&mut T)) -> bool {
-        let Some(ausf) = self.ausf.get(self.ctx) else {
-            log!(self.log, self.ctx, Error, "no AUSF {:?}", self.ausf.name());
-            return false;
-        };
-        let sent = self.ctx.alloc::<T>(ausf).and_then(|m| {
-            let mut m = m.with_corr_id(self.ids.0 as u32).with_flags(flags::REQUEST);
-            fill(&mut m);
-            self.ctx.send(m)
-        });
-        if let Err(e) = &sent {
-            self.ausf.forget();
-            log!(self.log, self.ctx, Error, "cannot reach the AUSF: {e}");
-        }
-        sent.is_ok()
-    }
-}
-
-impl Effects for Port<'_, '_, '_> {
-    fn send(&mut self, pdu: &[u8], what: &'static str) {
-        let (amf_id, ran_id, assoc, stream) = self.ids;
-        let sent = n2::downlink_nas_transport(amf_id, ran_id, pdu).and_then(|bytes| {
+    /// Sends an NGAP PDU on the UE's association and stream.
+    fn ngap(&mut self, pdu: Result<Vec<u8>, String>, what: &str) {
+        let (amf_id, _, assoc, stream) = self.ids;
+        let sent = pdu.and_then(|bytes| {
             let socket = self.socket.ok_or("N2 closed")?;
             socket.send(assoc, stream, NGAP_PPID, &bytes).map_err(|e| e.to_string())
         });
@@ -473,6 +519,43 @@ impl Effects for Port<'_, '_, '_> {
             Err(e) => log!(self.log, self.ctx, Error, "UE {amf_id}: cannot send {what}: {e}"),
         }
     }
+}
+
+impl Effects for Port<'_, '_, '_> {
+    fn send(&mut self, pdu: &[u8], what: &'static str) {
+        let (amf_id, ran_id, ..) = self.ids;
+        self.ngap(n2::downlink_nas_transport(amf_id, ran_id, pdu), what);
+    }
+
+    fn setup_context(&mut self, pdu: &[u8], context: &AsContext) {
+        let (amf_id, ran_id, ..) = self.ids;
+        let request = n2::initial_context_setup_request(amf_id, ran_id, self.config, context, pdu);
+        self.ngap(request, "Registration Accept in Initial Context Setup");
+    }
+
+    fn session(&mut self, r: &SessionRequest<'_>) -> Result<(), u8> {
+        let psi = r.pdu_session_id;
+        if !r.initial || self.sessions[usize::from(psi)].is_some() {
+            log!(self.log, self.ctx, Info, "UE {}: PDU session {psi}: only new sessions are served", self.ids.0);
+            return Err(librecn_nas::mm::cause::PAYLOAD_NOT_FORWARDED);
+        }
+        let dnn = match r.dnn {
+            Some(dnn) => DnnText::format(format_args!("{dnn}")),
+            None => DnnText::new(""),
+        };
+        let sent = request::<CreateSmContext>(self.ctx, self.smf, self.log, self.ids.0, |m| {
+            (m.supi, m.pdu_session_id) = (r.supi, psi);
+            let sd = r.snssai.sd;
+            m.slice = Slice { sst: r.snssai.sst, has_sd: u8::from(sd.is_some()), sd: sd.unwrap_or_default() };
+            m.dnn = dnn.unwrap_or(m.dnn);
+            m.n1.set(r.container);
+        });
+        if !sent {
+            return Err(librecn_nas::mm::cause::PAYLOAD_NOT_FORWARDED);
+        }
+        self.sessions[usize::from(psi)] = Some(PduSession { snssai: r.snssai, sm_ctx: None });
+        Ok(())
+    }
 
     fn authenticate(&mut self, who: &SupiOrSuci, resync: Option<([u8; 16], [u8; 14])>) -> bool {
         let info = AuthInfo::new(*who, *self.serving_network);
@@ -480,11 +563,13 @@ impl Effects for Port<'_, '_, '_> {
             Some((rand, auts)) => info.with_resync(rand, auts),
             None => info,
         };
-        self.request_ausf::<Authenticate>(|m| m.info = info)
+        request::<Authenticate>(self.ctx, self.ausf, self.log, self.ids.0, |m| m.info = info)
     }
 
     fn confirm(&mut self, auth_ctx: u32, res_star: &[u8; 16]) -> bool {
-        self.request_ausf::<Confirm>(|m| (m.auth_ctx, m.res_star) = (auth_ctx, *res_star))
+        request::<Confirm>(self.ctx, self.ausf, self.log, self.ids.0, |m| {
+            (m.auth_ctx, m.res_star) = (auth_ctx, *res_star)
+        })
     }
 
     fn release(&mut self, why: Release) {

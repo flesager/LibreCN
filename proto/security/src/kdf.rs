@@ -1,5 +1,7 @@
 //! The key derivation function of TS 33.220 Annex B.2 (HMAC-SHA-256 over
 //! `FC || P0 || L0 || P1 || L1 ...`) and the 5G keys of TS 33.501 Annex A.
+//! The key chain is checked against UERANSIM; K_gNB, which UERANSIM does
+//! not derive, follows the same KDF with the parameters of A.9.
 
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
@@ -53,6 +55,13 @@ pub fn kseaf(kausf: &[u8; 32], serving_network: &str) -> [u8; 32] {
 /// K_AMF (A.7), for a SUPI of type IMSI given as its digits.
 pub fn kamf(kseaf: &[u8; 32], imsi: &str, abba: &[u8]) -> [u8; 32] {
     kdf(kseaf, 0x6d, &[imsi.as_bytes(), abba])
+}
+
+/// K_gNB (A.9), from the uplink NAS COUNT of the message that triggered it,
+/// for 3GPP access.
+pub fn kgnb(kamf: &[u8; 32], ul_count: u32) -> [u8; 32] {
+    const ACCESS_3GPP: u8 = 0x01;
+    kdf(kamf, 0x6e, &[&ul_count.to_be_bytes(), &[ACCESS_3GPP]])
 }
 
 /// K_NASenc and K_NASint (A.8) for algorithm identities `ciphering` and

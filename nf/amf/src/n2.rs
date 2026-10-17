@@ -4,6 +4,7 @@ use librecn_ngap::*;
 use rasn::types::{FixedBitString, FixedOctetString, PrintableString};
 
 use crate::config::{AmfConfig, Plmn, Snssai};
+use crate::mm::AsContext;
 use crate::setup::{RanNodeId, Refusal, SetupRequest, SupportedTa};
 use crate::ue::{AmfUeId, Location, RanUeId};
 
@@ -37,6 +38,20 @@ pub(crate) enum Incoming {
         amf_id: AmfUeId,
         ran_id: RanUeId,
     },
+    /// Initial Context Setup Response, or Failure with its cause.
+    ContextSetup {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        failure: Option<String>,
+    },
+    /// PDU Session Resource Setup Response: transfers of the sessions set
+    /// up, and of those that failed, by PDU session ID.
+    SessionSetup {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        setup: Vec<(u8, Vec<u8>)>,
+        failed: Vec<(u8, Vec<u8>)>,
+    },
     /// A procedure this AMF does not handle, with the criticality the
     /// sender gave it (TS 38.413 §10.3: decides whether to answer).
     Unsupported {
@@ -61,6 +76,53 @@ pub(crate) fn decode(bytes: &[u8]) -> Incoming {
                 .and_then(|m| {
                     let ies = &m.protocol_ies.0;
                     Ok(Incoming::ReleaseComplete { amf_id: amf_id(ies)?, ran_id: ran_id(ies)? })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
+        NGAPPDU::successfulOutcome(outcome) if outcome.procedure_code == ID_INITIAL_CONTEXT_SETUP => {
+            return open::<InitialContextSetupResponse>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    Ok(Incoming::ContextSetup { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, failure: None })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
+        NGAPPDU::unsuccessfulOutcome(outcome) if outcome.procedure_code == ID_INITIAL_CONTEXT_SETUP => {
+            return open::<InitialContextSetupFailure>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    let cause = find(ies, ID_CAUSE).and_then(|v| open::<Cause>(v).ok());
+                    let failure = Some(cause.map_or_else(|| "no cause".into(), |c| format!("{c:?}")));
+                    Ok(Incoming::ContextSetup { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, failure })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
+        NGAPPDU::successfulOutcome(outcome) if outcome.procedure_code == ID_PDUSESSION_RESOURCE_SETUP => {
+            return open::<PDUSessionResourceSetupResponse>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    let setup = match find(ies, ID_PDUSESSION_RESOURCE_SETUP_LIST_SURES) {
+                        Some(v) => open::<PDUSessionResourceSetupListSURes>(v)
+                            .map_err(|e| format!("setup list: {e}"))?
+                            .0
+                            .into_iter()
+                            .map(|i| (i.p_dusession_id.0, i.p_dusession_resource_setup_response_transfer.to_vec()))
+                            .collect(),
+                        None => vec![],
+                    };
+                    let failed = match find(ies, ID_PDUSESSION_RESOURCE_FAILED_TO_SETUP_LIST_SURES) {
+                        Some(v) => open::<PDUSessionResourceFailedToSetupListSURes>(v)
+                            .map_err(|e| format!("failed list: {e}"))?
+                            .0
+                            .into_iter()
+                            .map(|i| (i.p_dusession_id.0, i.p_dusession_resource_setup_unsuccessful_transfer.to_vec()))
+                            .collect(),
+                        None => vec![],
+                    };
+                    Ok(Incoming::SessionSetup { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, setup, failed })
                 })
                 .unwrap_or_else(Incoming::Malformed);
         }
@@ -130,6 +192,9 @@ ie! {
     AnonymousUplinkNASTransportProtocolIEs: |e: &Self| e.id.0;
     AnonymousUEContextReleaseRequestProtocolIEs: |e: &Self| e.id.0;
     AnonymousUEContextReleaseCompleteProtocolIEs: |e: &Self| e.id.0;
+    AnonymousInitialContextSetupResponseProtocolIEs: |e: &Self| e.id;
+    AnonymousInitialContextSetupFailureProtocolIEs: |e: &Self| e.id;
+    AnonymousPDUSessionResourceSetupResponseProtocolIEs: |e: &Self| e.id;
 }
 
 fn find<E: Ie>(ies: &[E], id: ProtocolIEID) -> Option<&Any> {
@@ -301,6 +366,98 @@ pub(crate) fn downlink_nas_transport(amf_id: AmfUeId, ran_id: RanUeId, nas: &[u8
     ];
     let message = wrap(&DownlinkNASTransport::new(DownlinkNASTransportProtocolIEs(ies))).map_err(encoding_error)?;
     pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_DOWNLINK_NASTRANSPORT, Criticality::ignore, message)))
+}
+
+fn snssai(s: Snssai) -> SNSSAI {
+    SNSSAI::new(SST(FixedOctetString::new([s.sst])), s.sd.map(|sd| SD(FixedOctetString::new(sd))), None)
+}
+
+/// The NR (or E-UTRA) algorithms of a NAS capability octet as NGAP's
+/// 16-bit string: NAS bits 128-EA1/IA1, EA2/IA2, EA3/IA3 (0x40, 0x20, 0x10)
+/// become the string's first three bits; EA0/IA0 has no bit.
+fn algorithms(nas_octet: u8) -> rasn::types::BitString {
+    rasn::types::BitString::from_slice(&[(nas_octet & 0x70) << 1, 0])
+}
+
+/// INITIAL CONTEXT SETUP REQUEST carrying `nas`, no PDU session.
+pub(crate) fn initial_context_setup_request(
+    amf_id: AmfUeId,
+    ran_id: RanUeId,
+    config: &AmfConfig,
+    context: &AsContext,
+    nas: &[u8],
+) -> Result<Vec<u8>, String> {
+    use AnonymousInitialContextSetupRequestProtocolIEsCriticality::{ignore, reject};
+    let guami = GUAMI::new(
+        plmn(config.plmn),
+        AMFRegionID(bits(u32::from(config.amf_region))),
+        AMFSetID(bits(u32::from(config.amf_set))),
+        AMFPointer(bits(u32::from(config.amf_pointer))),
+        None,
+    );
+    let allowed = AllowedNSSAI(context.allowed.iter().map(|s| AllowedNSSAIItem::new(snssai(s), None)).collect());
+    let caps = context.capability.as_bytes();
+    let octet = |i: usize| caps.get(i).copied().unwrap_or(0);
+    let security = UESecurityCapabilities::new(
+        NRencryptionAlgorithms(algorithms(octet(0))),
+        NRintegrityProtectionAlgorithms(algorithms(octet(1))),
+        EUTRAencryptionAlgorithms(algorithms(octet(2))),
+        EUTRAintegrityProtectionAlgorithms(algorithms(octet(3))),
+        None,
+    );
+    let mut key = FixedBitString::<256>::ZERO;
+    for (i, byte) in context.kgnb.iter().enumerate() {
+        for bit in 0..8 {
+            key.set(i * 8 + bit, byte >> (7 - bit) & 1 == 1);
+        }
+    }
+    let key = SecurityKey(key);
+    let ie = |id: ProtocolIEID, criticality, value: Result<Any, EncodeError>| {
+        value.map(|v| AnonymousInitialContextSetupRequestProtocolIEs::new(id.0, criticality, v)).map_err(encoding_error)
+    };
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, reject, wrap(&AMFUENGAPID(amf_id)))?,
+        ie(ID_RAN_UE_NGAP_ID, reject, wrap(&RANUENGAPID(ran_id)))?,
+        ie(ID_GUAMI, reject, wrap(&guami))?,
+        ie(ID_ALLOWED_NSSAI, reject, wrap(&allowed))?,
+        ie(ID_UESECURITY_CAPABILITIES, reject, wrap(&security))?,
+        ie(ID_SECURITY_KEY, reject, wrap(&key))?,
+        ie(ID_NAS_PDU, ignore, wrap(&NASPDU(nas.into())))?,
+    ];
+    let message =
+        wrap(&InitialContextSetupRequest::new(InitialContextSetupRequestProtocolIEs(ies))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_INITIAL_CONTEXT_SETUP, Criticality::reject, message)))
+}
+
+/// PDU SESSION RESOURCE SETUP REQUEST for one session: the UE's NAS (the
+/// SMF's accept in DL NAS Transport) and the SMF's transfer for the gNB.
+pub(crate) fn pdu_session_resource_setup_request(
+    amf_id: AmfUeId,
+    ran_id: RanUeId,
+    pdu_session_id: u8,
+    nas: &[u8],
+    slice: Snssai,
+    transfer: &[u8],
+) -> Result<Vec<u8>, String> {
+    use AnonymousPDUSessionResourceSetupRequestProtocolIEsCriticality::reject;
+    let item = PDUSessionResourceSetupItemSUReq::new(
+        PDUSessionID(pdu_session_id),
+        Some(NASPDU(nas.into())),
+        snssai(slice),
+        transfer.to_vec().into(),
+        None,
+    );
+    let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
+        value.map(|v| AnonymousPDUSessionResourceSetupRequestProtocolIEs::new(id.0, reject, v)).map_err(encoding_error)
+    };
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)))?,
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)))?,
+        ie(ID_PDUSESSION_RESOURCE_SETUP_LIST_SUREQ, wrap(&PDUSessionResourceSetupListSUReq(vec![item])))?,
+    ];
+    let message = wrap(&PDUSessionResourceSetupRequest::new(PDUSessionResourceSetupRequestProtocolIEs(ies)))
+        .map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_PDUSESSION_RESOURCE_SETUP, Criticality::reject, message)))
 }
 
 /// UE CONTEXT RELEASE COMMAND for a UE.

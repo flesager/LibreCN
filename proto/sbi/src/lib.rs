@@ -7,8 +7,12 @@
 //! without changing the NFs' logic.
 //!
 //! - [`ue_authentication`]: Nausf_UEAuthentication (TS 29.509) and
-//!   Nudm_UEAuthentication (TS 29.503), 5G AKA only.
+//!   Nudm_UEAuthentication (TS 29.503), 5G AKA only;
+//! - [`pdu_session`]: Nsmf_PDUSession (TS 29.502) between AMF and SMF, and
+//!   N4 between SMF and UPF. N4 is PFCP (TS 29.244) in 3GPP; here it is EO
+//!   messages too, by the owner's choice (small deployments, one process).
 
+pub mod pdu_session;
 pub mod ue_authentication;
 
 use std::fmt;
@@ -32,6 +36,8 @@ pub enum Outcome {
     ContextNotFound = 5,
     /// The next NF could not be reached (HTTP 504).
     Unavailable = 6,
+    /// A container or IE could not be decoded (HTTP 400).
+    InvalidRequest = 7,
 }
 
 impl Outcome {
@@ -44,6 +50,7 @@ impl Outcome {
             3 => Outcome::AuthenticationRejected,
             4 => Outcome::UnsupportedProtectionScheme,
             5 => Outcome::ContextNotFound,
+            7 => Outcome::InvalidRequest,
             _ => Outcome::Unavailable,
         }
     }
@@ -129,6 +136,11 @@ text!(
     /// A SUPI or a SUCI, `suci-0-<mcc>-<mnc>-...` (TS 29.503 §6.1.6.3.2).
     SupiOrSuci,
     159
+);
+text!(
+    /// A data network name, dotted (`internet`).
+    DnnText,
+    63
 );
 text!(
     /// A serving network name, `5G:mnc<mnc>.mcc<mcc>.3gppnetwork.org` (TS 24.501 §9.12.1).

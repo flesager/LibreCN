@@ -22,6 +22,8 @@ serde_json.workspace = true
 librecn-oam = { path = "../../oam" }
 librecn-ausf = { path = "../ausf" }
 librecn-udm = { path = "../udm" }
+librecn-smf = { path = "../smf" }
+librecn-upf = { path = "../upf" }
 proptest.workspace = true
 zerocopy.workspace = true
 

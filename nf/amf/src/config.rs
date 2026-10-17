@@ -14,6 +14,7 @@
 //! slices = [{ sst = 1 }, { sst = 1, sd = "010203" }]
 //! max_ues = 1024
 //! ausf = "ausf"                 # the AUSF's EO name
+//! smf = "smf"                   # the SMF's EO name
 //! ciphering = ["NEA2", "NEA0"]  # NAS ciphering by preference
 //! ```
 //!
@@ -54,6 +55,7 @@ struct Params {
     slices: Vec<SliceParams>,
     max_ues: usize,
     ausf: String,
+    smf: String,
     ciphering: Vec<String>,
 }
 
@@ -69,6 +71,7 @@ impl Default for Params {
             slices: vec![SliceParams { sst: 1, sd: None }],
             max_ues: 1024,
             ausf: "ausf".into(),
+            smf: "smf".into(),
             ciphering: vec!["NEA2".into(), "NEA0".into()],
         }
     }
@@ -97,6 +100,8 @@ pub struct AmfConfig {
     pub max_ues: usize,
     /// The AUSF's EO name.
     pub ausf: String,
+    /// The SMF's EO name.
+    pub smf: String,
     /// NAS ciphering algorithm identities, by preference.
     pub ciphering: Vec<u8>,
 }
@@ -140,6 +145,7 @@ impl AmfConfig {
             slices,
             max_ues: p.max_ues,
             ausf: p.ausf,
+            smf: p.smf,
             ciphering,
         })
     }

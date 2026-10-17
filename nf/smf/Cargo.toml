@@ -1,0 +1,25 @@
+[package]
+name = "librecn-smf"
+description = "SMF: session management function (PDU session establishment)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-scheduler = { path = "../../scheduler" }
+librecn-common = { path = "../../common" }
+librecn-nas = { path = "../../proto/nas" }
+librecn-ngap = { path = "../../proto/ngap" }
+librecn-sbi = { path = "../../proto/sbi" }
+rasn.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+librecn-oam = { path = "../../oam" }
+librecn-upf = { path = "../upf" }
+zerocopy.workspace = true
+
+[lints]
+workspace = true

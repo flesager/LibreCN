@@ -13,6 +13,8 @@ librecn-oam = { path = "../oam" }
 librecn-amf = { path = "../nf/amf" }
 librecn-ausf = { path = "../nf/ausf" }
 librecn-udm = { path = "../nf/udm" }
+librecn-smf = { path = "../nf/smf" }
+librecn-upf = { path = "../nf/upf" }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

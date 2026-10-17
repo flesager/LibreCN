@@ -3,7 +3,7 @@
 //! A plain 5GMM message is the extended protocol discriminator, a security
 //! header type of 0, the message type, then the IEs.
 
-use crate::ie::{Guti, IdentityType, MobileIdentity, NgKsi, Nssai, SnssaiList, Tai, UeSecurityCapability};
+use crate::ie::{Dnn, Guti, IdentityType, MobileIdentity, NgKsi, Nssai, SnssaiList, Tai, UeSecurityCapability};
 use crate::{EPD_5GMM, Error, Reader, Result, Writer};
 
 /// Message types (§9.7).
@@ -69,7 +69,28 @@ pub mod cause {
     pub const INVALID_MANDATORY_INFORMATION: u8 = 96;
     pub const MESSAGE_TYPE_NOT_IMPLEMENTED: u8 = 97;
     pub const NOT_COMPATIBLE_WITH_PROTOCOL_STATE: u8 = 98;
+    pub const PAYLOAD_NOT_FORWARDED: u8 = 90;
     pub const PROTOCOL_ERROR: u8 = 111;
+}
+
+/// Payload container type N1 SM information (§9.11.3.40): a 5GSM message.
+pub const PAYLOAD_N1_SM: u8 = 1;
+
+/// Request types of UL NAS Transport (§9.11.3.47).
+pub mod request {
+    pub const INITIAL: u8 = 1;
+    pub const EXISTING: u8 = 2;
+}
+
+/// The IEs of a UL NAS Transport (§8.2.10) the AMF uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UlNasTransport<'a> {
+    pub container_type: u8,
+    pub container: &'a [u8],
+    pub pdu_session_id: Option<u8>,
+    pub request_type: Option<u8>,
+    pub snssai: Option<crate::Snssai>,
+    pub dnn: Option<Dnn<'a>>,
 }
 
 /// 5GS registration type (§9.11.3.7).
@@ -130,10 +151,11 @@ pub enum Uplink<'a> {
         ngksi: NgKsi,
         identity: MobileIdentity<'a>,
     },
+    UlNasTransport(UlNasTransport<'a>),
     Status {
         cause: u8,
     },
-    /// Understood but not decoded: Service Request, UL NAS Transport, ...
+    /// Understood but not decoded: Service Request.
     Other(u8),
 }
 
@@ -190,7 +212,8 @@ impl<'a> Uplink<'a> {
                 }
             }
             kind::STATUS => Uplink::Status { cause: r.u8()? },
-            kind::SERVICE_REQUEST | kind::UL_NAS_TRANSPORT => Uplink::Other(kind),
+            kind::UL_NAS_TRANSPORT => Uplink::UlNasTransport(ul_nas_transport(r)?),
+            kind::SERVICE_REQUEST => Uplink::Other(kind),
             _ => return Err(Error::UnknownMessage(kind)),
         };
         Ok(message)
@@ -207,6 +230,7 @@ impl<'a> Uplink<'a> {
             Uplink::SecurityModeReject { .. } => kind::SECURITY_MODE_REJECT,
             Uplink::IdentityResponse { .. } => kind::IDENTITY_RESPONSE,
             Uplink::DeregistrationRequest { .. } => kind::DEREGISTRATION_REQUEST_UE,
+            Uplink::UlNasTransport(_) => kind::UL_NAS_TRANSPORT,
             Uplink::Status { .. } => kind::STATUS,
             Uplink::Other(kind) => *kind,
         }
@@ -243,9 +267,32 @@ fn registration_request(mut r: Reader<'_>) -> Result<RegistrationRequest<'_>> {
     Ok(request)
 }
 
+fn ul_nas_transport(mut r: Reader<'_>) -> Result<UlNasTransport<'_>> {
+    let container_type = r.u8()? & 0x0f;
+    let mut t = UlNasTransport {
+        container_type,
+        container: r.lve()?,
+        pdu_session_id: None,
+        request_type: None,
+        snssai: None,
+        dnn: None,
+    };
+    // PDU session ID (0x12) and old PDU session ID (0x59) are TV.
+    while let Some((iei, v)) = r.optional(&[(0x12, 1), (0x59, 1)])? {
+        match iei {
+            0x12 => t.pdu_session_id = Some(v[0]),
+            0x80 => t.request_type = Some(v[0] & 0x07),
+            0x22 => t.snssai = Some(crate::Snssai::decode(v)?),
+            0x25 => t.dnn = Some(Dnn(v)),
+            _ => {}
+        }
+    }
+    Ok(t)
+}
+
 /// The downlink 5GMM messages the AMF sends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Downlink {
+pub enum Downlink<'a> {
     AuthenticationRequest {
         ngksi: u8,
         rand: [u8; 16],
@@ -276,12 +323,19 @@ pub enum Downlink {
     Status {
         cause: u8,
     },
+    /// A 5GSM message for PDU session `pdu_session_id`; with a 5GMM cause
+    /// when it is the UE's own, sent back (§5.4.5.2.5).
+    DlNasTransport {
+        pdu_session_id: u8,
+        container: &'a [u8],
+        cause: Option<u8>,
+    },
 }
 
 /// ABBA (§9.11.3.10): 0x0000 for this release of TS 33.501.
 pub const ABBA: [u8; 2] = [0, 0];
 
-impl Downlink {
+impl Downlink<'_> {
     pub fn kind(&self) -> u8 {
         match self {
             Downlink::AuthenticationRequest { .. } => kind::AUTHENTICATION_REQUEST,
@@ -293,6 +347,7 @@ impl Downlink {
             Downlink::DeregistrationAccept => kind::DEREGISTRATION_ACCEPT_UE,
             Downlink::ServiceReject { .. } => kind::SERVICE_REJECT,
             Downlink::Status { .. } => kind::STATUS,
+            Downlink::DlNasTransport { .. } => kind::DL_NAS_TRANSPORT,
         }
     }
 
@@ -326,6 +381,14 @@ impl Downlink {
             }
             Downlink::RegistrationReject { cause } | Downlink::ServiceReject { cause } | Downlink::Status { cause } => {
                 w.u8(cause)
+            }
+            Downlink::DlNasTransport { pdu_session_id, container, cause } => {
+                w.u8(PAYLOAD_N1_SM);
+                w.lve(|w| w.bytes(container));
+                w.bytes(&[0x12, pdu_session_id]);
+                if let Some(cause) = cause {
+                    w.bytes(&[0x58, cause]);
+                }
             }
             Downlink::AuthenticationReject | Downlink::DeregistrationAccept => {}
         }
@@ -372,6 +435,13 @@ mod tests {
         };
         assert_eq!((ngksi.value, g.tmsi, g.amf_set, g.amf_pointer), (0, 0x01020304, 1, 0));
         assert_eq!(Uplink::decode(&hex("7e004c")).unwrap(), Uplink::Other(kind::SERVICE_REQUEST));
+        // UERANSIM's PDU session request: N1 SM container, PSI 1, initial, SST 1, DNN "internet".
+        let ul = hex("7e0067 01 0003 2e0101 12 01 81 22 01 01 25 09 08696e7465726e6574");
+        let Uplink::UlNasTransport(t) = Uplink::decode(&ul).unwrap() else { panic!() };
+        assert_eq!((t.container_type, t.container), (PAYLOAD_N1_SM, &hex("2e0101")[..]));
+        assert_eq!((t.pdu_session_id, t.request_type), (Some(1), Some(request::INITIAL)));
+        assert_eq!(t.snssai, Some(Snssai { sst: 1, sd: None }));
+        assert!(t.dnn.unwrap().is("internet"));
         assert_eq!(Uplink::decode(&hex("7e0099")), Err(Error::UnknownMessage(0x99)));
         assert_eq!(Uplink::decode(&hex("7e0041 01 0005 01")), Err(Error::Truncated));
         assert_eq!(Uplink::decode(&hex("2e0041")), Err(Error::Invalid("plain 5GMM header")));
@@ -406,6 +476,9 @@ mod tests {
         assert_eq!(encode(Downlink::RegistrationReject { cause: 111 }, &mut buf), "7e00446f");
         assert_eq!(encode(Downlink::IdentityRequest(IdentityType::Suci), &mut buf), "7e005b01");
         assert_eq!(encode(Downlink::DeregistrationAccept, &mut buf), "7e0046");
+        let n1 = hex("2e0101c3 1b");
+        let dl = Downlink::DlNasTransport { pdu_session_id: 1, container: &n1, cause: Some(90) };
+        assert_eq!(encode(dl, &mut buf), h("7e0068 01 0005 2e0101c31b 1201 585a"));
         assert_eq!(Downlink::AuthenticationReject.encode(&mut [0u8; 2]), Err(Error::BufferTooSmall));
     }
 

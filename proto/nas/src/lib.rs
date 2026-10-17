@@ -1,12 +1,14 @@
-//! 5GS NAS (TS 24.501): the 5GMM messages of registration, decoded and
-//! encoded without allocation, and NAS security (§4.4).
+//! 5GS NAS (TS 24.501): the 5GMM messages of registration and the 5GSM
+//! messages of PDU session establishment, decoded and encoded without
+//! allocation, and NAS security (§4.4).
 //!
 //! - Decoding borrows from the PDU: [`mm::Uplink::decode`] gives views into
 //!   the received bytes.
 //! - Encoding writes into a buffer given by the caller:
 //!   [`mm::Downlink::encode`] returns the length written.
 //! - [`security`] protects and unprotects PDUs in place, with 128-NIA2 and
-//!   128-NEA2 (or NEA0).
+//!   128-NEA2 (or NEA0);
+//! - [`sm`]: 5GSM, for the SMF.
 //!
 //! Only the messages the AMF needs are decoded (uplink) or encoded
 //! (downlink); unknown optional IEs are skipped, as TS 24.007 §11.2.4 lets
@@ -15,6 +17,7 @@
 pub mod ie;
 pub mod mm;
 pub mod security;
+pub mod sm;
 
 use std::fmt;
 
@@ -201,6 +204,7 @@ impl fmt::Display for Describe<'_> {
                 write!(f, "5GMM {} ({})", mm::name(*kind), security::Header::name(*header))
             }
             [EPD_5GMM, header, ..] => write!(f, "5GMM message ({})", security::Header::name(*header)),
+            [EPD_5GSM, _, _, kind, ..] => write!(f, "{}", sm::name(*kind)),
             [EPD_5GSM, ..] => f.write_str("5GSM message"),
             _ => write!(f, "unknown NAS ({} bytes)", self.0.len()),
         }

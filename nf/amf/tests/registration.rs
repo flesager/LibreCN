@@ -1,5 +1,6 @@
-//! Registration end to end: a test gNB on SCTP, the AMF, AUSF and UDM EOs on
-//! the test bed, and a UE computing its side of 5G AKA and NAS security.
+//! Registration and PDU session end to end: a test gNB on SCTP, the AMF,
+//! AUSF, UDM, SMF and UPF EOs on the test bed, and a UE computing its side
+//! of 5G AKA and NAS security.
 
 mod common;
 
@@ -9,8 +10,10 @@ use librecn_ausf::Ausf;
 use librecn_ngap::*;
 use librecn_security::milenage::Milenage;
 use librecn_security::{Direction, kdf, nea2, nia2};
+use librecn_smf::Smf;
 use librecn_udm::Udm;
-use rasn::types::{FixedBitString, FixedOctetString};
+use librecn_upf::Upf;
+use rasn::types::{BitString, FixedBitString, FixedOctetString, Integer};
 
 const K: &str = "465B5CE8B199B49FAA5F0A2EE238A6BC";
 const OPC: &str = "E8ED289DEBA952E4283B54E88E6183CA";
@@ -23,7 +26,7 @@ fn hex(s: &str) -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
-/// Core with the UDM knowing `imsi-208930000000001`, and a gNB set up.
+/// Core with the UDM knowing `imsi-208930000000001`, SMF and UPF, and a gNB set up.
 fn core() -> (Setup, SctpSocket) {
     let mut s = amf_with("208", "93", |tb| {
         let subscriber = serde_json::json!({ "supi": "imsi-208930000000001", "k": K, "opc": OPC });
@@ -31,6 +34,10 @@ fn core() -> (Setup, SctpSocket) {
         tb.add(cfg, udm).unwrap();
         let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::Value::Null).unwrap();
         tb.add(cfg, ausf).unwrap();
+        let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
+        tb.add(cfg, smf).unwrap();
+        let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
+        tb.add(cfg, upf).unwrap();
     });
     let gnb = s.connect();
     assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
@@ -78,6 +85,83 @@ fn uplink_nas(amf_id: u64, ran_id: u32, nas: &[u8]) -> Vec<u8> {
         .unwrap()
 }
 
+fn successful<T: rasn::Encode>(code: ProcedureCode, message: &T) -> Vec<u8> {
+    encode(&NGAPPDU::successfulOutcome(SuccessfulOutcome::new(code, Criticality::reject, wrap(message).unwrap())))
+        .unwrap()
+}
+
+fn context_setup_response(amf_id: u64, ran_id: u32) -> Vec<u8> {
+    use AnonymousInitialContextSetupResponseProtocolIEsCriticality::ignore;
+    let ies = vec![
+        AnonymousInitialContextSetupResponseProtocolIEs::new(
+            ID_AMF_UE_NGAP_ID.0,
+            ignore,
+            wrap(&AMFUENGAPID(amf_id)).unwrap(),
+        ),
+        AnonymousInitialContextSetupResponseProtocolIEs::new(
+            ID_RAN_UE_NGAP_ID.0,
+            ignore,
+            wrap(&RANUENGAPID(ran_id)).unwrap(),
+        ),
+    ];
+    successful(ID_INITIAL_CONTEXT_SETUP, &InitialContextSetupResponse::new(InitialContextSetupResponseProtocolIEs(ies)))
+}
+
+/// PDU Session Resource Setup Response: the gNB's tunnel 127.0.0.1, TEID `teid`.
+fn session_setup_response(amf_id: u64, ran_id: u32, psi: u8, teid: u32) -> Vec<u8> {
+    use AnonymousPDUSessionResourceSetupResponseProtocolIEsCriticality::ignore;
+    let tunnel = UPTransportLayerInformation::gTPTunnel(GTPTunnel::new(
+        TransportLayerAddress(BitString::from_slice(&[127, 0, 0, 1])),
+        GTPTEID(FixedOctetString::new(teid.to_be_bytes())),
+        None,
+    ));
+    let flows =
+        AssociatedQosFlowList(vec![AssociatedQosFlowItem::new(QosFlowIdentifier(Integer::from(1)), None, None)]);
+    let transfer = PDUSessionResourceSetupResponseTransfer::new(
+        QosFlowPerTNLInformation::new(tunnel, flows, None),
+        None,
+        None,
+        None,
+        None,
+    );
+    let transfer = wrap(&transfer).unwrap().as_bytes().to_vec();
+    let list = PDUSessionResourceSetupListSURes(vec![PDUSessionResourceSetupItemSURes::new(
+        PDUSessionID(psi),
+        transfer.into(),
+        None,
+    )]);
+    let ies = vec![
+        AnonymousPDUSessionResourceSetupResponseProtocolIEs::new(
+            ID_AMF_UE_NGAP_ID.0,
+            ignore,
+            wrap(&AMFUENGAPID(amf_id)).unwrap(),
+        ),
+        AnonymousPDUSessionResourceSetupResponseProtocolIEs::new(
+            ID_RAN_UE_NGAP_ID.0,
+            ignore,
+            wrap(&RANUENGAPID(ran_id)).unwrap(),
+        ),
+        AnonymousPDUSessionResourceSetupResponseProtocolIEs::new(
+            ID_PDUSESSION_RESOURCE_SETUP_LIST_SURES.0,
+            ignore,
+            wrap(&list).unwrap(),
+        ),
+    ];
+    successful(
+        ID_PDUSESSION_RESOURCE_SETUP,
+        &PDUSessionResourceSetupResponse::new(PDUSessionResourceSetupResponseProtocolIEs(ies)),
+    )
+}
+
+/// What the gNB got for the UE, besides its NAS PDU.
+#[derive(Debug)]
+enum Carrier {
+    DownlinkNas,
+    ContextSetup,
+    /// PDU Session Resource Setup: PDU session ID and the SMF's transfer.
+    SessionSetup(u8, Vec<u8>),
+}
+
 /// The UE: its keys once authenticated, and its NAS counts.
 #[derive(Default)]
 struct Ue {
@@ -90,15 +174,44 @@ struct Ue {
 }
 
 impl Ue {
-    /// The next Downlink NAS Transport's NAS PDU, checked and deciphered if protected.
-    fn downlink(&mut self, s: &mut Setup, gnb: &SctpSocket) -> Vec<u8> {
+    /// The next NAS PDU for the UE, checked and deciphered if protected,
+    /// with what carried it.
+    fn downlink(&mut self, s: &mut Setup, gnb: &SctpSocket) -> (Carrier, Vec<u8>) {
         let (stream, pdu) = s.receive(gnb);
-        let message: DownlinkNASTransport = initiating(&pdu, ID_DOWNLINK_NASTRANSPORT);
-        let ie = |id: ProtocolIEID| &message.protocol_ies.0.iter().find(|ie| ie.id == id.0).unwrap().value;
-        (self.amf_id, self.stream) = (open::<AMFUENGAPID>(ie(ID_AMF_UE_NGAP_ID)).unwrap().0, stream);
-        let nas = open::<NASPDU>(ie(ID_NAS_PDU)).unwrap().0.to_vec();
+        self.stream = stream;
+        let NGAPPDU::initiatingMessage(m) = &pdu else { panic!("not an initiating message: {pdu:?}") };
+        let ids = |ies: Vec<(u16, Any)>| {
+            let ie = |id: ProtocolIEID| ies.iter().find(|(i, _)| *i == id.0).map(|(_, v)| v.clone());
+            (open::<AMFUENGAPID>(&ie(ID_AMF_UE_NGAP_ID).unwrap()).unwrap().0, ie(ID_NAS_PDU))
+        };
+        let (carrier, amf_id, nas) = match m.procedure_code {
+            ID_DOWNLINK_NASTRANSPORT => {
+                let message: DownlinkNASTransport = open(&m.value).unwrap();
+                let (amf_id, nas) = ids(message.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)).collect());
+                (Carrier::DownlinkNas, amf_id, open::<NASPDU>(&nas.unwrap()).unwrap().0.to_vec())
+            }
+            ID_INITIAL_CONTEXT_SETUP => {
+                let message: InitialContextSetupRequest = open(&m.value).unwrap();
+                let (amf_id, nas) = ids(message.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)).collect());
+                (Carrier::ContextSetup, amf_id, open::<NASPDU>(&nas.unwrap()).unwrap().0.to_vec())
+            }
+            ID_PDUSESSION_RESOURCE_SETUP => {
+                let message: PDUSessionResourceSetupRequest = open(&m.value).unwrap();
+                let ies: Vec<_> = message.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)).collect();
+                let list = ies.iter().find(|(i, _)| *i == ID_PDUSESSION_RESOURCE_SETUP_LIST_SUREQ.0).unwrap().1.clone();
+                let item = open::<PDUSessionResourceSetupListSUReq>(&list).unwrap().0.remove(0);
+                let (amf_id, _) = ids(ies);
+                let carrier = Carrier::SessionSetup(
+                    item.p_dusession_id.0,
+                    item.p_dusession_resource_setup_request_transfer.to_vec(),
+                );
+                (carrier, amf_id, item.p_dusession_nas_pdu.unwrap().0.to_vec())
+            }
+            ref other => panic!("unexpected procedure {other:?}"),
+        };
+        self.amf_id = amf_id;
         if nas[1] == 0 {
-            return nas;
+            return (carrier, nas);
         }
         assert_eq!(nia2(&self.k_int, self.dl, 1, Direction::Downlink, &nas[6..]), nas[2..6], "downlink MAC");
         let mut plain = nas[7..].to_vec();
@@ -106,7 +219,7 @@ impl Ue {
             nea2(&self.k_enc, self.dl, 1, Direction::Downlink, &mut plain);
         }
         self.dl += 1;
-        plain
+        (carrier, plain)
     }
 
     fn uplink(&mut self, gnb: &SctpSocket, nas: &[u8]) {
@@ -137,33 +250,41 @@ impl Ue {
         (self.k_enc, self.k_int) = kdf::nas_keys(&kamf, 2, 2);
         kdf::res_star(&v.ck, &v.ik, SNN, &rand, &v.res)
     }
+
+    /// The whole registration; returns the Registration Accept.
+    fn register(&mut self, s: &mut Setup, gnb: &SctpSocket) -> Vec<u8> {
+        gnb.send(0, 1, NGAP_PPID, &initial_ue_message(1, &hex(REGISTRATION_REQUEST))).unwrap();
+        let (_, request) = self.downlink(s, gnb);
+        assert_eq!(request[..3], [0x7e, 0, 0x56], "Authentication Request");
+        let res_star = self.authenticate(&request);
+        self.uplink(gnb, &[&hex("7e0057 2d10")[..], &res_star].concat());
+
+        let (_, command) = self.downlink(s, gnb);
+        assert_eq!(command, hex("7e005d 22 00 04f0f0f0f0 e1 360102"), "Security Mode Command: NEA2, NIA2");
+        let whole = hex(&format!("{REGISTRATION_REQUEST} 2f020101"));
+        let complete = [&hex("7e005e 71")[..], &(whole.len() as u16).to_be_bytes(), &whole].concat();
+        self.uplink_protected(gnb, 4, &complete);
+
+        let (carrier, accept) = self.downlink(s, gnb);
+        assert!(matches!(carrier, Carrier::ContextSetup), "the Accept comes in Initial Context Setup: {carrier:?}");
+        gnb.send(0, self.stream, NGAP_PPID, &context_setup_response(self.amf_id, 1)).unwrap();
+        self.uplink_protected(gnb, 2, &hex("7e0043"));
+        s.pump();
+        accept
+    }
 }
 
 #[test]
 fn a_ue_registers_then_deregisters() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();
-    gnb.send(0, 1, NGAP_PPID, &initial_ue_message(1, &hex(REGISTRATION_REQUEST))).unwrap();
-
-    let request = ue.downlink(&mut s, &gnb);
-    assert_eq!(request[..3], [0x7e, 0, 0x56], "Authentication Request");
-    let res_star = ue.authenticate(&request);
-    ue.uplink(&gnb, &[&hex("7e0057 2d10")[..], &res_star].concat());
-
-    let command = ue.downlink(&mut s, &gnb);
-    assert_eq!(command, hex("7e005d 22 00 04f0f0f0f0 e1 360102"), "Security Mode Command: NEA2, NIA2");
-    let whole = hex(&format!("{REGISTRATION_REQUEST} 2f020101"));
-    let complete = [&hex("7e005e 71")[..], &(whole.len() as u16).to_be_bytes(), &whole].concat();
-    ue.uplink_protected(&gnb, 4, &complete);
-
-    let accept = ue.downlink(&mut s, &gnb);
+    let accept = ue.register(&mut s, &gnb);
     assert_eq!(accept[..5], hex("7e0042 0101"), "Registration Accept");
     assert_eq!(accept[5..12], hex("77000b f2 02f839"), "a 5G-GUTI of this PLMN");
     assert_eq!(accept[accept.len() - 13..], hex("5407 00 02f839 000001 1502 0101"), "TAI list, allowed NSSAI");
-    ue.uplink_protected(&gnb, 2, &hex("7e0043"));
-    s.pump();
     let registered = format!("UE {}: registered: imsi-208930000000001, 5G-GUTI 208/93 1:1:0", ue.amf_id);
     assert!(s.logged("amf-1", &registered), "{:#?}", s.log.lines());
+    assert!(s.logged("amf-1", "Initial Context Setup done"));
     assert!(s.logged("ausf", "imsi-208930000000001 authenticated"));
     assert!(s.logged("udm", "authentication vector for imsi-208930000000001 (SQN 0x20)"));
 
@@ -180,12 +301,54 @@ fn a_ue_registers_then_deregisters() {
 }
 
 #[test]
+fn a_registered_ue_gets_a_pdu_session_released_with_it() {
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    ue.register(&mut s, &gnb);
+
+    // UL NAS Transport: PDU Session Establishment Request, PSI 1, initial, DNN internet.
+    let n1 = hex("2e 01 01 c1 ffff 91 a1");
+    let transport =
+        [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81 2509 08696e7465726e6574")]
+            .concat();
+    ue.uplink_protected(&gnb, 2, &transport);
+
+    let (carrier, dl) = ue.downlink(&mut s, &gnb);
+    let Carrier::SessionSetup(1, transfer) = carrier else { panic!("no PDU Session Resource Setup: {carrier:?}") };
+    assert_eq!(dl[..5], hex("7e0068 01 00"), "DL NAS Transport of N1 SM");
+    let accept = &dl[6..];
+    assert_eq!(accept[..4], hex("2e0101c2"), "PDU Session Establishment Accept");
+    assert!(accept.windows(5).any(|w| w == [0x01, 10, 45, 0, 2]), "address 10.45.0.2");
+    let t: PDUSessionResourceSetupRequestTransfer = open(&Any::new(transfer)).unwrap();
+    let tunnel = &t.protocol_ies.0.iter().find(|ie| ie.id == ID_UL_NGU_UP_TNLINFORMATION.0).unwrap().value;
+    let UPTransportLayerInformation::gTPTunnel(tunnel) = open(tunnel).unwrap() else { panic!() };
+    assert_eq!(tunnel.transport_layer_address.0.as_raw_slice(), [127, 0, 0, 2], "the UPF's N3");
+
+    gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, 1, 0x77)).unwrap();
+    s.pump();
+    assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x77"), "{:#?}", s.log.lines());
+    assert!(s.logged("amf-1", &format!("UE {}: PDU session 1 set up", ue.amf_id)));
+
+    // The UE goes with its gNB: the session goes at the SMF and the UPF.
+    drop(gnb);
+    let released = "imsi-208930000000001: PDU session 1 released, 0 left";
+    for _ in 0..20 {
+        if s.logged("smf", released) {
+            break;
+        }
+        s.pump();
+    }
+    assert!(s.logged("smf", released), "{:#?}", s.log.lines());
+    assert!(s.logged("upf", "deleted, 0 left"));
+}
+
+#[test]
 fn an_unknown_subscriber_is_rejected() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();
     let stranger = REGISTRATION_REQUEST.replace("0000000010", "0000000020");
     gnb.send(0, 1, NGAP_PPID, &initial_ue_message(1, &hex(&stranger))).unwrap();
-    assert_eq!(ue.downlink(&mut s, &gnb), hex("7e004403"), "Registration Reject, illegal UE");
+    assert_eq!(ue.downlink(&mut s, &gnb).1, hex("7e004403"), "Registration Reject, illegal UE");
     let (_, pdu) = s.receive(&gnb);
     let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
     assert!(s.logged("udm", "no authentication vector for suci-0-208-93-0000-0-0-0000000002: UserNotFound"));
