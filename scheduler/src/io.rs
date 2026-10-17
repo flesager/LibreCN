@@ -1,10 +1,11 @@
 //! I/O readiness: per-EO registrations and a thin epoll wrapper.
 //!
 //! Registrations are one-shot and level-triggered: the platform delivers one
-//! `IO_READY`, then re-arms the descriptor once the handler has returned. A
-//! socket that still has data is reported again; the handler can read as much
-//! or as little as it likes, and an EO never has more than one `IO_READY` per
-//! registration waiting, which bounds its system lane.
+//! `IO_READY`, then re-arms the descriptor at the end of the turn that handled
+//! it. A socket that still has data is reported again; the handler can read as
+//! much or as little as it likes, and an EO never has more than one `IO_READY`
+//! per registration waiting, which bounds its system lane, nor handles more
+//! than one per turn, which leaves the rest of the turn to its data lane.
 //!
 //! The platform keeps its own duplicate of every registered descriptor, so it
 //! can always re-arm and remove it safely. The socket therefore stays open
@@ -114,18 +115,22 @@ struct IoSlot {
     generation: u16,
     fd: Option<OwnedFd>,
     interest: Interest,
+    /// Its readiness was handled this turn: re-armed at the turn's end.
+    handled: bool,
 }
 
 /// Registrations of one EO; only touched by the thread running that EO.
 pub(crate) struct IoTable {
     slots: Box<[IoSlot]>,
+    /// Marks set since the last [`take_handled`](Self::take_handled); 0
+    /// lets a turn that handled no readiness skip the scan.
+    handled: u16,
 }
 
 impl IoTable {
     pub(crate) fn new(capacity: u16) -> Self {
-        IoTable {
-            slots: (0..capacity).map(|_| IoSlot { generation: 0, fd: None, interest: Interest::READABLE }).collect(),
-        }
+        let slot = || IoSlot { generation: 0, fd: None, interest: Interest::READABLE, handled: false };
+        IoTable { slots: (0..capacity).map(|_| slot()).collect(), handled: 0 }
     }
 
     /// Stores `fd` in a free slot.
@@ -134,7 +139,35 @@ impl IoTable {
             self.slots.iter_mut().enumerate().find(|(_, s)| s.fd.is_none()).ok_or(Error::IoExhausted)?;
         slot.fd = Some(fd);
         slot.interest = interest;
+        slot.handled = false;
         Ok(IoToken::new(index as u16, slot.generation))
+    }
+
+    /// Notes that the readiness of `token` was handled, if it is current.
+    pub(crate) fn mark_handled(&mut self, token: IoToken) {
+        if let Some(slot) = self.slots.get_mut(token.index())
+            && slot.generation == token.generation()
+            && slot.fd.is_some()
+            && !slot.handled
+        {
+            slot.handled = true;
+            self.handled += 1;
+        }
+    }
+
+    /// Calls `f` for every registration marked handled, and clears the marks.
+    pub(crate) fn take_handled(&mut self, mut f: impl FnMut(IoToken, BorrowedFd<'_>, Interest)) {
+        if self.handled == 0 {
+            return;
+        }
+        self.handled = 0;
+        for (i, s) in self.slots.iter_mut().enumerate() {
+            if std::mem::take(&mut s.handled)
+                && let Some(fd) = &s.fd
+            {
+                f(IoToken::new(i as u16, s.generation), fd.as_fd(), s.interest);
+            }
+        }
     }
 
     /// The registered descriptor and interest, if `token` is current.
@@ -302,6 +335,36 @@ mod tests {
         let b = t.insert(sock.as_fd().try_clone_to_owned().unwrap(), Interest::READABLE).unwrap();
         assert_ne!(a, b);
         assert_eq!(t.tokens().collect::<Vec<_>>(), [b]);
+    }
+
+    #[test]
+    fn handled_marks_are_taken_once_and_only_for_current_tokens() {
+        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let fd = || sock.as_fd().try_clone_to_owned().unwrap();
+        let mut t = IoTable::new(3);
+        let (a, b, c) = (
+            t.insert(fd(), Interest::READABLE).unwrap(),
+            t.insert(fd(), Interest::READABLE).unwrap(),
+            t.insert(fd(), Interest::READABLE).unwrap(),
+        );
+        t.mark_handled(a);
+        t.mark_handled(a);
+        t.mark_handled(c);
+        let taken = |t: &mut IoTable| {
+            let mut v = Vec::new();
+            t.take_handled(|token, _, _| v.push(token));
+            v
+        };
+        assert_eq!(taken(&mut t), [a, c], "each marked registration once");
+        assert!(taken(&mut t).is_empty(), "marks cleared");
+        // Marked, then freed and reused in the same turn: neither is taken.
+        t.mark_handled(b);
+        t.remove(b);
+        t.mark_handled(b);
+        let d = t.insert(fd(), Interest::READABLE).unwrap();
+        assert!(taken(&mut t).is_empty());
+        t.mark_handled(d);
+        assert_eq!(taken(&mut t), [d]);
     }
 
     #[test]

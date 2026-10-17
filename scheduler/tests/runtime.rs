@@ -446,6 +446,55 @@ fn udp_echo_over_the_pool_poller() {
     assert_eq!(rt.stats(id).unwrap().io_events, 200, "one datagram per readiness");
 }
 
+/// Two sockets that stay readable (never read), each readiness costing
+/// `work`; counts the data messages it gets.
+struct Flooded {
+    sockets: Vec<std::os::unix::net::UnixDatagram>,
+    work: Duration,
+    pings: Arc<AtomicU64>,
+}
+
+impl ExecutionObject for Flooded {
+    fn on_start(&mut self, ctx: &mut Context<'_>) {
+        for s in &self.sockets {
+            ctx.register_io(s, librecn_scheduler::Interest::READABLE).unwrap();
+        }
+    }
+
+    fn on_message(&mut self, msg: &Message<'_>, _ctx: &mut Context<'_>) {
+        if msg.io().is_some() {
+            spin(self.work);
+        } else if msg.body::<Ping>().is_some() {
+            self.pings.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+#[test]
+fn readiness_always_there_does_not_starve_data_messages() {
+    // On two workers, each re-armed socket used to be harvested again by the
+    // other worker during the next handler, so the system lane never ran
+    // dry and the data lane waited (the UPF under traffic starved N4).
+    let rt = runtime(vec![PoolConfig::new("cp", workers(2))]);
+    let mut sockets = Vec::new();
+    let mut peers = Vec::new();
+    for _ in 0..2 {
+        let (ours, peer) = std::os::unix::net::UnixDatagram::pair().unwrap();
+        peer.send(b"always readable").unwrap();
+        sockets.push(ours);
+        peers.push(peer);
+    }
+    let pings = Arc::new(AtomicU64::new(0));
+    let flooded = Flooded { sockets, work: Duration::from_micros(200), pings: pings.clone() };
+    let id = rt.add(EoConfig::new("flooded").max_io(2), flooded).unwrap();
+    assert!(wait_until(SECOND, || rt.stats(id).is_some_and(|s| s.io_events > 10)));
+    for seq in 0..20 {
+        rt.inject(id, &Ping { seq }).unwrap();
+        // A turn handles both readiness events then the data: under 1 ms.
+        assert!(wait_until(100 * MS, || pings.load(Ordering::Relaxed) > seq), "ping {seq} starved");
+    }
+}
+
 // --------------------------------------------------------- faults, lifecycle
 
 struct Bomb;

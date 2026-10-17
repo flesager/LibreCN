@@ -91,12 +91,17 @@ pub(crate) fn run_turn(
             break;
         }
         if let Some(token) = io_token {
-            rearm(platform, core, token);
+            // SAFETY: runner, no other borrow of the I/O table alive.
+            unsafe { core.io_mut() }.mark_handled(token);
         }
     }
 
     match outcome {
         Outcome::Continue => {
+            // Re-armed once per turn, not after each handler: a socket ready
+            // again at once would otherwise fill the system lane, which goes
+            // first, and starve the data lane (DESIGN.md §7).
+            rearm_handled(platform, core);
             if core.io_lost.swap(false, Ordering::Relaxed) {
                 rearm_all(platform, core);
             }
@@ -145,12 +150,13 @@ fn dispatch(platform: &mut dyn Platform, core: &EoCore, msg: Message<'_>, policy
     }
 }
 
-fn rearm(platform: &mut dyn Platform, core: &EoCore, token: IoToken) {
+fn rearm_handled(platform: &mut dyn Platform, core: &EoCore) {
+    let poller = platform.poller(core.pool);
     // SAFETY: runner, no other borrow of the I/O table alive.
-    if let Some((fd, interest)) = unsafe { core.io_mut() }.get(token) {
+    unsafe { core.io_mut() }.take_handled(|token, fd, interest| {
         // Fails only if the descriptor is gone; the EO will deregister it.
-        let _ = platform.poller(core.pool).rearm(fd, io::encode(core.id.index(), token), interest);
-    }
+        let _ = poller.rearm(fd, io::encode(core.id.index(), token), interest);
+    });
 }
 
 fn rearm_all(platform: &mut dyn Platform, core: &EoCore) {

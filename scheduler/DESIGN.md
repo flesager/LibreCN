@@ -104,7 +104,7 @@ A worker loops:
 ## 7. I/O
 
 - `ctx.register_io(&socket, Interest::READABLE)` returns a token. Readiness arrives as `IO_READY`, read with `msg.io()`. The EO does the actual `recv`.
-- Registrations are one-shot and level-triggered, **re-armed by the platform after the handler**: at most one `IO_READY` per registration is waiting, and the EO need not drain the socket in one turn.
+- Registrations are one-shot and level-triggered, **re-armed by the platform at the end of the turn** that handled their `IO_READY`: at most one `IO_READY` per registration is waiting, at most one per turn is handled, and the EO need not drain the socket in one turn. Re-arming after each handler let a socket that is always ready (the UPF under traffic) fill the system lane again during the next handler, so the data lane, drained after it, starved (§11).
 - The platform keeps a duplicate of the descriptor until `deregister_io` or the EO stops, so re-arming and removing are always safe.
 - If an `IO_READY` cannot be queued, every registration of that EO is re-armed at the end of its next turn. Readiness may occasionally be spurious; `WouldBlock` is normal.
 
@@ -175,6 +175,7 @@ Dependencies: `rustix` (epoll, eventfd, affinity), `zerocopy`, `thiserror`; test
 - `EPOLLEXCLUSIVE` is refused on a nested epoll descriptor, which gave the I/O leader.
 - Timers checked only every 32 turns were 100 ms late under long turns; the overload test found it.
 - Worker idle time that only counted finished sleeps reported 0 for a worker asleep for a long time.
+- Re-arming a socket right after its handler starved the data lane on two workers or more: with two sockets always ready, each was harvested again by another worker while the EO handled the other, so the system lane never ran dry. The UPF under traffic held the SMF's N4 requests for up to 1.4 s, and 3 or 4 cores stalled registrations; the whole-core load benchmark found it. Sockets are now re-armed at the end of the turn.
 - `is_alive(id)` turns false when the EO closes; `alive()` stops counting it once its resources are released, slightly later.
 
 **Open**

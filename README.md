@@ -35,7 +35,7 @@ scripts/ueransim/ng-setup.sh       # interop with UERANSIM's gNB (UERANSIM next 
 scripts/ueransim/registration.sh   # UERANSIM gNB + UE: registration, PDU session, deregistration
 scripts/ueransim/user-plane.sh     # in Docker: UERANSIM's UE pings through the UPF
 scripts/ueransim/scale.sh          # UERANSIM at scale: GNBS gNBs x UES UEs (default 4 x 250)
-scripts/load.sh                    # control-plane benchmark on 1 to 4 cores (below)
+scripts/load.sh                    # the whole core on 1 to 4 cores, control and user plane (below)
 scripts/upf-modes.sh               # the UPF measured: per mode, per number of UEs and packet size
 ```
 
@@ -48,14 +48,16 @@ Measured on 2026-10-17. Re-run them with the scripts named in each part.
 - release build (`panic = "abort"`), kernel SCTP and UDP over loopback.
 
 **Pinning**:
-- LibreCN's NFs on cores 2 to 5, the OAM EOs on core 6, the load generators on cores 8 to 11;
+- LibreCN on cores 2 to 5, the load generators on cores 6 to 14;
 - all distinct physical cores, no SMT sibling shared.
 
 Logs are at `error` level (`[oam] log_level`). At `info`, every NAS message is a log line, and the log EO would be what is measured.
 
-### Control plane: registrations (`scripts/load.sh`)
+### The whole core on 1 to 4 cores (`scripts/load.sh`)
 
-**What is measured**: one registration is a full Initial Registration followed by its PDU session:
+**Setup**: every EO of LibreCN (AMF, AUSF, UDM, SMF, UPF, log, alarms) runs in one pool pinned to 1, 2, 3 or 4 cores.
+
+**Control plane**: one registration is a full Initial Registration followed by its PDU session:
 - 5G AKA through the AUSF and UDM (Milenage), Security Mode with NIA2 and NEA2;
 - Registration Accept in Initial Context Setup, then Registration Complete;
 - PDU Session Establishment through the SMF and UPF, up to the gNB's PDU Session Resource Setup.
@@ -63,31 +65,47 @@ Logs are at `error` level (`[oam] log_level`). At `info`, every NAS message is a
 That is 11 NGAP messages on N2 and 8 NF-to-NF messages per UE.
 
 **Load generator** (`app/examples/load.rs`):
-- 4 test gNBs, each a thread with its own SCTP association;
-- 5000 UEs per gNB, with 64 registrations in flight per gNB;
-- each simulated UE runs the real crypto.
+- 4 test gNBs, each a thread with its own SCTP association, register 5000 UEs each, 64 at a time: 20 000 UEs, 256 in flight;
+- each simulated UE runs the real crypto;
+- a UE is timed from its Initial UE Message to the PDU Session Resource Setup Request.
 
-Every UE is timed from its Initial UE Message to the PDU Session Resource Setup Request. All the AMF, AUSF, UDM, SMF and UPF EOs run in one pool pinned to the given cores. The *unloaded* column is one UE at a time, on one gNB.
+**User plane**:
+- 1400-byte packets, uplink and downlink at the same time, over the 20 000 sessions just set up;
+- the UPF has N3 on UDP and, for N6, a datagram socket pair standing for the TUN device;
+- either as fast as the UPF takes them ("flat out"), or 500 Mbit/s each way.
 
-| NF cores | Registrations/s (20 000 UEs, 256 in flight) | Latency p50 / p99 under that load | Latency p50 / p99 unloaded | Pool busy |
-|---|---|---|---|---|
-| 1 | 9 360 | 27.1 / 29.0 ms | 0.22 / 0.27 ms | 100 % of 1 core |
-| 2 | 8 880 | 28.5 / 30.3 ms | 0.22 / 0.28 ms | 54 % of 2 cores |
-| 3 | 8 710 | 29.1 / 31.3 ms | 0.24 / 0.30 ms | 37 % of 3 cores |
-| 4 | 8 460 | 30.0 / 32.6 ms | 0.24 / 0.32 ms | 28 % of 4 cores |
+**Each alone, then both at once** (a second batch of 20 000 UEs registers while the traffic runs):
 
-Two runs agree within 2 %. Every run registered 20 000 out of 20 000.
+| Cores | Registrations alone | User plane alone, flat out | Both: registrations + user plane flat out |
+|---|---|---|---|
+| 1 | 8 930/s, p99 30 ms (busy 100 %) | 1.08 Gbit/s each way, 97 kpps (busy 100 %) | 3 400/s, p99 81 ms + 0.62 Gbit/s each way (busy 100 %) |
+| 2 | 9 330/s, p99 29 ms (busy 55 %) | 1.07 Gbit/s each way (busy 50 %) | **8 890/s, p99 31 ms + 1.00 Gbit/s each way** (busy 100 %) |
+| 3 | 9 270/s, p99 35 ms (busy 38 %) | 1.07 Gbit/s each way (busy 33 %) | 8 890/s, p99 31 ms + 1.00 Gbit/s each way (busy 69 %) |
+| 4 | 9 010/s, p99 31 ms (busy 29 %) | 1.09 Gbit/s each way (busy 25 %) | 8 740/s, p99 32 ms + 0.94 Gbit/s each way (busy 52 %) |
 
-**Reading the table**:
-- **One core is enough.** The AMF is the bottleneck: its EO is busy 100 % of one core in every run, about 110 µs per registration, while the AUSF, UDM, SMF and UPF together use under 10 % of a core.
-  - An EO runs on one worker at a time, so more cores cannot speed up a single AMF. They only add the cost of handing messages between cores, hence the slight decrease.
-  - Going beyond means several AMF instances, or a cheaper AMF.
-- **Where the AMF's time goes**:
-  - about 40 % is the kernel's SCTP: 8.3 µs to send and receive one message on loopback, about 4 µs on the AMF's side, for each of its 11 NGAP messages per UE;
-  - the NGAP codec takes about 1 µs per message (decoding an Uplink NAS Transport: 0.5 µs, encoding a Downlink NAS Transport: 0.8 µs);
-  - NAS security takes under 1 µs per message (NIA2 and NEA2 on 64 bytes: 0.19 µs, one KDF: 0.15 µs);
-  - the rest is NAS, the UE table, and the 8 NF-to-NF messages.
+**At a fixed traffic of 500 Mbit/s each way**, and one UE at a time (no load):
+
+| Cores | Registrations with 500 Mbit/s each way | Pool busy | One registration alone, p50 / p99 |
+|---|---|---|---|
+| 1 | 4 950/s, p50 51 ms, p99 59 ms | 100 % | 0.22 / 0.29 ms |
+| 2 | 9 150/s, p50 27 ms, p99 30 ms | 77 % | 0.22 / 0.29 ms |
+| 3 | 9 180/s, p50 28 ms, p99 30 ms | 54 % | 0.25 / 0.30 ms |
+| 4 | 9 070/s, p50 28 ms, p99 31 ms | 41 % | 0.25 / 0.31 ms |
+
+"Busy" is the pool's busy time, as a share of all its cores. Two runs agree within 5 %. Every run registered all its UEs.
+
+**Reading the tables**:
+- **Two cores are enough; more add nothing.** The AMF and the UPF are each one EO, and an EO runs on one core at a time.
+  - With two cores, each gets its own; the AUSF, UDM, SMF and OAM EOs fit in what is left (under 10 % of a core).
+  - A third and fourth core stay idle (69 % and 52 % busy): beyond, it would take several AMF or UPF instances.
+- **One core is enough for either plane alone**, about 9 000 registrations/s or 1 Gbit/s each way, but they share it when both are loaded: 500 Mbit/s each way halves the registrations.
+- **Where the AMF's time goes**: about 110 µs per registration.
+  - About 40 % is the kernel's SCTP: 8.3 µs to send and receive one message on loopback, about 4 µs on the AMF's side, for each of its 11 NGAP messages per UE.
+  - The NGAP codec takes about 1 µs per message (decoding an Uplink NAS Transport: 0.5 µs, encoding a Downlink NAS Transport: 0.8 µs).
+  - NAS security takes under 1 µs per message (NIA2 and NEA2 on 64 bytes: 0.19 µs, one KDF: 0.15 µs).
+  - The rest is NAS, the UE table, and the 8 NF-to-NF messages.
 - **Latency under load is queueing.** 256 registrations in flight at about 9 000 per second means about 28 ms each, by Little's law. Unloaded, one registration with its session takes 0.22 ms.
+- **This benchmark found a scheduler bug, now fixed.** Under traffic, the UPF's socket events kept its other messages (the SMF's N4 requests) waiting: on 2 cores, registrations fell to 4 700/s with p99 1.4 s, and 3 or 4 cores stalled. See [`scheduler/DESIGN.md`](scheduler/DESIGN.md) §7 and §11.
 
 ### User plane: the UPF (`scripts/upf-modes.sh`, details in [`nf/upf/README.md`](nf/upf/README.md))
 
