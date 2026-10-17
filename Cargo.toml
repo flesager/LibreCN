@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["scheduler", "common"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace.dependencies]
+thiserror = "2"
+zerocopy = { version = "0.8", features = ["derive"] }
+rustix = { version = "1", features = ["event", "thread"] }
+proptest = "1"
+loom = "0.7"
+criterion = { version = "0.7", default-features = false }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+panic = "abort"
+debug = "line-tables-only"

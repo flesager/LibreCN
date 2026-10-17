@@ -1,0 +1,26 @@
+[package]
+name = "librecn-scheduler"
+description = "Reactor scheduler hosting run-to-completion execution objects"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+zerocopy.workspace = true
+rustix.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
+[[bench]]
+name = "scheduler"
+harness = false
+
+[lints]
+workspace = true

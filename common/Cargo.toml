@@ -1,0 +1,10 @@
+[package]
+name = "librecn-common"
+description = "Types and helpers shared by the LibreCN network functions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
