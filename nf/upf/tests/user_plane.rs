@@ -8,7 +8,7 @@ use std::os::unix::net::UnixDatagram;
 use std::time::Duration;
 
 use librecn_oam::{CapturedLog, LogSink};
-use librecn_sbi::pdu_session::{N4Establish, N4EstablishResult, N4Modify};
+use librecn_sbi::pdu_session::{N4Establish, N4EstablishResult, N4Modify, N4Report, REPORT_PERIOD};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
 use librecn_scheduler::{EoConfig, EoId};
 use librecn_upf::Upf;
@@ -135,6 +135,38 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     assert_eq!((teid, qfi, payload), (0x77, Some(1), &packet[..]));
     gnb.set_nonblocking(true).unwrap();
     assert!(gnb.recv(&mut buf).is_err(), "no session for 10.45.0.99: dropped");
+}
+
+#[test]
+fn downlink_for_an_idle_ue_is_parked_reported_then_sent_with_its_tunnel() {
+    let (mut p, _) = plane(Ipv4Addr::new(127, 0, 0, 66));
+    // No downlink tunnel (the UE is idle): the packets wait, the SMF is told once.
+    let (first, second) = (ipv4(SERVER, UE, b"one"), ipv4(SERVER, UE, b"two"));
+    p.dn.send(&first).unwrap();
+    p.dn.send(&second).unwrap();
+    p.pump();
+    let reports: Vec<_> = p.seen.take().iter().filter_map(|m| m.body::<N4Report>().map(|r| r.seid)).collect();
+    assert_eq!(reports, [1], "one report for the two packets");
+    // Still idle after the report period: reported again.
+    p.tb.advance(REPORT_PERIOD);
+    p.dn.send(&first).unwrap();
+    p.pump();
+    assert_eq!(p.seen.take().iter().filter(|m| m.body::<N4Report>().is_some()).count(), 1);
+
+    // The tunnel is back: the parked packets go, in order.
+    let gnb = UdpSocket::bind("127.0.0.67:2152").unwrap();
+    gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 67], dl_teid: 0x78 }).unwrap();
+    p.pump();
+    let mut buf = [0u8; 128];
+    for expected in [&first, &second, &first] {
+        let n = gnb.recv(&mut buf).unwrap();
+        let librecn_gtpu::Message::GPdu { teid, payload, .. } = librecn_gtpu::decode(&buf[..n]).unwrap() else {
+            panic!()
+        };
+        assert_eq!((teid, payload), (0x78, &expected[..]));
+    }
+    assert!(p.log.lines().iter().any(|l| l.msg.contains("3 parked packet(s) sent")), "{:#?}", p.log.lines());
 }
 
 #[test]

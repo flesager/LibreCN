@@ -378,6 +378,25 @@ pub(crate) fn ng_reset_acknowledge() -> Result<Vec<u8>, String> {
     pdu(NGAPPDU::successfulOutcome(SuccessfulOutcome::new(ID_NGRESET, Criticality::reject, message)))
 }
 
+/// PAGING of an idle UE by its 5G-S-TMSI, in tracking area `tai`.
+pub(crate) fn paging(config: &AmfConfig, tmsi: u32, tai: (Plmn, [u8; 3])) -> Result<Vec<u8>, String> {
+    use AnonymousPagingProtocolIEsCriticality::ignore;
+    let identity = UEPagingIdentity::fiveG_S_TMSI(FiveGSTMSI::new(
+        AMFSetID(bits(u32::from(config.amf_set))),
+        AMFPointer(bits(u32::from(config.amf_pointer))),
+        FiveGTMSI(FixedOctetString::new(tmsi.to_be_bytes())),
+        None,
+    ));
+    let tai = TAI::new(plmn(tai.0), TAC(FixedOctetString::new(tai.1)), None);
+    let tais = TAIListForPaging(vec![TAIListForPagingItem::new(tai, None)]);
+    let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
+        value.map(|v| AnonymousPagingProtocolIEs::new(id.0, ignore, v)).map_err(encoding_error)
+    };
+    let ies = vec![ie(ID_UEPAGING_IDENTITY, wrap(&identity))?, ie(ID_TAILIST_FOR_PAGING, wrap(&tais))?];
+    let message = wrap(&Paging::new(PagingProtocolIEs(ies))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_PAGING, Criticality::ignore, message)))
+}
+
 /// DOWNLINK NAS TRANSPORT of `nas` to a UE.
 pub(crate) fn downlink_nas_transport(amf_id: AmfUeId, ran_id: RanUeId, nas: &[u8]) -> Result<Vec<u8>, String> {
     use AnonymousDownlinkNASTransportProtocolIEsCriticality as C;

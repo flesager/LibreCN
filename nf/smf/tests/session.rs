@@ -5,8 +5,8 @@ use librecn_common::manage::{Manage, Method};
 use librecn_ngap::*;
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_sbi::pdu_session::{
-    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, SmNotify, SmNotifyResult, UpdateSmContext,
-    UpdateSmContextResult, n2, update,
+    CreateSmContext, CreateSmContextResult, N4Report, ReleaseSmContext, Slice, SmNotify, SmNotifyResult,
+    UpdateSmContext, UpdateSmContextResult, n2, update,
 };
 use librecn_sbi::{DnnText, Outcome, Supi};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
@@ -26,6 +26,7 @@ struct Core {
     log: CapturedLog,
     amf: EoId,
     smf: EoId,
+    upf: EoId,
     seen: ProbeLog,
 }
 
@@ -34,13 +35,13 @@ fn core() -> Core {
     let (sink, log) = LogSink::capture();
     tb.add(LogSink::config(), sink).unwrap();
     let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
-    tb.add(cfg, upf).unwrap();
+    let upf = tb.add(cfg, upf).unwrap();
     let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
     let smf = tb.add(cfg, smf).unwrap();
     let (probe, seen) = Probe::new();
     let amf = tb.add(EoConfig::new("amf").buffers(&[(256, 8), (2048, 8), (16 * 1024, 2)]), probe).unwrap();
     tb.run_until_idle();
-    Core { tb, log, amf, smf, seen }
+    Core { tb, log, amf, smf, upf, seen }
 }
 
 impl Core {
@@ -157,6 +158,42 @@ fn the_ue_releases_its_session_and_cannot_modify_it() {
     assert_eq!(complete.released, 1);
     assert!(c.logged("smf", "PDU session 1 released, 0 left"));
     assert_eq!(c.n1(sm_ctx, &hex("2e0102d4")).outcome(), Outcome::ContextNotFound);
+}
+
+#[test]
+fn downlink_data_for_an_idle_ue_goes_to_the_amf_with_the_n2_setup() {
+    let mut c = core();
+    let result = c.create("internet", &hex("2e 01 01 c1 ffff 91 a1"));
+    let mut request = UpdateSmContext::new_zeroed();
+    (request.sm_ctx, request.kind) = (result.sm_ctx, update::SETUP_RESPONSE);
+    request.container.set(&response_transfer());
+    c.tb.inject_from(c.amf, c.smf, 43, &request).unwrap();
+    c.tb.run_until_idle();
+    c.seen.take();
+    let report = N4Report { seid: u64::from(result.sm_ctx) };
+    // The downlink is up: a stale report is ignored.
+    c.tb.inject_from(c.upf, c.smf, 0, &report).unwrap();
+    c.tb.run_until_idle();
+    assert!(c.seen.take().is_empty());
+
+    request.kind = update::DEACTIVATE;
+    c.tb.inject_from(c.amf, c.smf, 0, &request).unwrap();
+    c.tb.run_until_idle();
+    c.seen.take();
+    c.tb.inject_from(c.upf, c.smf, 0, &report).unwrap();
+    c.tb.run_until_idle();
+    let got = c.seen.take();
+    let notify: SmNotify = got[0].body().expect("the AMF is told");
+    assert_eq!((notify.sm_ctx, notify.pdu_session_id, notify.n2_kind), (result.sm_ctx, 1, n2::SETUP));
+    assert_eq!((notify.n1.get(), notify.n2.get()), (&[][..], result.n2.get()), "no N1, the setup of the session");
+    assert!(c.logged("smf", "PDU session 1: downlink data, the AMF told"));
+
+    // The AMF pages the UE: the session stays.
+    let mut paged = SmNotifyResult::new_zeroed();
+    paged.sm_ctx = result.sm_ctx;
+    c.tb.inject_from(c.amf, c.smf, 0, &paged).unwrap();
+    c.tb.run_until_idle();
+    assert!(!c.logged("smf", "released"));
 }
 
 #[test]

@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 
+use librecn_scheduler::Time;
+
 /// One PDU session's forwarding state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Session {
@@ -10,6 +12,8 @@ pub struct Session {
     pub ul_teid: u32,
     /// The gNB's GTP-U endpoint and TEID, once known.
     pub dl: Option<(SocketAddrV4, u32)>,
+    /// When downlink data without a tunnel was last reported to the SMF.
+    pub reported: Option<Time>,
 }
 
 /// Why a session was not created.
@@ -67,17 +71,17 @@ impl Sessions {
                 break teid;
             }
         };
-        let session = Session { ue_ip, ul_teid, dl: None };
+        let session = Session { ue_ip, ul_teid, dl: None, reported: None };
         self.by_seid.insert(seid, session);
         self.by_teid.insert(ul_teid, seid);
         self.by_ue.insert(ue_ip, seid);
         Ok(session)
     }
 
-    /// Sets the downlink tunnel, or clears it (the UE is idle); false if
-    /// `seid` is unknown.
+    /// Sets the downlink tunnel (its data reported no longer), or clears it
+    /// (the UE is idle); false if `seid` is unknown.
     pub fn modify(&mut self, seid: u64, dl: Option<(SocketAddrV4, u32)>) -> bool {
-        self.by_seid.get_mut(&seid).map(|s| s.dl = dl).is_some()
+        self.by_seid.get_mut(&seid).map(|s| (s.dl, s.reported) = (dl, None)).is_some()
     }
 
     pub fn delete(&mut self, seid: u64) -> Option<Session> {
@@ -95,6 +99,12 @@ impl Sessions {
     /// The session of the UE with address `ip` (downlink).
     pub fn by_ue(&self, ip: Ipv4Addr) -> Option<&Session> {
         self.by_ue.get(&ip).and_then(|seid| self.by_seid.get(seid))
+    }
+
+    /// The same, with its SEID, to update.
+    pub fn by_ue_mut(&mut self, ip: Ipv4Addr) -> Option<(u64, &mut Session)> {
+        let seid = *self.by_ue.get(&ip)?;
+        self.by_seid.get_mut(&seid).map(|s| (seid, s))
     }
 }
 

@@ -10,6 +10,8 @@
 //! Sessions are released by the UE (PDU Session Release Request) or by the
 //! network (`DELETE /api/nfs/{smf}/sessions/{id}`, the AMF telling the UE);
 //! a UE's modification request is rejected (no QoS change is offered).
+//! Downlink data for an idle UE, reported by the UPF, goes to the AMF with
+//! the session's N2 setup (TS 23.502 §4.2.3.3): the AMF pages the UE.
 //!
 //! - [`session`], the decision and the N1 answers, on domain values;
 //! - [`n2sm`], the NGAP transfers (the only module seeing ASN.1);
@@ -33,7 +35,7 @@ use librecn_nas::Snssai;
 use librecn_nas::sm::{SmUplink, cause};
 use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult,
-    ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult, n2, update,
+    N4Report, ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult, n2, update,
 };
 use librecn_sbi::{Outcome, Supi};
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Message};
@@ -75,6 +77,8 @@ struct SmContext {
     waiting: Option<u32>,
     /// The UPF's uplink tunnel endpoint, once it answered N4Establish.
     n3: Option<(Ipv4Addr, u32)>,
+    /// The downlink tunnel is set on the UPF (false while the UE is idle).
+    active: bool,
 }
 
 /// The SMF EO.
@@ -177,6 +181,7 @@ impl Smf {
             releasing: false,
             waiting: Some(to.1),
             n3: None,
+            active: false,
         };
         self.contexts.insert(id, context);
     }
@@ -253,6 +258,7 @@ impl Smf {
         let container = request.container.get();
         match (request.kind, n3) {
             (update::DEACTIVATE, _) => {
+                c.active = false;
                 log!(self.log, ctx, Info, "{supi}: PDU session {psi} deactivated (the UE is idle)");
                 let _ = self.n4_modify(ctx, id, Ipv4Addr::UNSPECIFIED, 0);
                 // The AMF's acknowledgement: it paces its notices on them.
@@ -356,6 +362,7 @@ impl Smf {
     fn on_modified(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, result: &N4ModifyResult) {
         let Some(c) = self.contexts.get_mut(&msg.corr_id()) else { return };
         let Some(corr) = c.waiting.take() else { return };
+        c.active = result.outcome() == Outcome::Ok;
         let (to, psi) = ((c.amf, corr), c.pdu_session_id);
         self.update_result(ctx, to, psi, Answer::outcome(result.outcome()));
     }
@@ -371,6 +378,28 @@ impl Smf {
         });
         if let Err(e) = sent {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", to.0);
+        }
+    }
+
+    /// Downlink data for session `id` without its tunnel: the AMF gets the
+    /// N2 setup, to page the UE if it is idle (TS 23.502 §4.2.3.3).
+    fn on_report(&mut self, ctx: &mut Context<'_>, id: u32) {
+        let Some(c) = self.contexts.get(&id).filter(|c| !c.active && !c.releasing) else { return };
+        let (amf, amf_ue, psi, supi) = (c.amf, c.amf_ue, c.pdu_session_id, c.supi);
+        let Some(n3) = c.n3 else { return };
+        let transfer = match self.setup_transfer(n3) {
+            Ok(transfer) => transfer,
+            Err(e) => return log!(self.log, ctx, Error, "{supi}: {e}"),
+        };
+        let sent = ctx.alloc::<SmNotify>(amf).and_then(|m| {
+            let mut m = m.with_corr_id(amf_ue).with_flags(flags::REQUEST);
+            (m.sm_ctx, m.pdu_session_id, m.n2_kind) = (id, psi, n2::SETUP);
+            m.n2.set(&transfer);
+            ctx.send(m)
+        });
+        match sent {
+            Ok(()) => log!(self.log, ctx, Info, "{supi}: PDU session {psi}: downlink data, the AMF told"),
+            Err(e) => log!(self.log, ctx, Error, "{supi}: PDU session {psi}: downlink data, the AMF not told: {e}"),
         }
     }
 
@@ -464,6 +493,8 @@ impl ExecutionObject for Smf {
             self.on_update(ctx, msg, request);
         } else if let Some(result) = msg.body::<N4ModifyResult>() {
             self.on_modified(ctx, msg, result);
+        } else if let Some(report) = msg.body::<N4Report>() {
+            self.on_report(ctx, report.seid as u32);
         } else if let Some(result) = msg.body::<SmNotifyResult>() {
             // The UE could not be reached: the session ends here.
             if result.outcome() != Outcome::Ok {

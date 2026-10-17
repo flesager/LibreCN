@@ -12,6 +12,9 @@
 //! AMF ◀─ UpdateSmContextResult (N1 command, N2 release) SMF
 //! AMF ◀─ SmNotify (network-requested: N1, N2) ────────── SMF
 //! AMF ── SmNotifyResult (delivered, or the UE is idle) ▶ SMF
+//!                                                         SMF ◀─ N4Report ───── UPF (downlink data, the UE idle)
+//! AMF ◀─ SmNotify (N2 setup: page the UE) ────────────── SMF
+//! AMF ── SmNotifyResult (set up, or paging) ───────────▶ SMF
 //! AMF ── ReleaseSmContext ─────────────────────────────▶ SMF ── N4Delete ─────▶ UPF
 //! ```
 //!
@@ -237,9 +240,26 @@ impl MsgBody for N4Delete {
     const MSG_ID: u32 = id(family::PDU_SESSION, 10);
 }
 
+/// UPF → SMF (N4 Session Report, Downlink Data Report): a downlink packet
+/// for a session without downlink tunnel (the UE is idle). Sent again at
+/// most every [`REPORT_PERIOD`] while the tunnel stays down. No answer.
+#[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct N4Report {
+    pub seid: u64,
+}
+
+impl MsgBody for N4Report {
+    const MSG_ID: u32 = id(family::PDU_SESSION, 13);
+}
+
+/// The UPF reports a session's downlink data at most this often.
+pub const REPORT_PERIOD: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// SMF → AMF, unsolicited (Namf_Communication_N1N2MessageTransfer): the
-/// network releases a session. `corr_id` is the AMF's id of the UE when it
-/// last spoke to the SMF.
+/// network releases a session ([`n2::RELEASE`]), or has downlink data for it
+/// ([`n2::SETUP`], no N1: the AMF pages an idle UE, then sets the session up).
+/// `corr_id` is the AMF's id of the UE when it last spoke to the SMF.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct SmNotify {
@@ -255,8 +275,9 @@ impl MsgBody for SmNotify {
     const MSG_ID: u32 = id(family::PDU_SESSION, 11);
 }
 
-/// AMF → SMF: delivered, or `ContextNotFound` if the UE cannot be reached
-/// (idle or gone): the SMF then ends the session alone.
+/// AMF → SMF: delivered (or, for downlink data, the UE paged), or
+/// `ContextNotFound` if the UE cannot be reached (idle or gone): the SMF
+/// then ends the session alone.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct SmNotifyResult {

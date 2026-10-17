@@ -88,6 +88,8 @@ pub trait Effects {
     fn setup_context(&mut self, pdu: &[u8], context: &AsContext, what: &'static str);
     /// The PDU sessions the network holds for the UE.
     fn sessions(&mut self) -> SessionSet;
+    /// The sessions the UE was paged for while idle (asked once).
+    fn paged(&mut self) -> SessionSet;
     /// The UE is back: reactivate the user plane of `reactivate`, release
     /// the sessions the UE no longer holds (if it said which it holds).
     fn resume_sessions(&mut self, reactivate: SessionSet, held_by_ue: Option<SessionSet>);
@@ -591,7 +593,9 @@ impl Mm {
     /// A Service Request from idle, integrity checked (§5.6.1.4).
     fn on_service_request(&mut self, request: &ServiceRequest<'_>, fx: &mut impl Effects) {
         let sessions = fx.sessions();
-        let (reactivate, held) = (request.uplink_data, request.sessions);
+        // Sessions with uplink data, and those it was paged for (downlink data).
+        let reactivate = SessionSet(request.uplink_data.0 | fx.paged().0);
+        let held = request.sessions;
         fx.log(Level::Info, format_args!("back from idle: Service Request (type {})", request.service_type));
         let Some(context) = self.as_context() else {
             self.send(Downlink::ServiceReject { cause: cause::PROTOCOL_ERROR }, fx);
@@ -733,6 +737,8 @@ mod tests {
         refuse_sessions: Option<u8>,
         /// What `sessions` answers, and what `resume_sessions` got.
         network_sessions: SessionSet,
+        /// What `paged` answers.
+        paged: SessionSet,
         resumed: Vec<(SessionSet, Option<SessionSet>)>,
         /// Whether the NAS timer runs.
         timer: bool,
@@ -750,6 +756,9 @@ mod tests {
         }
         fn sessions(&mut self) -> SessionSet {
             self.network_sessions
+        }
+        fn paged(&mut self) -> SessionSet {
+            std::mem::take(&mut self.paged)
         }
         fn resume_sessions(&mut self, reactivate: SessionSet, held_by_ue: Option<SessionSet>) {
             self.resumed.push((reactivate, held_by_ue));
@@ -1049,6 +1058,19 @@ mod tests {
         assert_eq!(context.kgnb, kdf::kgnb(&kamf, 2), "from the Service Request's count");
         assert_eq!(fx.resumed, [(SessionSet(0x02), Some(SessionSet(0x02)))], "reactivate 1, 2 is gone at the UE");
         assert_eq!((mm.state(), fx.released), (State::Registered, None));
+    }
+
+    #[test]
+    fn a_paged_ue_gets_its_paged_sessions_set_up_again() {
+        let (config, mut mm, mut fx, mut ue) = registered();
+        fx.network_sessions = SessionSet(0x06);
+        fx.paged = SessionSet(0x04);
+        // Mobile terminated services, no uplink data, holding sessions 1 and 2.
+        let cleartext = hex("7e004c 20 0007 f4004000c0ffee");
+        let whole = hex("7e004c 20 0007 f4004000c0ffee 5002 0600");
+        mm.on_uplink(&config, tai(), &mut ue.initial(&cleartext, &whole), &mut fx);
+        assert_eq!(ue.open(&fx.sent.pop().unwrap(), 2), hex("7e004e 50020600"), "Service Accept: 1 and 2");
+        assert_eq!(fx.resumed, [(SessionSet(0x04), Some(SessionSet(0x06)))], "the paged session only");
     }
 
     #[test]

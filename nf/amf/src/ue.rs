@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use librecn_nas::ie::SessionSet;
 use librecn_scheduler::TimerId;
 
 use crate::config::{Plmn, Snssai};
@@ -52,6 +53,8 @@ pub struct UeContext {
     pub sessions: [Option<PduSession>; 16],
     /// Its NAS timer, while running.
     pub timer: Option<TimerId>,
+    /// Sessions the UE was paged for while idle: set up again when it is back.
+    pub paged: SessionSet,
 }
 
 /// Why an id pair does not match a context (TS 38.413 §10.6 causes).
@@ -110,6 +113,7 @@ impl UeTable {
             mm: Mm::default(),
             sessions: [None; 16],
             timer: None,
+            paged: SessionSet::default(),
         };
         // A RAN id reused on the association names the new context.
         self.by_ran.insert((assoc, ran_id), amf_id);

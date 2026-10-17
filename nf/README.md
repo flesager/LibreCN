@@ -9,10 +9,10 @@ their EO names (parameters `ausf` and `smf` of the AMF, `udm` of the AUSF,
 
 | Crate | NF | Status |
 |---|---|---|
-| [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept in Initial Context Setup, retransmission timers (T3550, T3560, T3570), identification, UE-originating deregistration; idle UEs kept (Service Request, registration from idle, implicit deregistration); PDU sessions carried between UE, SMF and gNB (PDU Session Resource Setup, reactivation) |
+| [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept in Initial Context Setup, retransmission timers (T3550, T3560, T3570), identification, UE-originating deregistration; idle UEs kept (Service Request, registration from idle, implicit deregistration), paged for downlink data; PDU sessions carried between UE, SMF and gNB (PDU Session Resource Setup, reactivation) |
 | [`ausf`](ausf/) | AUSF | 5G AKA (Nausf_UEAuthentication): challenge with HXRES*, confirmation, K_SEAF; contexts expire after 30 s |
-| [`smf`](smf/) | SMF | IPv4 PDU session establishment: checks (DNN, slice, type, SSC mode), address pool, default QoS flow, N1 accept/reject, N2 transfers, N4 to the UPF; release by the UE or the network (`/api/nfs/smf/sessions`); user plane deactivated and reactivated with the UE's idleness; a UE's modification request rejected |
-| [`upf`](upf/) | UPF | N4 sessions; GTP-U on N3 and a TUN device on N6, both ways, IPv4, source address checked, no allocation per packet; packet and byte counters on `/metrics`; event, poll or hybrid mode, measured in [`upf/README.md`](upf/README.md) |
+| [`smf`](smf/) | SMF | IPv4 PDU session establishment: checks (DNN, slice, type, SSC mode), address pool, default QoS flow, N1 accept/reject, N2 transfers, N4 to the UPF; release by the UE or the network (`/api/nfs/smf/sessions`); user plane deactivated and reactivated with the UE's idleness, downlink data for an idle UE passed to the AMF; a UE's modification request rejected |
+| [`upf`](upf/) | UPF | N4 sessions; GTP-U on N3 and a TUN device on N6, both ways, IPv4, source address checked, no allocation per packet; downlink packets of idle UEs parked (64 in all) and reported to the SMF; packet and byte counters on `/metrics`; event, poll or hybrid mode, measured in [`upf/README.md`](upf/README.md) |
 | [`udm`](udm/) | UDM | subscribers from the deployment or the web API (`/api/nfs/udm/subscribers`, GUI view); SUCI de-concealment (null scheme); authentication vectors (Milenage), SQN resynchronisation |
 
 Each NF keeps protocol decisions as pure functions on domain values (unit
@@ -21,16 +21,16 @@ tested without I/O), codecs in one module, and the EO as thin glue.
 Interop with UERANSIM: `scripts/ueransim/ng-setup.sh` (gNB) and
 `scripts/ueransim/registration.sh` (gNB + UE: registration, PDU session, then
 switch-off deregistration), and `scripts/ueransim/user-plane.sh` (in Docker:
-a ping through the UPF); UERANSIM is built next to this repository, see
+a ping through the UPF, the UE back from idle, then paged); UERANSIM is built next to this repository, see
 `CLAUDE.md`.
 
 ## Not done yet
 
 Deliberately left out of this release, to be added when a step needs them:
 
-- **Paging**: downlink data for an idle UE is dropped by the UPF; the network
-  does not page it (no Downlink Data Notification). The UE comes back by
-  itself, with uplink data or signalling.
+- **Paging retransmission** (T3513) and paging priorities: an idle UE is
+  paged once per downlink data report, the UPF reporting again at most every
+  10 s while the UE stays away.
 - **T3512 in Registration Accept**: the UE keeps its default (54 min).
 - **User plane extras**: IPv6, Error Indication for unknown TEIDs, AMBR
   enforcement, batched system calls (`recvmmsg`/`sendmmsg`: the measured

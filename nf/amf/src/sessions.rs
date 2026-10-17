@@ -74,8 +74,10 @@ impl Amf {
         }
     }
 
-    /// The network releases a session (the SMF's N1N2 message transfer): to
-    /// the UE if it is connected; else the SMF ends it alone.
+    /// The SMF's N1N2 message transfer: a release by the network, or
+    /// downlink data (N2 setup) for a session without its user plane. To the
+    /// UE and its gNB if it is connected; an idle UE is paged for downlink
+    /// data; else the SMF ends the session alone.
     pub(crate) fn on_sm_notify(
         &mut self,
         ctx: &mut Context<'_>,
@@ -90,13 +92,13 @@ impl Amf {
             .and_then(|ue| ue.sessions.get(usize::from(psi)).copied().flatten())
             .is_some_and(|s| s.sm_ctx == Some(sm_ctx));
         let delivered = connected && self.deliver(ctx, amf_id, psi, notify.n2_kind, notify.n1.get(), notify.n2.get());
-        if !delivered {
-            for idle in self.idle.values_mut() {
-                idle.forget_session(sm_ctx);
-            }
-            log!(self.log, ctx, Info, "PDU session context {sm_ctx} released by the network, the UE not reached");
+        // Downlink data for an idle UE: it is paged, the session set up once it is back.
+        let reached = delivered || (notify.n2_kind == n2_kind::SETUP && self.page(ctx, sm_ctx));
+        if !reached {
+            self.forget_idle_session(sm_ctx);
+            log!(self.log, ctx, Info, "PDU session context {sm_ctx}: the UE not reached, the session ends");
         }
-        let outcome = if delivered { Outcome::Ok } else { Outcome::ContextNotFound };
+        let outcome = if reached { Outcome::Ok } else { Outcome::ContextNotFound };
         let sent = ctx.alloc::<SmNotifyResult>(msg.from()).and_then(|r| {
             let mut r = r.with_corr_id(msg.corr_id()).with_flags(librecn_common::msg::flags::RESPONSE);
             r.sm_ctx = sm_ctx;

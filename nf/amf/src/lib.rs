@@ -12,7 +12,7 @@
 //! - `ue`, UE contexts and AMF-UE-NGAP-ID allocation;
 //! - `mm`, 5GMM for one UE, on domain values;
 //! - `sessions`, PDU sessions between the UE, the SMF and the gNB;
-//! - `idle`, the contexts of registered UEs without N2 connection;
+//! - `idle`, the contexts of registered UEs without N2 connection, paging;
 //! - [`config`], identity and addresses, from the deployment `params`.
 //!
 //! The AUSF and the SMF are reached by EO messages (`librecn-sbi`); the
@@ -72,6 +72,19 @@ struct Gnb {
     node: Option<(RanNodeId, Option<String>)>,
     /// Outbound streams of the association.
     streams: u16,
+    /// The tracking areas it serves (NG Setup): PLMN, TAC.
+    tas: Vec<(config::Plmn, [u8; 3])>,
+}
+
+impl Gnb {
+    fn new(streams: u16) -> Self {
+        Gnb { node: None, streams, tas: Vec::new() }
+    }
+
+    /// Set up, and serving tracking area `tai`.
+    fn serves(&self, tai: (config::Plmn, [u8; 3])) -> bool {
+        self.node.is_some() && self.tas.contains(&tai)
+    }
 }
 
 /// The AMF EO.
@@ -86,6 +99,8 @@ pub struct Amf {
     ues: UeTable,
     /// Idle UEs by 5G-TMSI.
     idle: HashMap<u32, idle::Idle>,
+    /// The idle UE (5G-TMSI) of each SMF context an idle UE holds.
+    idle_sessions: HashMap<u32, u32>,
     /// Session notices waiting for room at the SMF, and their retry timer.
     notices: std::collections::VecDeque<sessions::Notice>,
     notices_in_flight: usize,
@@ -108,6 +123,7 @@ impl Amf {
             bound: Arc::default(),
             gnbs: HashMap::new(),
             idle: HashMap::new(),
+            idle_sessions: HashMap::new(),
             notices: std::collections::VecDeque::new(),
             notices_in_flight: 0,
             notice_timer: None,
@@ -166,7 +182,7 @@ impl Amf {
         match received {
             Received::Up { assoc, outbound_streams } => {
                 log!(self.log, ctx, Info, "SCTP association {assoc} up, {outbound_streams} streams");
-                self.gnbs.insert(assoc, Gnb { node: None, streams: outbound_streams });
+                self.gnbs.insert(assoc, Gnb::new(outbound_streams));
             }
             Received::Down { assoc } => {
                 let released = self.forget_gnb(ctx, assoc);
@@ -287,7 +303,8 @@ impl Amf {
                 let label = request.name.clone().unwrap_or_else(|| request.node.to_string());
                 log!(self.log, ctx, Info, "NG Setup accepted: {label} ({}), {} TA(s)", request.node, request.tas.len());
                 self.alarms.clear(ctx, request.node.key());
-                let gnb = self.gnbs.entry(assoc).or_insert(Gnb { node: None, streams: 1 });
+                let gnb = self.gnbs.entry(assoc).or_insert(Gnb::new(1));
+                gnb.tas = request.tas.iter().flat_map(|ta| ta.plmns.iter().map(|(p, _)| (*p, ta.tac))).collect();
                 gnb.node = Some((request.node, request.name));
             }
             Err(refusal) => {
@@ -350,6 +367,7 @@ impl Amf {
             config: &self.config,
             serving_network: &self.serving_network,
             sessions: &mut ue.sessions,
+            paged: &mut ue.paged,
             timer: &mut ue.timer,
             ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
             release: None,
@@ -555,6 +573,7 @@ struct Port<'a, 'c, 's> {
     config: &'a AmfConfig,
     serving_network: &'a ServingNetwork,
     sessions: &'a mut [Option<PduSession>; 16],
+    paged: &'a mut SessionSet,
     timer: &'a mut Option<TimerId>,
     /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
     ids: (AmfUeId, RanUeId, AssocId, u16),
@@ -596,6 +615,10 @@ impl Effects for Port<'_, '_, '_> {
             }
         }
         set
+    }
+
+    fn paged(&mut self) -> SessionSet {
+        std::mem::take(self.paged)
     }
 
     fn resume_sessions(&mut self, reactivate: SessionSet, held_by_ue: Option<SessionSet>) {

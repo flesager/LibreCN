@@ -4,6 +4,14 @@ The user plane function, one EO: N4 sessions from the SMF (EO messages),
 GTP-U on N3 (UDP 2152 of `n3`), a TUN device on N6 (`n6`). See the crate
 documentation for the parameters.
 
+## Idle UEs
+
+A downlink packet for a session without downlink tunnel (the UE is idle) is
+parked, and the SMF told (`N4Report`, at most every 10 s per session): the
+AMF pages the UE, whose Service Request brings the tunnel back, and the
+parked packets go first. 64 packets are kept in all (2 KiB at most each,
+preallocated: 128 KiB), the oldest dropped when full.
+
 ## Modes
 
 `mode` chooses how the UPF learns that packets wait:

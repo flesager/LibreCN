@@ -6,7 +6,10 @@
 //! - N3: GTP-U on UDP port 2152 of the `n3` address. An uplink G-PDU goes
 //!   to N6 if its TEID and inner source address match a session.
 //! - N6: a TUN device (`n6`). A packet to a UE's address goes to its gNB in
-//!   a G-PDU with the PDU Session Container (QFI 1, the default flow).
+//!   a G-PDU with the PDU Session Container (QFI 1, the default flow). For
+//!   an idle UE (no downlink tunnel) it is parked, and the SMF told
+//!   (`N4Report`, at most every `REPORT_PERIOD`): the network pages the UE,
+//!   whose tunnel then comes back with the parked packets.
 //!
 //! Without `n6` the UPF keeps sessions and forwards nothing (no socket is
 //! opened). Forwarding uses one preallocated buffer: no allocation per
@@ -20,8 +23,10 @@
 //!   a row find nothing, and sleeps on epoll again.
 //!
 //! - [`sessions`], the session table;
+//! - [`parked`], the downlink packets of idle UEs;
 //! - [`tun`], the N6 device.
 
+pub mod parked;
 pub mod sessions;
 pub mod tun;
 
@@ -35,10 +40,13 @@ use librecn_common::log::Logger;
 use librecn_common::msg::flags;
 use librecn_gtpu::{G_PDU_HEADER, Message as Gtp};
 use librecn_sbi::Outcome;
-use librecn_sbi::pdu_session::{N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult};
-use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, system};
+use librecn_sbi::pdu_session::{
+    N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult, N4Report, REPORT_PERIOD,
+};
+use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Interest, IoToken, Message, system};
 use serde::Deserialize;
 
+use parked::{Parked, Parking};
 use sessions::{Refusal, Sessions};
 
 /// Packets moved per readiness, so one busy side cannot hold the worker.
@@ -100,6 +108,9 @@ pub struct Upf {
     n3_socket: Option<(UdpSocket, Option<IoToken>)>,
     n6: Option<(File, Option<IoToken>)>,
     buffer: Box<[u8]>,
+    parked: Parked,
+    /// The SMF, from its N4 messages: where downlink data reports go.
+    smf: Option<EoId>,
     log: Logger,
     alarms: Alarms,
 }
@@ -124,6 +135,8 @@ impl Upf {
             n3_socket: None,
             n6: None,
             buffer: vec![0; BUFFER].into_boxed_slice(),
+            parked: Parked::default(),
+            smf: None,
             log: Logger::default(),
             alarms: Alarms::new(),
         })
@@ -219,8 +232,27 @@ impl Upf {
                 }
             };
             let packet = &self.buffer[G_PDU_HEADER..G_PDU_HEADER + n];
-            let Some((gnb, teid)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue(dst)).and_then(|s| s.dl) else {
+            let Some((seid, session)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue_mut(dst)) else {
                 ctx.count(DROPPED, 1);
+                continue;
+            };
+            let Some((gnb, teid)) = session.dl else {
+                // The UE is idle: the packet waits for its tunnel, the SMF is told.
+                if self.parked.park(seid, packet) != Parking::Kept {
+                    ctx.count(DROPPED, 1);
+                }
+                let now = ctx.now();
+                if session.reported.is_none_or(|at| now - at >= REPORT_PERIOD) {
+                    session.reported = Some(now);
+                    let sent = self
+                        .smf
+                        .ok_or(librecn_scheduler::Error::UnknownEo)
+                        .and_then(|smf| ctx.send_value(smf, &N4Report { seid }));
+                    match sent {
+                        Ok(()) => log!(self.log, ctx, Info, "session {seid:#x}: downlink data, the UE is idle"),
+                        Err(e) => log!(self.log, ctx, Error, "session {seid:#x}: downlink data not reported: {e}"),
+                    }
+                }
                 continue;
             };
             let header: &mut [u8; G_PDU_HEADER] = (&mut self.buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
@@ -260,12 +292,16 @@ impl Upf {
     }
 
     fn on_modify(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &N4Modify) {
+        self.smf = Some(msg.from());
         let gnb = SocketAddrV4::new(Ipv4Addr::from(request.gnb_addr), librecn_gtpu::PORT);
         let dl = (request.dl_teid != 0).then_some((gnb, request.dl_teid));
         let outcome = if self.sessions.modify(request.seid, dl) {
             let (seid, teid) = (request.seid, request.dl_teid);
             match dl {
-                Some(_) => log!(self.log, ctx, Info, "session {seid:#x}: downlink to {} TEID {teid:#x}", gnb.ip()),
+                Some(_) => {
+                    log!(self.log, ctx, Info, "session {seid:#x}: downlink to {} TEID {teid:#x}", gnb.ip());
+                    self.send_parked(ctx, seid, gnb, teid);
+                }
                 None => log!(self.log, ctx, Info, "session {seid:#x}: downlink deactivated"),
             }
             Outcome::Ok
@@ -285,6 +321,29 @@ impl Upf {
         });
         if let Err(e) = sent {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
+        }
+    }
+
+    /// The packets parked for session `seid`, now that its tunnel is back.
+    fn send_parked(&mut self, ctx: &mut Context<'_>, seid: u64, gnb: SocketAddrV4, teid: u32) {
+        let (buffer, socket) = (&mut self.buffer, &self.n3_socket);
+        let mut sent = 0;
+        self.parked.release(seid, |packet| {
+            let n = packet.len();
+            buffer[G_PDU_HEADER..G_PDU_HEADER + n].copy_from_slice(packet);
+            let header: &mut [u8; G_PDU_HEADER] = (&mut buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
+            librecn_gtpu::write_g_pdu_header(header, teid, QFI, n);
+            let delivered = socket.as_ref().is_some_and(|(s, _)| s.send_to(&buffer[..G_PDU_HEADER + n], gnb).is_ok());
+            if delivered {
+                ctx.count(DOWNLINK_PACKETS, 1);
+                ctx.count(DOWNLINK_BYTES, n as u64);
+                sent += 1;
+            } else {
+                ctx.count(DROPPED, 1);
+            }
+        });
+        if sent > 0 {
+            log!(self.log, ctx, Info, "session {seid:#x}: {sent} parked packet(s) sent");
         }
     }
 }
@@ -344,12 +403,14 @@ impl ExecutionObject for Upf {
                 }
             }
         } else if let Some(request) = msg.body::<N4Establish>() {
+            self.smf = Some(msg.from());
             self.on_establish(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Modify>() {
             self.on_modify(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Delete>()
             && self.sessions.delete(request.seid).is_some()
         {
+            self.parked.release(request.seid, |_| ctx.count(DROPPED, 1));
             log!(self.log, ctx, Info, "session {:#x} deleted, {} left", request.seid, self.sessions.len());
         }
     }

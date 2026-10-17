@@ -8,6 +8,8 @@ use common::{Setup, amf_with, initiating, release_complete, vector};
 use librecn_amf::sctp::{NGAP_PPID, SctpSocket};
 use librecn_ausf::Ausf;
 use librecn_ngap::*;
+use librecn_sbi::pdu_session::N4Report;
+use librecn_scheduler::EoId;
 use librecn_security::milenage::Milenage;
 use librecn_security::{Direction, kdf, nea2, nia2};
 use librecn_smf::Smf;
@@ -33,6 +35,18 @@ fn core() -> (Setup, SctpSocket) {
 
 /// The same, the SMF's mailbox holding `smf_capacity` messages; 8 subscribers.
 fn core_with(smf_capacity: usize) -> (Setup, SctpSocket) {
+    let (s, gnb, _) = core_and_ids(smf_capacity);
+    (s, gnb)
+}
+
+/// The SMF's and UPF's EOs.
+struct Ids {
+    smf: EoId,
+    upf: EoId,
+}
+
+fn core_and_ids(smf_capacity: usize) -> (Setup, SctpSocket, Ids) {
+    let mut ids = None;
     let mut s = amf_with("208", "93", |tb| {
         let subscriber = serde_json::json!({ "supi": "imsi-208930000000001", "k": K, "opc": OPC, "count": 8 });
         let (cfg, udm) = Udm::from_params("udm", &serde_json::json!({ "subscribers": [subscriber] })).unwrap();
@@ -40,13 +54,14 @@ fn core_with(smf_capacity: usize) -> (Setup, SctpSocket) {
         let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::Value::Null).unwrap();
         tb.add(cfg, ausf).unwrap();
         let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
-        tb.add(cfg.data_capacity(smf_capacity), smf).unwrap();
+        let smf = tb.add(cfg.data_capacity(smf_capacity), smf).unwrap();
         let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
-        tb.add(cfg, upf).unwrap();
+        let upf = tb.add(cfg, upf).unwrap();
+        ids = Some(Ids { smf, upf });
     });
     let gnb = s.connect();
     assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
-    (s, gnb)
+    (s, gnb, ids.unwrap())
 }
 
 /// SUCI of imsi-208930000000001 (null scheme), all algorithms.
@@ -387,40 +402,52 @@ fn release_request(amf_id: u64, ran_id: u32) -> Vec<u8> {
     .unwrap()
 }
 
-#[test]
-fn an_idle_ue_comes_back_and_its_session_is_reactivated() {
-    let (mut s, gnb) = core();
-    let mut ue = Ue::default();
-    let accept = ue.register(&mut s, &gnb);
+/// Registers the UE with PDU session 1 (gNB TEID 0x77), then the gNB
+/// releases it: idle, its session's downlink off. Its 5G-TMSI.
+fn registered_with_a_session_then_idle(s: &mut Setup, gnb: &SctpSocket, ue: &mut Ue) -> Vec<u8> {
+    let accept = ue.register(s, gnb);
     let tmsi = accept[15..19].to_vec();
     let n1 = hex("2e 01 01 c1 ffff 91 a1");
     let transport = [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81")].concat();
-    ue.uplink_protected(&gnb, 2, &transport);
-    ue.downlink(&mut s, &gnb);
+    ue.uplink_protected(gnb, 2, &transport);
+    ue.downlink(s, gnb);
     gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, 1, 0x77)).unwrap();
     s.pump();
 
-    // The gNB releases the UE: it goes idle, its session's downlink off.
     let first = ue.amf_id;
     gnb.send(0, ue.stream, NGAP_PPID, &release_request(first, 1)).unwrap();
-    let (_, pdu) = s.receive(&gnb);
+    let (_, pdu) = s.receive(gnb);
     let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
     gnb.send(0, ue.stream, NGAP_PPID, &release_complete(first, 1)).unwrap();
     s.pump();
     assert!(s.logged("amf-1", &format!("UE {first}: idle")), "{:#?}", s.log.lines());
     assert!(s.logged("upf", "downlink deactivated"));
+    tmsi
+}
 
-    // Back with a Service Request (data for session 1) on a new RAN id.
-    let cleartext = [&hex("7e004c 10 0007 f4 0040")[..], &tmsi].concat();
-    let whole = [&cleartext[..], &hex("4002 0200 5002 0200")].concat();
+/// The Service Request of the idle UE (service type `service_type`, the
+/// cleartext IEs; `more`: the rest), on RAN id 2; then the Service Accept
+/// in Initial Context Setup, answered, and the reactivation of session 1:
+/// the gNB's tunnel is now TEID 0x88.
+fn back_with_a_service_request(
+    s: &mut Setup,
+    gnb: &SctpSocket,
+    ue: &mut Ue,
+    tmsi: &[u8],
+    service_type: &str,
+    more: &str,
+) {
+    let cleartext = [&hex(&format!("7e004c {service_type} 0007 f4 0040"))[..], tmsi].concat();
+    let whole = [&cleartext[..], &hex(more)].concat();
     let request = ue.initial(&cleartext, &whole);
+    let first = ue.amf_id;
     gnb.send(0, 2, NGAP_PPID, &initial_ue_message(2, &request)).unwrap();
-    let (carrier, service_accept) = ue.downlink(&mut s, &gnb);
+    let (carrier, service_accept) = ue.downlink(s, gnb);
     assert!(matches!(carrier, Carrier::ContextSetup), "{carrier:?}");
     assert_eq!(service_accept, hex("7e004e 50020200"), "Service Accept, session 1 kept");
     assert_ne!(ue.amf_id, first, "a new N2 context");
     gnb.send(0, ue.stream, NGAP_PPID, &context_setup_response(ue.amf_id, 2)).unwrap();
-    let (stream, pdu) = s.receive(&gnb);
+    let (stream, pdu) = s.receive(gnb);
     let setup: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
     let list =
         &setup.protocol_ies.0.iter().find(|ie| ie.id == ID_PDUSESSION_RESOURCE_SETUP_LIST_SUREQ.0).unwrap().value;
@@ -430,6 +457,39 @@ fn an_idle_ue_comes_back_and_its_session_is_reactivated() {
     s.pump();
     assert!(s.logged("amf-1", "resumed after"), "{:#?}", s.log.lines());
     assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x88"), "{:#?}", s.log.lines());
+}
+
+#[test]
+fn an_idle_ue_comes_back_and_its_session_is_reactivated() {
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    let tmsi = registered_with_a_session_then_idle(&mut s, &gnb, &mut ue);
+    // Back with a Service Request (data for session 1) on a new RAN id.
+    back_with_a_service_request(&mut s, &gnb, &mut ue, &tmsi, "10", "4002 0200 5002 0200");
+}
+
+#[test]
+fn downlink_data_pages_an_idle_ue_whose_service_request_brings_its_session_back() {
+    let (mut s, gnb, ids) = core_and_ids(1024);
+    let mut ue = Ue::default();
+    let tmsi = registered_with_a_session_then_idle(&mut s, &gnb, &mut ue);
+    // The UPF reports downlink data for the session (SMF context 1).
+    s.tb.inject_from(ids.upf, ids.smf, 0, &N4Report { seid: 1 }).unwrap();
+    let (stream, pdu) = s.receive(&gnb);
+    assert_eq!(stream, 0, "non-UE signalling");
+    let paging: Paging = initiating(&pdu, ID_PAGING);
+    let ie = |id: ProtocolIEID| &paging.protocol_ies.0.iter().find(|ie| ie.id == id.0).unwrap().value;
+    let UEPagingIdentity::fiveG_S_TMSI(identity) = open(ie(ID_UEPAGING_IDENTITY)).unwrap() else { panic!() };
+    assert_eq!(identity.five_g_tmsi.0.as_slice(), tmsi, "its 5G-S-TMSI");
+    let tais = open::<TAIListForPaging>(ie(ID_TAILIST_FOR_PAGING)).unwrap();
+    assert_eq!(
+        (tais.0[0].t_ai.p_lmnidentity.0.as_slice(), tais.0[0].t_ai.t_ac.0.as_slice()),
+        (&PLMN[..], &[0, 0, 1][..])
+    );
+    assert!(s.logged("amf-1", "paged for PDU session 1 by 1 gNB(s)"), "{:#?}", s.log.lines());
+
+    // The UE answers: mobile terminated services, no uplink data, holding session 1.
+    back_with_a_service_request(&mut s, &gnb, &mut ue, &tmsi, "20", "5002 0200");
 }
 
 #[test]
