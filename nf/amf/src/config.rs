@@ -12,6 +12,7 @@
 //! amf_pointer = 0
 //! relative_capacity = 255
 //! slices = [{ sst = 1 }, { sst = 1, sd = "010203" }]
+//! max_ues = 1024
 //! ```
 //!
 //! Every field is optional; the defaults are test values matching UERANSIM's
@@ -85,6 +86,7 @@ struct Params {
     amf_pointer: u8,
     relative_capacity: u8,
     slices: Vec<SliceParams>,
+    max_ues: usize,
 }
 
 impl Default for Params {
@@ -97,6 +99,7 @@ impl Default for Params {
             amf_pointer: 0,
             relative_capacity: 255,
             slices: vec![SliceParams { sst: 1, sd: None }],
+            max_ues: 1024,
         }
     }
 }
@@ -120,6 +123,8 @@ pub struct AmfConfig {
     pub relative_capacity: u8,
     /// Slices supported in the PLMN.
     pub slices: Vec<Snssai>,
+    /// UE contexts kept at most.
+    pub max_ues: usize,
 }
 
 impl AmfConfig {
@@ -150,6 +155,7 @@ impl AmfConfig {
             amf_pointer: p.amf_pointer,
             relative_capacity: p.relative_capacity,
             slices,
+            max_ues: p.max_ues,
         })
     }
 }

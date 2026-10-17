@@ -89,14 +89,14 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
 
 - Built step by step, each step proven against UERANSIM:
   1. N2 setup: SCTP, NG Setup, NG Reset, Error Indication (done).
-  2. Initial UE Message, Downlink/Uplink NAS Transport, UE context ids.
+  2. Initial UE Message, Downlink/Uplink NAS Transport, UE contexts, UE Context Release (done). NAS is a stub behind `nas::on_uplink`: every uplink gets a Registration Reject (#111), then the UE is released.
   3. NAS (`proto/nas`): Registration, authentication, security.
   4. Initial Context Setup and PDU sessions (needs an SMF).
 - **SCTP**: one-to-many style (one socket for every gNB, association id per message), kernel SCTP through `libc`.
 - **Structure**: procedures are pure functions on domain values (`setup.rs`); ASN.1 only in `n2.rs`; the EO is thin glue (`lib.rs`).
 - **Test values** (the owner let me choose; they match UERANSIM's sample gNB): PLMN 999/70, TAC 1, SST 1, AMF Region 1 / Set 1 / Pointer 0, capacity 255, N2 on 127.0.0.1:38412.
 - **UERANSIM** v3.3.0 lives in `/mnt/part_1TB_disck/prg/UERANSIM`, next to this repository, built by its `build.sh` without system packages: cmake and libsctp come from its `tools/`.
-  - Interop check: `scripts/ueransim/ng-setup.sh`.
+  - Interop checks: `scripts/ueransim/ng-setup.sh` (gNB), `scripts/ueransim/registration.sh` (gNB + UE).
 
 ## Commands
 
@@ -106,4 +106,5 @@ scripts/stress.sh [RUNS]                                  # slow checks
 cargo bench -p librecn-scheduler
 cargo run --release -p librecn -- --config app/librecn.example.toml   # GUI on http://127.0.0.1:8080
 scripts/ueransim/ng-setup.sh                              # interop with UERANSIM's gNB
+scripts/ueransim/registration.sh                          # UERANSIM gNB + UE: UE signalling over N2
 ```

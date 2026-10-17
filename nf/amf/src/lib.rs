@@ -1,17 +1,23 @@
 //! AMF, the access and mobility management function, hosted in one EO.
 //!
-//! This release covers the N2 interface setup: SCTP (one-to-many) on the N2
-//! address, NG Setup, NG Reset, Error Indication.
+//! This release covers N2: SCTP (one-to-many), NG Setup, NG Reset, Error
+//! Indication, and UE-associated signalling (Initial UE Message, NAS
+//! transport both ways, UE Context Release). NAS itself is a stub
+//! ([`nas`]) until the NAS codec lands.
 //!
 //! - [`sctp`], the transport;
 //! - `n2`, NGAP ↔ domain values (the only module seeing ASN.1);
 //! - `setup`, the NG Setup decision, on domain values;
+//! - `ue`, UE contexts and AMF-UE-NGAP-ID allocation;
+//! - [`nas`], the NAS layer behind one function;
 //! - [`config`], identity and addresses, from the deployment `params`.
 
 pub mod config;
 mod n2;
+pub mod nas;
 pub mod sctp;
 mod setup;
+mod ue;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -20,13 +26,17 @@ use std::sync::{Arc, Mutex};
 use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
 use librecn_common::log::Logger;
-use librecn_ngap::{CauseProtocol, Criticality, procedure_name};
+use librecn_ngap::{
+    Cause, CauseNas, CauseProtocol, CauseRadioNetwork, Criticality, ID_INITIAL_UEMESSAGE, ID_NGRESET,
+    ID_UECONTEXT_RELEASE_REQUEST, ID_UPLINK_NASTRANSPORT, procedure_name,
+};
 use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message};
 
 use config::AmfConfig;
 use n2::Incoming;
 use sctp::{AssocId, NGAP_PPID, Received, SctpSocket};
 use setup::RanNodeId;
+use ue::{AmfUeId, Location, Mismatch, RanUeId, UeTable};
 
 /// Largest NGAP message accepted (a larger one is dropped and logged).
 const RECEIVE_BUFFER: usize = 64 * 1024;
@@ -40,6 +50,8 @@ const ALARM_N2_DOWN: u32 = 0;
 /// A gNB association; `node` is set once NG Setup succeeded.
 struct Gnb {
     node: Option<(RanNodeId, Option<String>)>,
+    /// Outbound streams of the association.
+    streams: u16,
 }
 
 /// The AMF EO.
@@ -48,6 +60,7 @@ pub struct Amf {
     socket: Option<(SctpSocket, IoToken)>,
     bound: Arc<Mutex<Option<SocketAddr>>>,
     gnbs: HashMap<AssocId, Gnb>,
+    ues: UeTable,
     buffer: Box<[u8]>,
     log: Logger,
     alarms: Alarms,
@@ -57,6 +70,7 @@ impl Amf {
     /// An AMF with this configuration; N2 opens when the EO starts.
     pub fn new(config: AmfConfig) -> Self {
         Amf {
+            ues: UeTable::new(config.max_ues),
             config,
             socket: None,
             bound: Arc::default(),
@@ -83,30 +97,48 @@ impl Amf {
         self.bound.clone()
     }
 
-    fn send(&mut self, ctx: &mut Context<'_>, assoc: AssocId, pdu: Result<Vec<u8>, String>, what: &str) {
+    fn send(&mut self, ctx: &mut Context<'_>, assoc: AssocId, stream: u16, pdu: Result<Vec<u8>, String>, what: &str) {
         let result = pdu.and_then(|bytes| {
             let (socket, _) = self.socket.as_ref().ok_or("N2 closed")?;
-            socket.send(assoc, 0, NGAP_PPID, &bytes).map_err(|e| e.to_string())
+            socket.send(assoc, stream, NGAP_PPID, &bytes).map_err(|e| e.to_string())
         });
         if let Err(e) = result {
             log!(self.log, ctx, Error, "cannot send {what} on association {assoc}: {e}");
         }
     }
 
+    fn error_indication(
+        &mut self,
+        ctx: &mut Context<'_>,
+        assoc: AssocId,
+        ids: Option<(AmfUeId, RanUeId)>,
+        cause: Cause,
+    ) {
+        self.send(ctx, assoc, 0, n2::error_indication(ids, cause), "Error Indication");
+    }
+
     fn on_received(&mut self, ctx: &mut Context<'_>, received: Received<'_>) {
         match received {
             Received::Up { assoc, outbound_streams } => {
                 log!(self.log, ctx, Info, "SCTP association {assoc} up, {outbound_streams} streams");
-                self.gnbs.insert(assoc, Gnb { node: None });
+                self.gnbs.insert(assoc, Gnb { node: None, streams: outbound_streams });
             }
-            Received::Down { assoc } => match self.gnbs.remove(&assoc).and_then(|g| g.node) {
-                Some((node, name)) => {
-                    let label = name.unwrap_or_else(|| node.to_string());
-                    log!(self.log, ctx, Error, "N2 to {label} lost (association {assoc})");
-                    self.alarms.raise(ctx, node.key(), Severity::Major, &format!("N2 to {label} lost"));
+            Received::Down { assoc } => {
+                let released = self.ues.remove_gnb(assoc);
+                match self.gnbs.remove(&assoc).and_then(|g| g.node) {
+                    Some((node, name)) => {
+                        let label = name.unwrap_or_else(|| node.to_string());
+                        log!(
+                            self.log,
+                            ctx,
+                            Error,
+                            "N2 to {label} lost (association {assoc}), {released} UE(s) released"
+                        );
+                        self.alarms.raise(ctx, node.key(), Severity::Major, &format!("N2 to {label} lost"));
+                    }
+                    None => log!(self.log, ctx, Info, "SCTP association {assoc} closed before NG Setup"),
                 }
-                None => log!(self.log, ctx, Info, "SCTP association {assoc} closed before NG Setup"),
-            },
+            }
             Received::Truncated { assoc } => {
                 log!(self.log, ctx, Error, "message over {RECEIVE_BUFFER} bytes dropped (association {assoc})");
             }
@@ -121,43 +153,148 @@ impl Amf {
     fn on_ngap(&mut self, ctx: &mut Context<'_>, assoc: AssocId, data: &[u8]) {
         let set_up = self.gnbs.get(&assoc).is_some_and(|g| g.node.is_some());
         match n2::decode(data) {
-            Incoming::NgSetup(request) => match setup::decide(&self.config, &request) {
-                Ok(()) => {
-                    let response = n2::ng_setup_response(&self.config);
-                    self.send(ctx, assoc, response, "NG Setup Response");
-                    let label = request.name.clone().unwrap_or_else(|| request.node.to_string());
-                    log!(
-                        self.log,
-                        ctx,
-                        Info,
-                        "NG Setup accepted: {label} ({}), {} TA(s)",
-                        request.node,
-                        request.tas.len()
-                    );
-                    self.alarms.clear(ctx, request.node.key());
-                    self.gnbs.entry(assoc).or_insert(Gnb { node: None }).node = Some((request.node, request.name));
-                }
-                Err(refusal) => {
-                    self.send(ctx, assoc, n2::ng_setup_failure(refusal), "NG Setup Failure");
-                    log!(self.log, ctx, Info, "NG Setup refused for {}: {refusal:?}", request.node);
-                }
-            },
+            Incoming::NgSetup(request) => self.on_ng_setup(ctx, assoc, request),
             Incoming::NgReset if set_up => {
-                self.send(ctx, assoc, n2::ng_reset_acknowledge(), "NG Reset Acknowledge");
-                log!(self.log, ctx, Info, "NG Reset from association {assoc}: acknowledged");
+                let released = self.ues.remove_gnb(assoc);
+                self.send(ctx, assoc, 0, n2::ng_reset_acknowledge(), "NG Reset Acknowledge");
+                log!(self.log, ctx, Info, "NG Reset from association {assoc}: {released} UE(s) released, acknowledged");
             }
             Incoming::ErrorIndication(cause) => {
                 log!(self.log, ctx, Error, "Error Indication from association {assoc}: {cause}");
             }
+            Incoming::InitialUe { ran_id, nas, location } if set_up => {
+                self.on_initial_ue(ctx, assoc, ran_id, &nas, location)
+            }
+            Incoming::UplinkNas { amf_id, ran_id, nas, location } if set_up => {
+                match self.ues.get_mut(assoc, amf_id, ran_id) {
+                    Ok(ue) => {
+                        if location.is_some() {
+                            ue.location = location;
+                        }
+                        log!(self.log, ctx, Info, "UE {amf_id}: uplink {}", nas::describe(&nas));
+                        self.on_nas(ctx, amf_id, &nas);
+                    }
+                    Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
+                }
+            }
+            Incoming::ReleaseRequest { amf_id, ran_id, cause } if set_up => {
+                match self.ues.get_mut(assoc, amf_id, ran_id) {
+                    Ok(_) => {
+                        log!(self.log, ctx, Info, "UE {amf_id}: release requested by the gNB ({cause})");
+                        self.release(ctx, amf_id, Cause::radioNetwork(CauseRadioNetwork::unspecified));
+                    }
+                    Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
+                }
+            }
+            Incoming::ReleaseComplete { amf_id, ran_id } => match self.ues.get_mut(assoc, amf_id, ran_id) {
+                Ok(_) => {
+                    self.ues.remove(amf_id);
+                    log!(self.log, ctx, Info, "UE {amf_id}: released, {} UE(s) left", self.ues.len());
+                }
+                // A late Complete for a context already gone: nothing to do (criticality ignore).
+                Err(_) => log!(self.log, ctx, Debug, "UE Context Release Complete for unknown UE {amf_id}"),
+            },
             Incoming::Malformed(e) => {
                 log!(self.log, ctx, Error, "malformed NGAP from association {assoc}: {e}");
-                let error = n2::error_indication(CauseProtocol::transfer_syntax_error);
-                self.send(ctx, assoc, error, "Error Indication");
+                self.error_indication(ctx, assoc, None, Cause::protocol(CauseProtocol::transfer_syntax_error));
             }
-            // NG Reset before NG Setup: nothing to reset.
-            Incoming::NgReset => self.not_handled(ctx, assoc, librecn_ngap::ID_NGRESET.0, Criticality::reject),
+            // Before NG Setup: only NG Setup is acceptable.
+            Incoming::NgReset => self.not_handled(ctx, assoc, ID_NGRESET.0, Criticality::reject),
+            Incoming::InitialUe { .. } => self.not_handled(ctx, assoc, ID_INITIAL_UEMESSAGE.0, Criticality::reject),
+            Incoming::UplinkNas { .. } => self.not_handled(ctx, assoc, ID_UPLINK_NASTRANSPORT.0, Criticality::reject),
+            Incoming::ReleaseRequest { .. } => {
+                self.not_handled(ctx, assoc, ID_UECONTEXT_RELEASE_REQUEST.0, Criticality::reject);
+            }
             Incoming::Unsupported { procedure, criticality } => self.not_handled(ctx, assoc, procedure, criticality),
         }
+    }
+
+    fn on_ng_setup(&mut self, ctx: &mut Context<'_>, assoc: AssocId, request: setup::SetupRequest) {
+        match setup::decide(&self.config, &request) {
+            Ok(()) => {
+                let response = n2::ng_setup_response(&self.config);
+                self.send(ctx, assoc, 0, response, "NG Setup Response");
+                let label = request.name.clone().unwrap_or_else(|| request.node.to_string());
+                log!(self.log, ctx, Info, "NG Setup accepted: {label} ({}), {} TA(s)", request.node, request.tas.len());
+                self.alarms.clear(ctx, request.node.key());
+                let gnb = self.gnbs.entry(assoc).or_insert(Gnb { node: None, streams: 1 });
+                gnb.node = Some((request.node, request.name));
+            }
+            Err(refusal) => {
+                self.send(ctx, assoc, 0, n2::ng_setup_failure(refusal), "NG Setup Failure");
+                log!(self.log, ctx, Info, "NG Setup refused for {}: {refusal:?}", request.node);
+            }
+        }
+    }
+
+    fn on_initial_ue(
+        &mut self,
+        ctx: &mut Context<'_>,
+        assoc: AssocId,
+        ran_id: RanUeId,
+        nas: &[u8],
+        location: Option<Location>,
+    ) {
+        // The gNB reuses a RAN-UE-NGAP-ID only for a new UE: the old context is stale.
+        if let Some(stale) = self.ues.find(assoc, ran_id) {
+            self.ues.remove(stale);
+            log!(self.log, ctx, Info, "UE {stale}: replaced by a new Initial UE Message for RAN id {ran_id}");
+        }
+        let streams = self.gnbs.get(&assoc).map_or(1, |g| g.streams);
+        let Some(ue) = self.ues.create(assoc, ran_id, streams) else {
+            log!(
+                self.log,
+                ctx,
+                Error,
+                "UE table full ({} UEs): Initial UE Message for RAN id {ran_id} dropped",
+                self.config.max_ues
+            );
+            return;
+        };
+        let amf_id = ue.amf_id;
+        self.ues.get_mut(assoc, amf_id, ran_id).expect("just created").location = location;
+        log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): initial {}", nas::describe(nas));
+        self.on_nas(ctx, amf_id, nas);
+    }
+
+    /// Hands an uplink NAS PDU to the NAS layer and carries out its answer.
+    fn on_nas(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, pdu: &[u8]) {
+        match nas::on_uplink(pdu) {
+            nas::Answer::SendAndRelease { nas } => {
+                let Some(ue) = self.ues.get(amf_id) else { return };
+                let (assoc, stream, ran_id) = (ue.assoc, ue.stream, ue.ran_id);
+                let downlink = n2::downlink_nas_transport(amf_id, ran_id, &nas);
+                self.send(ctx, assoc, stream, downlink, "Downlink NAS Transport");
+                log!(self.log, ctx, Info, "UE {amf_id}: downlink {}", nas::describe(&nas));
+                self.release(ctx, amf_id, Cause::nas(CauseNas::normal_release));
+            }
+        }
+    }
+
+    /// Sends UE Context Release Command; the context goes on the Complete.
+    fn release(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, cause: Cause) {
+        let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
+        ue.releasing = true;
+        let (assoc, stream, ran_id) = (ue.assoc, ue.stream, ue.ran_id);
+        let command = n2::ue_context_release_command(amf_id, ran_id, cause);
+        self.send(ctx, assoc, stream, command, "UE Context Release Command");
+    }
+
+    /// TS 38.413 §10.6: unknown or inconsistent UE ids are reported.
+    fn unknown_ue(
+        &mut self,
+        ctx: &mut Context<'_>,
+        assoc: AssocId,
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        mismatch: Mismatch,
+    ) {
+        log!(self.log, ctx, Error, "UE ids AMF {amf_id} / RAN {ran_id} on association {assoc}: {mismatch:?}");
+        let cause = match mismatch {
+            Mismatch::UnknownAmfId => CauseRadioNetwork::unknown_local_UE_NGAP_ID,
+            Mismatch::InconsistentRanId => CauseRadioNetwork::inconsistent_remote_UE_NGAP_ID,
+        };
+        self.error_indication(ctx, assoc, Some((amf_id, ran_id)), Cause::radioNetwork(cause));
     }
 
     /// A procedure not handled now: reported unless the sender asked to
@@ -166,8 +303,12 @@ impl Amf {
         let name = procedure_name(procedure).unwrap_or("unknown procedure");
         log!(self.log, ctx, Info, "{name} not handled (association {assoc})");
         if criticality != Criticality::ignore {
-            let error = n2::error_indication(CauseProtocol::message_not_compatible_with_receiver_state);
-            self.send(ctx, assoc, error, "Error Indication");
+            self.error_indication(
+                ctx,
+                assoc,
+                None,
+                Cause::protocol(CauseProtocol::message_not_compatible_with_receiver_state),
+            );
         }
     }
 }
@@ -225,6 +366,14 @@ impl ExecutionObject for Amf {
     }
 
     fn on_stop(&mut self, ctx: &mut Context<'_>) {
-        log!(self.log, ctx, Info, "AMF {} stopping, {} gNB association(s)", self.config.name, self.gnbs.len());
+        log!(
+            self.log,
+            ctx,
+            Info,
+            "AMF {} stopping, {} gNB association(s), {} UE(s)",
+            self.config.name,
+            self.gnbs.len(),
+            self.ues.len()
+        );
     }
 }

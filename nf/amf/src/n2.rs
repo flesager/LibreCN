@@ -5,6 +5,7 @@ use rasn::types::{FixedBitString, FixedOctetString, PrintableString};
 
 use crate::config::{AmfConfig, Plmn, Snssai};
 use crate::setup::{RanNodeId, Refusal, SetupRequest, SupportedTa};
+use crate::ue::{AmfUeId, Location, RanUeId};
 
 /// An NGAP PDU from a gNB, as far as this AMF understands it.
 #[derive(Debug, PartialEq, Eq)]
@@ -13,6 +14,29 @@ pub(crate) enum Incoming {
     NgReset,
     /// The gNB reports an error; its cause, for the log.
     ErrorIndication(String),
+    /// A UE's first NAS message.
+    InitialUe {
+        ran_id: RanUeId,
+        nas: Vec<u8>,
+        location: Option<Location>,
+    },
+    UplinkNas {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        nas: Vec<u8>,
+        location: Option<Location>,
+    },
+    /// The gNB asks to release a UE; its cause, for the log.
+    ReleaseRequest {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        cause: String,
+    },
+    /// UE Context Release Complete.
+    ReleaseComplete {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+    },
     /// A procedure this AMF does not handle, with the criticality the
     /// sender gave it (TS 38.413 §10.3: decides whether to answer).
     Unsupported {
@@ -29,11 +53,47 @@ pub(crate) fn decode(bytes: &[u8]) -> Incoming {
         Ok(pdu) => pdu,
         Err(e) => return Incoming::Malformed(e.to_string()),
     };
-    let NGAPPDU::initiatingMessage(message) = pdu else {
-        let procedure = procedure_code(&pdu).unwrap_or(0);
-        return Incoming::Unsupported { procedure, criticality: Criticality::ignore };
+    let message = match pdu {
+        NGAPPDU::initiatingMessage(message) => message,
+        NGAPPDU::successfulOutcome(outcome) if outcome.procedure_code == ID_UECONTEXT_RELEASE => {
+            return open::<UEContextReleaseComplete>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    Ok(Incoming::ReleaseComplete { amf_id: amf_id(ies)?, ran_id: ran_id(ies)? })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
+        other => {
+            let procedure = procedure_code(&other).unwrap_or(0);
+            return Incoming::Unsupported { procedure, criticality: Criticality::ignore };
+        }
     };
     let result = match message.procedure_code {
+        ID_INITIAL_UEMESSAGE => open::<InitialUEMessage>(&message.value).map_err(|e| e.to_string()).and_then(|m| {
+            let ies = &m.protocol_ies.0;
+            Ok(Incoming::InitialUe { ran_id: ran_id(ies)?, nas: nas_pdu(ies)?, location: location(ies) })
+        }),
+        ID_UPLINK_NASTRANSPORT => open::<UplinkNASTransport>(&message.value).map_err(|e| e.to_string()).and_then(|m| {
+            let ies = &m.protocol_ies.0;
+            Ok(Incoming::UplinkNas {
+                amf_id: amf_id(ies)?,
+                ran_id: ran_id(ies)?,
+                nas: nas_pdu(ies)?,
+                location: location(ies),
+            })
+        }),
+        ID_UECONTEXT_RELEASE_REQUEST => {
+            open::<UEContextReleaseRequest>(&message.value).map_err(|e| e.to_string()).and_then(|m| {
+                let ies = &m.protocol_ies.0;
+                let cause = find(ies, ID_CAUSE).and_then(|v| open::<Cause>(v).ok());
+                Ok(Incoming::ReleaseRequest {
+                    amf_id: amf_id(ies)?,
+                    ran_id: ran_id(ies)?,
+                    cause: cause.map_or_else(|| "no cause".into(), |c| format!("{c:?}")),
+                })
+            })
+        }
         ID_NGSETUP => open::<NGSetupRequest>(&message.value).map_err(|e| e.to_string()).and_then(|m| setup_request(&m)),
         ID_NGRESET => open::<NGReset>(&message.value).map(|_| Incoming::NgReset).map_err(|e| e.to_string()),
         ID_ERROR_INDICATION => open::<ErrorIndication>(&message.value).map_err(|e| e.to_string()).map(|m| {
@@ -44,6 +104,65 @@ pub(crate) fn decode(bytes: &[u8]) -> Incoming {
         code => Ok(Incoming::Unsupported { procedure: code.0, criticality: message.criticality }),
     };
     result.unwrap_or_else(Incoming::Malformed)
+}
+
+/// A protocol IE container entry, whichever shape the generator gave it.
+trait Ie {
+    fn id(&self) -> u16;
+    fn value(&self) -> &Any;
+}
+
+macro_rules! ie {
+    ($($entry:ty: $id:expr;)*) => {$(
+        impl Ie for $entry {
+            fn id(&self) -> u16 {
+                $id(self)
+            }
+            fn value(&self) -> &Any {
+                &self.value
+            }
+        }
+    )*};
+}
+
+ie! {
+    AnonymousInitialUEMessageProtocolIEs: |e: &Self| e.id;
+    AnonymousUplinkNASTransportProtocolIEs: |e: &Self| e.id.0;
+    AnonymousUEContextReleaseRequestProtocolIEs: |e: &Self| e.id.0;
+    AnonymousUEContextReleaseCompleteProtocolIEs: |e: &Self| e.id.0;
+}
+
+fn find<E: Ie>(ies: &[E], id: ProtocolIEID) -> Option<&Any> {
+    ies.iter().find(|ie| ie.id() == id.0).map(Ie::value)
+}
+
+fn mandatory<T: rasn::Decode, E: Ie>(ies: &[E], id: ProtocolIEID, name: &str) -> Result<T, String> {
+    open(find(ies, id).ok_or_else(|| format!("{name} missing"))?).map_err(|e| format!("{name}: {e}"))
+}
+
+fn amf_id<E: Ie>(ies: &[E]) -> Result<AmfUeId, String> {
+    mandatory::<AMFUENGAPID, _>(ies, ID_AMF_UE_NGAP_ID, "AMF-UE-NGAP-ID").map(|id| id.0)
+}
+
+fn ran_id<E: Ie>(ies: &[E]) -> Result<RanUeId, String> {
+    mandatory::<RANUENGAPID, _>(ies, ID_RAN_UE_NGAP_ID, "RAN-UE-NGAP-ID").map(|id| id.0)
+}
+
+fn nas_pdu<E: Ie>(ies: &[E]) -> Result<Vec<u8>, String> {
+    mandatory::<NASPDU, _>(ies, ID_NAS_PDU, "NAS-PDU").map(|nas| nas.0.to_vec())
+}
+
+/// NR location only: E-UTRA (ng-eNB) is not served yet.
+fn location<E: Ie>(ies: &[E]) -> Option<Location> {
+    let UserLocationInformation::userLocationInformationNR(nr) = open(find(ies, ID_USER_LOCATION_INFORMATION)?).ok()?
+    else {
+        return None;
+    };
+    let cell = nr.n_r_cgi.n_rcell_identity.0[..36].iter().fold(0u64, |acc, bit| acc << 1 | u64::from(*bit));
+    Some(Location {
+        tai: (Plmn(*nr.t_ai.p_lmnidentity.0), *nr.t_ai.t_ac.0),
+        cell: (Plmn(*nr.n_r_cgi.p_lmnidentity.0), cell),
+    })
 }
 
 fn setup_request(message: &NGSetupRequest) -> Result<Incoming, String> {
@@ -169,13 +288,53 @@ pub(crate) fn ng_reset_acknowledge() -> Result<Vec<u8>, String> {
     pdu(NGAPPDU::successfulOutcome(SuccessfulOutcome::new(ID_NGRESET, Criticality::reject, message)))
 }
 
-/// ERROR INDICATION with a protocol cause.
-pub(crate) fn error_indication(cause: CauseProtocol) -> Result<Vec<u8>, String> {
-    let ies = vec![AnonymousErrorIndicationProtocolIEs::new(
-        ID_CAUSE.0,
-        AnonymousErrorIndicationProtocolIEsCriticality::ignore,
-        wrap(&Cause::protocol(cause)).map_err(encoding_error)?,
-    )];
+/// DOWNLINK NAS TRANSPORT of `nas` to a UE.
+pub(crate) fn downlink_nas_transport(amf_id: AmfUeId, ran_id: RanUeId, nas: &[u8]) -> Result<Vec<u8>, String> {
+    use AnonymousDownlinkNASTransportProtocolIEsCriticality as C;
+    let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
+        value.map(|v| AnonymousDownlinkNASTransportProtocolIEs::new(id.0, C::reject, v)).map_err(encoding_error)
+    };
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)))?,
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)))?,
+        ie(ID_NAS_PDU, wrap(&NASPDU(nas.into())))?,
+    ];
+    let message = wrap(&DownlinkNASTransport::new(DownlinkNASTransportProtocolIEs(ies))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_DOWNLINK_NASTRANSPORT, Criticality::ignore, message)))
+}
+
+/// UE CONTEXT RELEASE COMMAND for a UE.
+pub(crate) fn ue_context_release_command(amf_id: AmfUeId, ran_id: RanUeId, cause: Cause) -> Result<Vec<u8>, String> {
+    let ids = UENGAPIDs::uE_NGAP_ID_pair(UENGAPIDPair::new(AMFUENGAPID(amf_id), RANUENGAPID(ran_id), None));
+    let ies = vec![
+        AnonymousUEContextReleaseCommandProtocolIEs::new(
+            ID_UE_NGAP_IDS,
+            Criticality::reject,
+            wrap(&ids).map_err(encoding_error)?,
+        ),
+        AnonymousUEContextReleaseCommandProtocolIEs::new(
+            ID_CAUSE,
+            Criticality::ignore,
+            wrap(&cause).map_err(encoding_error)?,
+        ),
+    ];
+    let message =
+        wrap(&UEContextReleaseCommand::new(UEContextReleaseCommandProtocolIEs(ies))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_UECONTEXT_RELEASE, Criticality::reject, message)))
+}
+
+/// ERROR INDICATION, about a UE if `ids` are given.
+pub(crate) fn error_indication(ids: Option<(AmfUeId, RanUeId)>, cause: Cause) -> Result<Vec<u8>, String> {
+    use AnonymousErrorIndicationProtocolIEsCriticality as C;
+    let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
+        value.map(|v| AnonymousErrorIndicationProtocolIEs::new(id.0, C::ignore, v)).map_err(encoding_error)
+    };
+    let mut ies = Vec::new();
+    if let Some((amf_id, ran_id)) = ids {
+        ies.push(ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)))?);
+        ies.push(ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)))?);
+    }
+    ies.push(ie(ID_CAUSE, wrap(&cause))?);
     let message = wrap(&ErrorIndication::new(ErrorIndicationProtocolIEs(ies))).map_err(encoding_error)?;
     pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_ERROR_INDICATION, Criticality::ignore, message)))
 }
@@ -236,15 +395,46 @@ mod tests {
 
         let ack = librecn_ngap::decode(&ng_reset_acknowledge().unwrap()).unwrap();
         assert_eq!(procedure_code(&ack), Some(ID_NGRESET.0));
-        let error = error_indication(CauseProtocol::transfer_syntax_error).unwrap();
+        let error = error_indication(None, Cause::protocol(CauseProtocol::transfer_syntax_error)).unwrap();
         assert!(matches!(decode(&error), Incoming::ErrorIndication(cause) if cause.contains("transfer_syntax_error")));
+    }
+
+    #[test]
+    fn ue_associated_messages_become_domain_values() {
+        let Incoming::InitialUe { ran_id, nas, location } = decode(&vector("ci0002")) else { panic!() };
+        assert_eq!(nas[..3], [0x7e, 0x00, 0x41], "plain Registration Request");
+        let location = location.expect("NR location");
+        assert_eq!(location.tai.0, Plmn::new("208", "93").unwrap());
+        let Incoming::UplinkNas { amf_id, ran_id: ul_ran, nas, .. } = decode(&vector("ci0004")) else { panic!() };
+        assert!(!nas.is_empty());
+        assert!(matches!(decode(&vector("ci0096")), Incoming::ReleaseRequest { .. }));
+        assert!(matches!(decode(&vector("ci0050")), Incoming::ReleaseComplete { .. }));
+        println!("ran {ran_id}, uplink amf {amf_id} ran {ul_ran}");
+    }
+
+    #[test]
+    fn downlink_and_release_command_are_valid_ngap() {
+        let nas = [0x7e, 0x00, 0x44, 0x6f];
+        let dl = librecn_ngap::decode(&downlink_nas_transport(7, 9, &nas).unwrap()).unwrap();
+        assert_eq!(check(&dl).unwrap(), 4, "message + 3 IEs");
+        let NGAPPDU::initiatingMessage(m) = &dl else { panic!() };
+        let transport: DownlinkNASTransport = open(&m.value).unwrap();
+        let carried = transport.protocol_ies.0.iter().find(|ie| ie.id == ID_NAS_PDU.0).unwrap();
+        assert_eq!(&*open::<NASPDU>(&carried.value).unwrap().0, nas);
+
+        let command =
+            librecn_ngap::decode(&ue_context_release_command(7, 9, Cause::nas(CauseNas::normal_release)).unwrap())
+                .unwrap();
+        assert_eq!(check(&command).unwrap(), 3);
+        let error = error_indication(Some((7, 9)), Cause::radioNetwork(CauseRadioNetwork::unknown_local_UE_NGAP_ID));
+        assert_eq!(check(&librecn_ngap::decode(&error.unwrap()).unwrap()).unwrap(), 4);
     }
 
     #[test]
     fn garbage_and_unhandled_procedures_are_classified() {
         assert!(matches!(decode(&[0xff, 0x00]), Incoming::Malformed(_)));
-        // ci0832: Initial UE Message, not handled at this step.
-        assert!(matches!(decode(&vector("ci0832")), Incoming::Unsupported { procedure: 15, .. }));
+        // ci0003: Downlink NAS Transport, which only the AMF sends.
+        assert!(matches!(decode(&vector("ci0003")), Incoming::Unsupported { procedure: 4, .. }));
         assert_eq!(decode(&vector("ci0709")), Incoming::NgReset);
     }
 }

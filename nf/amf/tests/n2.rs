@@ -64,14 +64,21 @@ impl Setup {
         gnb
     }
 
-    /// Sends `pdu` from the gNB and returns the AMF's answer.
+    /// Sends `pdu` from the gNB and returns the AMF's answer, which must be on stream 0.
     fn exchange(&mut self, gnb: &SctpSocket, pdu: &[u8]) -> NGAPPDU {
         gnb.send(0, 0, NGAP_PPID, pdu).unwrap();
-        assert!(self.pump_until_readable(gnb), "no answer from the AMF");
+        let (stream, answer) = self.receive(gnb);
+        assert_eq!(stream, 0, "non-UE signalling on stream 0");
+        answer
+    }
+
+    /// The AMF's next PDU to the gNB, with its stream.
+    fn receive(&mut self, gnb: &SctpSocket) -> (u16, NGAPPDU) {
+        assert!(self.pump_until_readable(gnb), "nothing from the AMF");
         let mut buf = [0u8; 4096];
         let Some(Received::Data { data, ppid, stream, .. }) = gnb.recv(&mut buf).unwrap() else { panic!() };
-        assert_eq!((ppid, stream), (NGAP_PPID, 0), "NGAP on stream 0");
-        decode(data).unwrap()
+        assert_eq!(ppid, NGAP_PPID);
+        (stream, decode(data).unwrap())
     }
 
     fn logged(&self, eo: &str, needle: &str) -> bool {
@@ -107,7 +114,7 @@ fn error_cause(pdu: &NGAPPDU) -> Cause {
     let NGAPPDU::initiatingMessage(m) = pdu else { panic!("not an Error Indication: {pdu:?}") };
     assert_eq!(m.procedure_code, ID_ERROR_INDICATION);
     let indication: ErrorIndication = open(&m.value).unwrap();
-    open(&indication.protocol_ies.0[0].value).unwrap()
+    open(&indication.protocol_ies.0.iter().find(|ie| ie.id == ID_CAUSE.0).expect("a cause").value).unwrap()
 }
 
 #[test]
@@ -146,4 +153,83 @@ fn losing_a_set_up_gnb_raises_an_alarm_cleared_at_its_next_setup() {
     assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
     s.pump();
     assert!(s.logged("alarm", "alarm cleared"), "{:#?}", s.log.lines());
+}
+
+fn initiating<T: rasn::Decode>(pdu: &NGAPPDU, code: ProcedureCode) -> T {
+    let NGAPPDU::initiatingMessage(m) = pdu else { panic!("not an initiating message: {pdu:?}") };
+    assert_eq!(m.procedure_code, code);
+    open(&m.value).unwrap()
+}
+
+fn release_complete(amf_id: u64, ran_id: u32) -> Vec<u8> {
+    let ie = |id: ProtocolIEID, value: Any| {
+        AnonymousUEContextReleaseCompleteProtocolIEs::new(id, Criticality::ignore, value)
+    };
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)).unwrap()),
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)).unwrap()),
+    ];
+    let message = wrap(&UEContextReleaseComplete::new(UEContextReleaseCompleteProtocolIEs(ies))).unwrap();
+    encode(&NGAPPDU::successfulOutcome(SuccessfulOutcome::new(ID_UECONTEXT_RELEASE, Criticality::reject, message)))
+        .unwrap()
+}
+
+#[test]
+fn initial_ue_message_gets_a_downlink_nas_then_a_release() {
+    let mut s = amf("208", "93");
+    let gnb = s.connect();
+    assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
+
+    // ci0002: Initial UE Message carrying a plain Registration Request.
+    gnb.send(0, 1, NGAP_PPID, &vector("ci0002")).unwrap();
+    let (stream, pdu) = s.receive(&gnb);
+    assert_ne!(stream, 0, "UE signalling off stream 0");
+    let downlink: DownlinkNASTransport = initiating(&pdu, ID_DOWNLINK_NASTRANSPORT);
+    let ie = |id: ProtocolIEID| &downlink.protocol_ies.0.iter().find(|ie| ie.id == id.0).unwrap().value;
+    let amf_id = open::<AMFUENGAPID>(ie(ID_AMF_UE_NGAP_ID)).unwrap().0;
+    let ran_id = open::<RANUENGAPID>(ie(ID_RAN_UE_NGAP_ID)).unwrap().0;
+    assert_eq!(&*open::<NASPDU>(ie(ID_NAS_PDU)).unwrap().0, [0x7e, 0x00, 0x44, 0x6f], "Registration Reject #111");
+
+    let (stream2, pdu) = s.receive(&gnb);
+    assert_eq!(stream2, stream, "the UE keeps its stream");
+    let command: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
+    let ids = command.protocol_ies.0.iter().find(|ie| ie.id == ID_UE_NGAP_IDS).unwrap();
+    let UENGAPIDs::uE_NGAP_ID_pair(pair) = open(&ids.value).unwrap() else { panic!() };
+    assert_eq!((pair.a_mf_ue_ngap_id.0, pair.r_an_ue_ngap_id.0), (amf_id, ran_id));
+
+    gnb.send(0, stream, NGAP_PPID, &release_complete(amf_id, ran_id)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", "Registration Request (plain)"));
+    assert!(s.logged("amf-1", &format!("UE {amf_id}: released, 0 UE(s) left")), "{:#?}", s.log.lines());
+}
+
+#[test]
+fn unknown_ue_ids_get_an_error_indication() {
+    let mut s = amf("208", "93");
+    let gnb = s.connect();
+    assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
+    // ci0004: Uplink NAS Transport for an AMF-UE-NGAP-ID this AMF never gave.
+    let answer = s.exchange(&gnb, &vector("ci0004"));
+    assert_eq!(error_cause(&answer), Cause::radioNetwork(CauseRadioNetwork::unknown_local_UE_NGAP_ID));
+}
+
+#[test]
+fn ue_signalling_before_ng_setup_is_refused() {
+    let mut s = amf("208", "93");
+    let gnb = s.connect();
+    let answer = s.exchange(&gnb, &vector("ci0002"));
+    assert_eq!(error_cause(&answer), Cause::protocol(CauseProtocol::message_not_compatible_with_receiver_state));
+}
+
+#[test]
+fn ues_are_released_with_their_gnb() {
+    let mut s = amf("208", "93");
+    let gnb = s.connect();
+    assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
+    gnb.send(0, 1, NGAP_PPID, &vector("ci0002")).unwrap();
+    s.receive(&gnb);
+    s.receive(&gnb);
+    drop(gnb); // no Release Complete: the context dies with the association
+    s.pump();
+    assert!(s.logged("amf-1", "1 UE(s) released"), "{:#?}", s.log.lines());
 }
