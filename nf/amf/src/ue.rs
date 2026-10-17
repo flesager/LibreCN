@@ -67,13 +67,15 @@ pub enum Mismatch {
 #[derive(Debug)]
 pub struct UeTable {
     ues: HashMap<AmfUeId, UeContext>,
+    /// The context of a RAN-UE-NGAP-ID on a gNB association.
+    by_ran: HashMap<(AssocId, RanUeId), AmfUeId>,
     next: AmfUeId,
     capacity: usize,
 }
 
 impl UeTable {
     pub fn new(capacity: usize) -> Self {
-        UeTable { ues: HashMap::with_capacity(capacity), next: 1, capacity }
+        UeTable { ues: HashMap::with_capacity(capacity), by_ran: HashMap::with_capacity(capacity), next: 1, capacity }
     }
 
     pub fn len(&self) -> usize {
@@ -109,6 +111,8 @@ impl UeTable {
             sessions: [None; 16],
             timer: None,
         };
+        // A RAN id reused on the association names the new context.
+        self.by_ran.insert((assoc, ran_id), amf_id);
         Some(self.ues.entry(amf_id).or_insert(ue))
     }
 
@@ -127,15 +131,18 @@ impl UeTable {
 
     /// The context of RAN-UE-NGAP-ID `ran_id` on `assoc`, if any.
     pub fn find(&self, assoc: AssocId, ran_id: RanUeId) -> Option<AmfUeId> {
-        self.ues.values().find(|ue| ue.assoc == assoc && ue.ran_id == ran_id).map(|ue| ue.amf_id)
+        self.by_ran.get(&(assoc, ran_id)).copied()
     }
 
     pub fn remove(&mut self, amf_id: AmfUeId) -> Option<UeContext> {
-        self.ues.remove(&amf_id)
+        let ue = self.ues.remove(&amf_id)?;
+        self.by_ran.remove(&(ue.assoc, ue.ran_id));
+        Some(ue)
     }
 
     /// Removes every context of a gNB (association lost, NG Reset).
     pub fn remove_gnb(&mut self, assoc: AssocId) -> Vec<UeContext> {
+        self.by_ran.retain(|(a, _), _| *a != assoc);
         self.ues.extract_if(|_, ue| ue.assoc == assoc).map(|(_, ue)| ue).collect()
     }
 }

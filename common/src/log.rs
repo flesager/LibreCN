@@ -138,10 +138,18 @@ pub struct Logger {
     sink: Service,
 }
 
+/// The threshold of `Logger::default()`, process-wide (`[oam] log_level`).
+static DEFAULT_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(Level::Info as u8);
+
+/// Sets the threshold of the loggers created from now on (`Info` until then).
+pub fn set_default_level(level: Level) {
+    DEFAULT_LEVEL.store(level as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
 impl Default for Logger {
-    /// Threshold `Info`.
+    /// The default threshold ([`set_default_level`]).
     fn default() -> Self {
-        Logger::new(Level::Info)
+        Logger::new(Level::from_u8(DEFAULT_LEVEL.load(std::sync::atomic::Ordering::Relaxed)))
     }
 }
 

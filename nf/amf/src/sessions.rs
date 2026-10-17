@@ -11,7 +11,7 @@ use librecn_sbi::pdu_session::{
     CreateSmContextResult, ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult,
     n2 as n2_kind, update,
 };
-use librecn_scheduler::{Context, Message};
+use librecn_scheduler::{Context, Error, Message};
 
 use crate::ue::{AmfUeId, UeContext};
 use crate::{Amf, n2, request};
@@ -187,8 +187,75 @@ impl Amf {
     }
 
     pub(crate) fn release_sm_context(&mut self, ctx: &mut Context<'_>, sm_ctx: u32) {
-        if let Some(smf) = self.smf.get(ctx) {
-            let _ = ctx.send_value(smf, &ReleaseSmContext { sm_ctx });
+        self.notify_smf(ctx, Notice::Release { sm_ctx });
+    }
+
+    /// A notice to the SMF: sent while fewer than [`NOTICE_WINDOW`] wait
+    /// for the SMF's acknowledgement, else queued.
+    pub(crate) fn notify_smf(&mut self, ctx: &mut Context<'_>, notice: Notice) {
+        self.notices.push_back(notice);
+        self.flush_notices(ctx);
+    }
+
+    /// The SMF acknowledged a notice: the next ones can go.
+    pub(crate) fn on_notice_ack(&mut self, ctx: &mut Context<'_>) {
+        self.notices_in_flight = self.notices_in_flight.saturating_sub(1);
+        self.flush_notices(ctx);
+    }
+
+    /// Sends the queued notices in order, [`NOTICE_WINDOW`] at most without
+    /// an acknowledgement: a gNB's loss can idle thousands of UEs at once,
+    /// and a full SMF mailbox would refuse every other message. One refused
+    /// all the same (mailbox or pool full) waits for the retry timer.
+    /// Without an SMF they are dropped. Their `corr_id` is 0, no UE's.
+    pub(crate) fn flush_notices(&mut self, ctx: &mut Context<'_>) {
+        while self.notices_in_flight < NOTICE_WINDOW {
+            let Some(&notice) = self.notices.front() else { return };
+            let Some(smf) = self.smf.get(ctx) else {
+                log!(self.log, ctx, Error, "no SMF: {} session notice(s) dropped", self.notices.len());
+                self.notices_in_flight = 0;
+                return self.notices.clear();
+            };
+            let sent = match notice {
+                Notice::Release { sm_ctx } => ctx.send_value(smf, &ReleaseSmContext { sm_ctx }),
+                Notice::Deactivate { sm_ctx } => ctx.alloc::<UpdateSmContext>(smf).and_then(|m| {
+                    let mut m = m.with_flags(librecn_common::msg::flags::REQUEST);
+                    (m.sm_ctx, m.kind) = (sm_ctx, update::DEACTIVATE);
+                    ctx.send(m)
+                }),
+            };
+            match sent {
+                Ok(()) => {
+                    self.notices.pop_front();
+                    self.notices_in_flight += 1;
+                }
+                Err(Error::QueueFull | Error::PoolExhausted) => {
+                    if self.notice_timer.is_none() {
+                        self.notice_timer = ctx.arm_timer(NOTICE_RETRY, 0).ok();
+                    }
+                    return;
+                }
+                Err(e) => {
+                    self.smf.forget();
+                    log!(self.log, ctx, Error, "session notice to the SMF lost: {e}");
+                    self.notices.pop_front();
+                }
+            }
         }
     }
 }
+
+/// A one-way notice to the SMF about a session.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Notice {
+    /// The UE is idle: no downlink (UpdateSMContext, upCnxState DEACTIVATED).
+    Deactivate { sm_ctx: u32 },
+    /// The UE is forgotten: the session too (ReleaseSMContext).
+    Release { sm_ctx: u32 },
+}
+
+/// A notice refused by a full SMF is tried again after this.
+const NOTICE_RETRY: std::time::Duration = std::time::Duration::from_millis(1);
+
+/// Notices sent and not yet acknowledged by the SMF, at most.
+const NOTICE_WINDOW: usize = 64;

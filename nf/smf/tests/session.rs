@@ -106,7 +106,8 @@ fn a_session_is_established_set_up_on_the_gnb_and_released() {
     request.kind = update::DEACTIVATE;
     c.tb.inject_from(c.amf, c.smf, 44, &request).unwrap();
     c.tb.run_until_idle();
-    assert!(c.seen.take().is_empty(), "no answer to a deactivation");
+    let ack: UpdateSmContextResult = c.seen.take()[0].body().unwrap();
+    assert_eq!((ack.outcome(), ack.n2.get().len()), (Outcome::Ok, 0), "a deactivation is acknowledged, nothing more");
     assert!(c.logged("upf", "downlink deactivated"));
     request.kind = update::ACTIVATE;
     c.tb.inject_from(c.amf, c.smf, 45, &request).unwrap();
@@ -119,6 +120,8 @@ fn a_session_is_established_set_up_on_the_gnb_and_released() {
     c.tb.run_until_idle();
     assert!(c.logged("smf", "PDU session 1 released, 0 left"));
     assert!(c.logged("upf", "deleted, 0 left"));
+    let ack: UpdateSmContextResult = c.seen.take()[0].body().unwrap();
+    assert_eq!(ack.released, 1, "a release is acknowledged");
     let again = c.create("internet", &hex("2e 01 02 c1 ffff 91"));
     assert!(again.n1.get().windows(5).any(|w| w == [0x01, 10, 45, 0, 3]), "the next address");
 }

@@ -109,7 +109,7 @@ impl Smf {
     /// The AMF's requests carry N1/N2 containers (1 KiB); the UPF's answers
     /// are small; management requests 8 KiB.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 64), (1024, 32), (8 * 1024, 2)])
+        EoConfig::new(name).max_timers(0).buffers(&[(256, 1024), (1024, 1024), (8 * 1024, 2)])
     }
 
     fn next_ctx(&mut self) -> u32 {
@@ -228,9 +228,11 @@ impl Smf {
         })
     }
 
+    /// N4Modify; `teid` 0 (deactivation) is a notification, not answered.
     fn n4_modify(&mut self, ctx: &mut Context<'_>, id: u32, gnb: Ipv4Addr, teid: u32) -> librecn_scheduler::Result<()> {
+        let flag = if teid == 0 { flags::NOTIFICATION } else { flags::REQUEST };
         let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
-            let mut m = ctx.alloc::<N4Modify>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
+            let mut m = ctx.alloc::<N4Modify>(upf)?.with_corr_id(id).with_flags(flag);
             *m = N4Modify { seid: u64::from(id), gnb_addr: gnb.octets(), dl_teid: teid };
             ctx.send(m)
         });
@@ -244,10 +246,7 @@ impl Smf {
         let to = (msg.from(), msg.corr_id());
         let id = request.sm_ctx;
         let Some(c) = self.contexts.get_mut(&id) else {
-            if request.kind != update::DEACTIVATE {
-                self.update_result(ctx, to, 0, Answer::outcome(Outcome::ContextNotFound));
-            }
-            return;
+            return self.update_result(ctx, to, 0, Answer::outcome(Outcome::ContextNotFound));
         };
         (c.amf, c.amf_ue) = to;
         let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3);
@@ -256,6 +255,8 @@ impl Smf {
             (update::DEACTIVATE, _) => {
                 log!(self.log, ctx, Info, "{supi}: PDU session {psi} deactivated (the UE is idle)");
                 let _ = self.n4_modify(ctx, id, Ipv4Addr::UNSPECIFIED, 0);
+                // The AMF's acknowledgement: it paces its notices on them.
+                self.update_result(ctx, to, psi, Answer::default());
             }
             (update::ACTIVATE, Some(n3)) => match self.setup_transfer(n3) {
                 Ok(n2) => {
@@ -472,6 +473,8 @@ impl ExecutionObject for Smf {
             self.on_manage(ctx, msg, request);
         } else if let Some(request) = msg.body::<ReleaseSmContext>() {
             self.remove(ctx, request.sm_ctx);
+            let to = (msg.from(), msg.corr_id());
+            self.update_result(ctx, to, 0, Answer { released: true, ..Answer::default() });
         }
     }
 

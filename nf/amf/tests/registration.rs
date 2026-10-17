@@ -28,14 +28,19 @@ fn hex(s: &str) -> Vec<u8> {
 
 /// Core with the UDM knowing `imsi-208930000000001`, SMF and UPF, and a gNB set up.
 fn core() -> (Setup, SctpSocket) {
+    core_with(1024)
+}
+
+/// The same, the SMF's mailbox holding `smf_capacity` messages; 8 subscribers.
+fn core_with(smf_capacity: usize) -> (Setup, SctpSocket) {
     let mut s = amf_with("208", "93", |tb| {
-        let subscriber = serde_json::json!({ "supi": "imsi-208930000000001", "k": K, "opc": OPC });
+        let subscriber = serde_json::json!({ "supi": "imsi-208930000000001", "k": K, "opc": OPC, "count": 8 });
         let (cfg, udm) = Udm::from_params("udm", &serde_json::json!({ "subscribers": [subscriber] })).unwrap();
         tb.add(cfg, udm).unwrap();
         let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::Value::Null).unwrap();
         tb.add(cfg, ausf).unwrap();
         let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
-        tb.add(cfg, smf).unwrap();
+        tb.add(cfg.data_capacity(smf_capacity), smf).unwrap();
         let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
         tb.add(cfg, upf).unwrap();
     });
@@ -241,16 +246,26 @@ impl Ue {
 
     /// Protects (header type 2 or 4: ciphered) and sends.
     fn uplink_protected(&mut self, gnb: &SctpSocket, header: u8, plain: &[u8]) {
+        let pdu = self.protect(header, plain);
+        self.uplink(gnb, &pdu);
+    }
+
+    fn protect(&mut self, header: u8, plain: &[u8]) -> Vec<u8> {
         let mut pdu = [&[0x7e, header, 0, 0, 0, 0, self.ul as u8][..], plain].concat();
         nea2(&self.k_enc, self.ul, 1, Direction::Uplink, &mut pdu[7..]);
         let mac = nia2(&self.k_int, self.ul, 1, Direction::Uplink, &pdu[6..]);
         pdu[2..6].copy_from_slice(&mac);
         self.ul += 1;
-        self.uplink(gnb, &pdu);
+        pdu
     }
 
     /// RES* for an Authentication Request, and the NAS keys (NEA2, NIA2) for later.
     fn authenticate(&mut self, request: &[u8]) -> [u8; 16] {
+        self.authenticate_as(request, "208930000000001")
+    }
+
+    /// The same for subscriber `imsi` (digits).
+    fn authenticate_as(&mut self, request: &[u8], imsi: &str) -> [u8; 16] {
         let key = |h: &str| -> [u8; 16] { hex(h).try_into().unwrap() };
         let m = Milenage::new(&key(K), &key(OPC));
         let rand: [u8; 16] = request[8..24].try_into().unwrap();
@@ -259,7 +274,7 @@ impl Ue {
         let sqn: [u8; 6] = std::array::from_fn(|i| sqn_xor_ak[i] ^ v.ak[i]);
         assert_eq!(m.f1(&rand, &sqn, &[0x80, 0]).0, request[34..42], "the network is authentic");
         let kseaf = kdf::kseaf(&kdf::kausf(&v.ck, &v.ik, SNN, &sqn_xor_ak), SNN);
-        let kamf = kdf::kamf(&kseaf, "208930000000001", &[0, 0]);
+        let kamf = kdf::kamf(&kseaf, imsi, &[0, 0]);
         (self.k_enc, self.k_int) = kdf::nas_keys(&kamf, 2, 2);
         kdf::res_star(&v.ck, &v.ik, SNN, &rand, &v.res)
     }
@@ -452,6 +467,58 @@ fn the_ue_releases_its_pdu_session() {
 }
 
 #[test]
+fn a_lost_gnb_idles_more_sessions_than_the_smf_mailbox_holds() {
+    let (mut s, gnb) = core_with(3);
+    // Five UEs with a session, one after the other (the mailbox never overflows).
+    for n in 0..5u32 {
+        let mut ue = Ue::default();
+        let ran_id = 10 + n;
+        // MSIN 000000000k in BCD, low nibble first: last octet k0.
+        let request = REGISTRATION_REQUEST.replace("0000000010", &format!("00000000{}0", n + 1));
+        let msin = format!("20893000000000{}", n + 1);
+        gnb.send(0, 1, NGAP_PPID, &initial_ue_message(ran_id, &hex(&request))).unwrap();
+        let (_, auth) = ue.downlink(&mut s, &gnb);
+        let res_star = ue.authenticate_as(&auth, &msin);
+        gnb.send(
+            0,
+            ue.stream,
+            NGAP_PPID,
+            &uplink_nas(ue.amf_id, ran_id, &[&hex("7e0057 2d10")[..], &res_star].concat()),
+        )
+        .unwrap();
+        ue.downlink(&mut s, &gnb);
+        let whole = hex(&format!("{request} 2f020101"));
+        let complete = [&hex("7e005e 71")[..], &(whole.len() as u16).to_be_bytes(), &whole].concat();
+        let pdu = ue.protect(4, &complete);
+        gnb.send(0, ue.stream, NGAP_PPID, &uplink_nas(ue.amf_id, ran_id, &pdu)).unwrap();
+        ue.downlink(&mut s, &gnb);
+        gnb.send(0, ue.stream, NGAP_PPID, &context_setup_response(ue.amf_id, ran_id)).unwrap();
+        let complete = ue.protect(2, &hex("7e0043"));
+        gnb.send(0, ue.stream, NGAP_PPID, &uplink_nas(ue.amf_id, ran_id, &complete)).unwrap();
+        let n1 = hex("2e 01 01 c1 ffff 91 a1");
+        let transport = [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81")].concat();
+        let pdu = ue.protect(2, &transport);
+        gnb.send(0, ue.stream, NGAP_PPID, &uplink_nas(ue.amf_id, ran_id, &pdu)).unwrap();
+        ue.downlink(&mut s, &gnb);
+        gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, ran_id, 1, 0x70 + n)).unwrap();
+        s.pump();
+    }
+    // The gNB goes: five deactivations at once, more than the SMF's mailbox holds.
+    drop(gnb);
+    let deactivated =
+        |s: &Setup| s.log.lines().iter().filter(|l| l.eo == "smf" && l.msg.contains("deactivated")).count();
+    for _ in 0..40 {
+        if deactivated(&s) == 5 {
+            break;
+        }
+        s.pump();
+        s.tb.advance(std::time::Duration::from_millis(1));
+    }
+    let deactivated = deactivated(&s);
+    assert_eq!(deactivated, 5, "every notice delivered, the refused ones later: {:#?}", s.log.lines());
+}
+
+#[test]
 fn an_unanswered_challenge_is_sent_again_after_t3560() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();
@@ -471,10 +538,10 @@ fn an_unanswered_challenge_is_sent_again_after_t3560() {
 fn an_unknown_subscriber_is_rejected() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();
-    let stranger = REGISTRATION_REQUEST.replace("0000000010", "0000000020");
+    let stranger = REGISTRATION_REQUEST.replace("0000000010", "0000000090");
     gnb.send(0, 1, NGAP_PPID, &initial_ue_message(1, &hex(&stranger))).unwrap();
     assert_eq!(ue.downlink(&mut s, &gnb).1, hex("7e004403"), "Registration Reject, illegal UE");
     let (_, pdu) = s.receive(&gnb);
     let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
-    assert!(s.logged("udm", "no authentication vector for suci-0-208-93-0000-0-0-0000000002: UserNotFound"));
+    assert!(s.logged("udm", "no authentication vector for suci-0-208-93-0000-0-0-0000000009: UserNotFound"));
 }

@@ -10,6 +10,8 @@
 //! opc = "E8ED289DEBA952E4283B54E88E6183CA"
 //! amf = "8000"          # optional: the default
 //! sqn = "000000000000"  # optional: the last SQN used
+//! count = 1             # optional: this many subscribers from this SUPI on,
+//!                       # the same keys (test fleets)
 //! ```
 
 use std::collections::HashMap;
@@ -44,6 +46,12 @@ struct SubscriberParams {
     amf: String,
     #[serde(default)]
     sqn: Option<String>,
+    #[serde(default = "one")]
+    count: u32,
+}
+
+fn one() -> u32 {
+    1
 }
 
 fn default_amf() -> String {
@@ -63,11 +71,12 @@ pub fn from_params(params: &serde_json::Value) -> Result<HashMap<String, Subscri
     } else {
         serde_json::from_value(params.clone()).map_err(|e| format!("invalid UDM parameters: {e}"))?
     };
-    let mut subscribers = HashMap::with_capacity(p.subscribers.len());
+    let mut subscribers = HashMap::with_capacity(p.subscribers.iter().map(|s| s.count as usize).sum());
     for s in p.subscribers {
-        let (supi, subscriber) = parse(s)?;
-        if subscribers.insert(supi.clone(), subscriber).is_some() {
-            return Err(format!("subscriber {supi}: listed twice"));
+        for (supi, subscriber) in parse(s)? {
+            if subscribers.insert(supi.clone(), subscriber).is_some() {
+                return Err(format!("subscriber {supi}: listed twice"));
+            }
         }
     }
     Ok(subscribers)
@@ -86,10 +95,11 @@ pub fn subscribers(json: &str) -> Result<Vec<(String, Subscriber)>, String> {
         OneOrMany::One(s) => vec![s],
         OneOrMany::Many(list) => list,
     };
-    list.into_iter().map(parse).collect()
+    Ok(list.into_iter().map(parse).collect::<Result<Vec<_>, _>>()?.into_iter().flatten().collect())
 }
 
-fn parse(s: SubscriberParams) -> Result<(String, Subscriber), String> {
+/// The subscriber, or `count` of them: the SUPI's digits counted up, width kept.
+fn parse(s: SubscriberParams) -> Result<Vec<(String, Subscriber)>, String> {
     let what = |field: &str| format!("subscriber {}: {field}", s.supi);
     if !s.supi.starts_with("imsi-") || s.supi.len() < 6 || !s.supi[5..].bytes().all(|b| b.is_ascii_digit()) {
         return Err(what("the SUPI must be imsi-<digits>"));
@@ -104,7 +114,13 @@ fn parse(s: SubscriberParams) -> Result<(String, Subscriber), String> {
         amf: hex(&s.amf).ok_or_else(|| what("amf: 4 hex digits"))?,
         sqn,
     };
-    Ok((s.supi, subscriber))
+    let digits = &s.supi[5..];
+    let first: u64 = digits.parse().map_err(|_| what("the SUPI must be imsi-<digits>"))?;
+    let width = digits.len();
+    if s.count == 0 || u64::from(s.count - 1) > 10u64.pow(width.min(19) as u32) - 1 - first {
+        return Err(what("count: 1 or more, within the SUPI's digits"));
+    }
+    Ok((0..u64::from(s.count)).map(|i| (format!("imsi-{:0width$}", first + i), subscriber.clone())).collect())
 }
 
 fn hex<const N: usize>(s: &str) -> Option<[u8; N]> {
@@ -145,6 +161,19 @@ mod tests {
         assert!(bad("supi", "nai-x@y").contains("imsi-<digits>"));
         assert!(bad("sqn", "zz0000000000").contains("sqn"));
         assert!(bad("supi", "imsi-").contains("imsi-<digits>"));
+    }
+
+    #[test]
+    fn a_range_counts_the_supi_up() {
+        let params = serde_json::json!({ "subscribers": [{ "supi": "imsi-001010000000998", "count": 3,
+            "k": "00000000000000000000000000000001", "opc": "00000000000000000000000000000002" }]});
+        let mut supis: Vec<_> = from_params(&params).unwrap().into_keys().collect();
+        supis.sort();
+        assert_eq!(supis, ["imsi-001010000000998", "imsi-001010000000999", "imsi-001010000001000"]);
+        let mut bad = params.clone();
+        bad["subscribers"][0]["supi"] = "imsi-99".into();
+        bad["subscribers"][0]["count"] = 5.into();
+        assert!(from_params(&bad).unwrap_err().contains("count"), "past the digits");
     }
 
     #[test]

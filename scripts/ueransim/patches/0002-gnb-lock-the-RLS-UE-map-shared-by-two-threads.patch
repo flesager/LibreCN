@@ -1,0 +1,74 @@
+diff --git a/src/gnb/rls/udp_task.cpp b/src/gnb/rls/udp_task.cpp
+index 46a42d8c..cd9a06d4 100644
+--- a/src/gnb/rls/udp_task.cpp
++++ b/src/gnb/rls/udp_task.cpp
+@@ -95,6 +95,7 @@ void RlsUdpTask::onQuit()
+ 
+ void RlsUdpTask::receiveRlsPdu(const InetAddress &addr, std::unique_ptr<rls::RlsMessage> &&msg)
+ {
++    std::lock_guard<std::mutex> lock(m_mapMutex);
+     if (msg->msgType == rls::EMessageType::HEARTBEAT)
+     {
+         int dbm = EstimateSimulatedDbm(m_phyLocation, ((const rls::RlsHeartBeat &)*msg).simPos);
+@@ -161,6 +162,7 @@ void RlsUdpTask::heartbeatCycle(int64_t time)
+ {
+     std::set<int> lostUeId{};
+     std::set<uint64_t> lostSti{};
++    std::lock_guard<std::mutex> lock(m_mapMutex);
+ 
+     for (auto &item : m_ueMap)
+     {
+@@ -192,20 +194,20 @@ void RlsUdpTask::initialize(NtsTask *ctlTask)
+ 
+ void RlsUdpTask::send(int ueId, const rls::RlsMessage &msg)
+ {
+-    if (ueId == 0)
++    std::vector<InetAddress> targets{};
+     {
+-        for (auto &ue : m_ueMap)
+-            send(ue.first, msg);
+-        return;
+-    }
+-
+-    if (!m_ueMap.count(ueId))
+-    {
+-        // ignore the message
+-        return;
++        std::lock_guard<std::mutex> lock(m_mapMutex);
++        if (ueId == 0)
++        {
++            for (auto &ue : m_ueMap)
++                targets.push_back(ue.second.address);
++        }
++        else if (m_ueMap.count(ueId))
++            targets.push_back(m_ueMap[ueId].address);
++        // else: an unknown UE, the message is ignored
+     }
+-
+-    sendRlsPdu(m_ueMap[ueId].address, msg);
++    for (auto &address : targets)
++        sendRlsPdu(address, msg);
+ }
+ 
+ } // namespace nr::gnb
+diff --git a/src/gnb/rls/udp_task.hpp b/src/gnb/rls/udp_task.hpp
+index a86737e1..7261f549 100644
+--- a/src/gnb/rls/udp_task.hpp
++++ b/src/gnb/rls/udp_task.hpp
+@@ -9,6 +9,7 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <mutex>
+ #include <unordered_map>
+ #include <vector>
+ 
+@@ -39,6 +40,8 @@ class RlsUdpTask : public NtsTask
+     int64_t m_lastLoop;
+     std::unordered_map<uint64_t, int> m_stiToUe;
+     std::unordered_map<int, UeInfo> m_ueMap;
++    // send() runs on the RLS control task's thread: the maps are shared.
++    std::mutex m_mapMutex;
+     int m_newIdCounter;
+ 
+   public:

@@ -62,11 +62,13 @@ pub struct PoolSection {
 #[serde(default, deny_unknown_fields)]
 pub struct OamSection {
     pub listen: SocketAddr,
+    /// Threshold of every EO's logs: vip, fatal, error, info or debug.
+    pub log_level: String,
 }
 
 impl Default for OamSection {
     fn default() -> Self {
-        OamSection { listen: SocketAddr::from(([127, 0, 0, 1], 8080)) }
+        OamSection { listen: SocketAddr::from(([127, 0, 0, 1], 8080)), log_level: "info".into() }
     }
 }
 

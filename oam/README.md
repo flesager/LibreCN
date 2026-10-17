@@ -67,6 +67,7 @@ The answer lists what started and what failed, NF by NF. OAM EOs cannot be stopp
 | `GET /metrics` | Prometheus text |
 
 It listens on `127.0.0.1:8080` by default; there is no authentication yet.
+`[oam] log_level` (default `info`) sets every EO's log threshold.
 
 ### NF resources
 

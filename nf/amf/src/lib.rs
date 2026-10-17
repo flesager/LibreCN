@@ -86,6 +86,10 @@ pub struct Amf {
     ues: UeTable,
     /// Idle UEs by 5G-TMSI.
     idle: HashMap<u32, idle::Idle>,
+    /// Session notices waiting for room at the SMF, and their retry timer.
+    notices: std::collections::VecDeque<sessions::Notice>,
+    notices_in_flight: usize,
+    notice_timer: Option<TimerId>,
     buffer: Box<[u8]>,
     log: Logger,
     alarms: Alarms,
@@ -104,6 +108,9 @@ impl Amf {
             bound: Arc::default(),
             gnbs: HashMap::new(),
             idle: HashMap::new(),
+            notices: std::collections::VecDeque::new(),
+            notices_in_flight: 0,
+            notice_timer: None,
             buffer: vec![0; RECEIVE_BUFFER].into_boxed_slice(),
             log: Logger::default(),
             alarms: Alarms::new(),
@@ -120,13 +127,14 @@ impl Amf {
     /// lanes, and buffers for the AUSF's and the SMF's answers. A NAS timer
     /// per UE, and the idle sweep.
     pub fn eo_config(&self) -> EoConfig {
-        let timers = u32::try_from(self.config.max_ues).unwrap_or(u32::MAX).saturating_add(1);
+        // A NAS timer per UE, the idle sweep, the notices' retry.
+        let timers = u32::try_from(self.config.max_ues).unwrap_or(u32::MAX).saturating_add(2);
         // The system lane holds every expiry at once (the scheduler checks it).
         EoConfig::new(&self.config.name)
             .max_io(1)
             .max_timers(timers)
             .system_capacity(timers as usize + 1 + 3)
-            .buffers(&[(256, 64), (2048, 16)])
+            .buffers(&[(256, 1024), (2048, 1024)])
     }
 
     /// The N2 address actually bound, once the EO started (port 0: chosen by the kernel).
@@ -372,7 +380,12 @@ impl Amf {
         } else if let Some(result) = msg.body::<CreateSmContextResult>() {
             self.on_sm_created(ctx, amf_id, result);
         } else if let Some(result) = msg.body::<UpdateSmContextResult>() {
-            self.on_sm_updated(ctx, amf_id, result);
+            // `corr_id` 0: the acknowledgement of a session notice.
+            if amf_id == 0 {
+                self.on_notice_ack(ctx);
+            } else {
+                self.on_sm_updated(ctx, amf_id, result);
+            }
         } else if let Some(notify) = msg.body::<SmNotify>() {
             self.on_sm_notify(ctx, msg, amf_id, notify);
         }
@@ -459,7 +472,10 @@ impl ExecutionObject for Amf {
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if let Some(fired) = msg.timer() {
-            if fired.tag == 0 {
+            if Some(fired.id) == self.notice_timer {
+                self.notice_timer = None;
+                self.flush_notices(ctx);
+            } else if fired.tag == 0 {
                 self.sweep_idle(ctx);
                 let _ = ctx.arm_timer(idle::SWEEP, 0);
             } else {

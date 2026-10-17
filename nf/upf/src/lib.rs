@@ -137,7 +137,7 @@ impl Upf {
     /// N4 messages are small; N3 and N6 are two I/O registrations; the
     /// packet counters.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_io(2).max_timers(0).buffers(&[(256, 64)]).counters(COUNTERS)
+        EoConfig::new(name).max_io(2).max_timers(0).buffers(&[(256, 1024)]).counters(COUNTERS)
     }
 
     /// N6 on an already open, non-blocking packet device instead of the
@@ -272,6 +272,10 @@ impl Upf {
         } else {
             Outcome::ContextNotFound
         };
+        // A notification (the UE went idle) wants no answer.
+        if msg.header().flags & flags::REQUEST == 0 {
+            return;
+        }
         let seid = request.seid;
         let sent = ctx.alloc::<N4ModifyResult>(msg.from()).and_then(|r| {
             let mut r = r.with_corr_id(msg.corr_id()).with_flags(flags::RESPONSE);

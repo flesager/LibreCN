@@ -96,7 +96,7 @@ impl Ausf {
 
     /// Requests are at most 256 bytes; one sweep timer.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(1).buffers(&[(256, 128)])
+        EoConfig::new(name).max_timers(1).buffers(&[(256, 1024)])
     }
 
     fn next_id(&mut self) -> u32 {

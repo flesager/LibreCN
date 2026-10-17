@@ -7,12 +7,12 @@
 use std::time::Duration;
 
 use librecn_common::log;
-use librecn_sbi::pdu_session::{UpdateSmContext, update};
 use librecn_scheduler::{Context, Time};
 
+use crate::Amf;
 use crate::mm::{self, Mm, State};
+use crate::sessions::Notice;
 use crate::ue::{AmfUeId, PduSession, UeContext};
-use crate::{Amf, request};
 
 /// The mobile reachable timer: T3512's default (54 min, the AMF sends no
 /// other value) plus 4 minutes (§5.3.7).
@@ -52,9 +52,7 @@ impl Amf {
             return false;
         };
         for sm_ctx in ue.sessions.iter().flatten().filter_map(|s| s.sm_ctx) {
-            request::<UpdateSmContext>(ctx, &mut self.smf, &mut self.log, ue.amf_id, |m| {
-                (m.sm_ctx, m.kind) = (sm_ctx, update::DEACTIVATE);
-            });
+            self.notify_smf(ctx, Notice::Deactivate { sm_ctx });
         }
         let idle = Idle { mm: ue.mm, sessions: ue.sessions, since: ctx.now() };
         self.idle.insert(tmsi, idle);

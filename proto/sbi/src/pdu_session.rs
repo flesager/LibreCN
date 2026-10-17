@@ -102,7 +102,7 @@ pub mod update {
     pub const SETUP_RESPONSE: u8 = 1;
     /// N2: PDU Session Resource Setup Unsuccessful Transfer.
     pub const SETUP_FAILED: u8 = 2;
-    /// The UE went idle: no downlink tunnel (upCnxState DEACTIVATED). No answer.
+    /// The UE went idle: no downlink tunnel (upCnxState DEACTIVATED).
     pub const DEACTIVATE: u8 = 3;
     /// The UE is back: N2 to set the session up again (upCnxState ACTIVATING).
     pub const ACTIVATE: u8 = 4;
@@ -152,7 +152,8 @@ impl MsgBody for UpdateSmContextResult {
     const MSG_ID: u32 = id(family::PDU_SESSION, 4);
 }
 
-/// AMF → SMF: Nsmf_PDUSession_ReleaseSMContext (the UE is gone). No answer.
+/// AMF → SMF: Nsmf_PDUSession_ReleaseSMContext (the UE is gone); answered
+/// by an UpdateSmContextResult, `released`.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct ReleaseSmContext {

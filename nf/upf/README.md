@@ -55,3 +55,40 @@ Reading:
 
 So `event` stays the default; `hybrid` suits latency-sensitive traffic on
 a shared machine, `poll` a dedicated core.
+
+### By number of UEs
+
+`forwarding ues` (also run by `scripts/upf-modes.sh`), `event` mode: one
+PDU session per UE, the packets sent to the UEs in turn. *Uplink*: three
+gNB threads send G-PDUs as fast as they can; *downlink*: three threads
+write IP packets on N6 as fast as they can; the packets per second that
+come out of the UPF, and their IP bytes in Mbit/s. Two runs agree within
+5 %; the first:
+
+| UEs | packet | round trip p50 / p99 (µs) | uplink kpps, Mbit/s | downlink kpps, Mbit/s |
+|---|---|---|---|---|
+| 1 | 84 B | 27.6 / 32.9 | 303, 203 | 187, 126 |
+| 1 | 1400 B | 28.3 / 36.2 | 274, 3065 | 176, 1969 |
+| 2 | 84 B | 27.5 / 37.4 | 285, 192 | 187, 126 |
+| 2 | 1400 B | 28.5 / 36.3 | 276, 3095 | 178, 1994 |
+| 10 | 84 B | 28.0 / 38.5 | 291, 196 | 185, 124 |
+| 10 | 1400 B | 28.6 / 40.6 | 272, 3048 | 172, 1929 |
+| 100 | 84 B | 27.7 / 37.9 | 299, 201 | 186, 125 |
+| 100 | 1400 B | 27.8 / 36.2 | 254, 2842 | 175, 1960 |
+| 1000 | 84 B | 27.9 / 39.0 | 283, 190 | 182, 123 |
+| 1000 | 1400 B | 28.8 / 41.6 | 261, 2923 | 178, 1997 |
+
+Reading:
+
+- **The number of UEs costs nothing**: sessions are found by hash (TEID
+  uplink, UE address downlink).
+- **Packets, not bytes, are the limit**: 1400-byte packets go nearly as
+  many per second as 84-byte ones, hence 2 to 3 Gbit/s against 120 to 200
+  Mbit/s.
+- **Downlink is slower** (about 180 kpps): the UPF's UDP send on loopback
+  also runs the receiving side of the stack on its core (94 % busy, every
+  packet delivered). On a real network card, the send is cheaper.
+- **More cores in the pool change nothing** (`UPF_CORES=2` to 4, the same
+  figures within 3 %; the round trip 3 µs longer, a packet sometimes waking
+  another worker): one EO runs on one core at a time. More would take
+  several UPF instances.

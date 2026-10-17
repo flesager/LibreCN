@@ -46,7 +46,7 @@ impl Udm {
 
     /// Requests are 256 bytes; management requests 8 KiB.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 64), (8 * 1024, 4)])
+        EoConfig::new(name).max_timers(0).buffers(&[(256, 1024), (8 * 1024, 4)])
     }
 
     fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
