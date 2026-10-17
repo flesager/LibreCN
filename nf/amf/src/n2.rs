@@ -378,6 +378,26 @@ pub(crate) fn ng_reset_acknowledge() -> Result<Vec<u8>, String> {
     pdu(NGAPPDU::successfulOutcome(SuccessfulOutcome::new(ID_NGRESET, Criticality::reject, message)))
 }
 
+/// OVERLOAD START: the gNB lets through only emergency sessions and mobile
+/// terminated services (paging answers), TS 38.413 §9.3.1.105.
+pub(crate) fn overload_start() -> Result<Vec<u8>, String> {
+    let action =
+        OverloadResponse::overloadAction(OverloadAction::permit_emergency_sessions_and_mobile_terminated_services_only);
+    let ies = vec![AnonymousOverloadStartProtocolIEs::new(
+        ID_AMFOVERLOAD_RESPONSE.0,
+        AnonymousOverloadStartProtocolIEsCriticality::reject,
+        wrap(&action).map_err(encoding_error)?,
+    )];
+    let message = wrap(&OverloadStart::new(OverloadStartProtocolIEs(ies))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_OVERLOAD_START, Criticality::ignore, message)))
+}
+
+/// OVERLOAD STOP.
+pub(crate) fn overload_stop() -> Result<Vec<u8>, String> {
+    let message = wrap(&OverloadStop::new(OverloadStopProtocolIEs(vec![]))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_OVERLOAD_STOP, Criticality::reject, message)))
+}
+
 /// PAGING of an idle UE by its 5G-S-TMSI, in tracking area `tai`.
 pub(crate) fn paging(config: &AmfConfig, tmsi: u32, tai: (Plmn, [u8; 3])) -> Result<Vec<u8>, String> {
     use AnonymousPagingProtocolIEsCriticality::ignore;

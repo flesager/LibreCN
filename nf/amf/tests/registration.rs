@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{Setup, amf_with, initiating, release_complete, vector};
+use common::{Setup, amf_with, amf_with_params, initiating, release_complete, vector};
 use librecn_amf::sctp::{NGAP_PPID, SctpSocket};
 use librecn_ausf::Ausf;
 use librecn_common::manage::{Manage, Method, Reply};
@@ -659,4 +659,49 @@ fn the_network_deregisters_a_connected_ue_then_an_idle_one() {
     assert!(s.logged("amf-1", "deregistered by the network, locally (idle)"));
     assert!(s.logged("smf", "PDU session 1 released, 0 left"), "{:#?}", s.log.lines());
     assert_eq!(manage(&mut s, &ids, Method::Delete, "ues/imsi-208930000000001", "").0, 404);
+}
+
+#[test]
+fn a_full_ue_table_starts_overload_at_the_gnbs_and_stops_it_once_emptied() {
+    // Two UE contexts at most: the second one is 100 %, over the 90 % threshold.
+    let mut s = amf_with_params("208", "93", serde_json::json!({ "max_ues": 2 }), |_| {});
+    let gnb = s.connect();
+    assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
+    // No AUSF: each registration is rejected, its context waits for the Release Complete.
+    let mut contexts = Vec::new();
+    let mut overload = None;
+    for ran_id in [1, 2] {
+        gnb.send(0, 1, NGAP_PPID, &initial_ue_message(ran_id, &hex(REGISTRATION_REQUEST))).unwrap();
+        s.pump();
+    }
+    for _ in 0..5 {
+        let (_, pdu) = s.receive(&gnb);
+        let NGAPPDU::initiatingMessage(m) = &pdu else { panic!("{pdu:?}") };
+        match m.procedure_code {
+            ID_UECONTEXT_RELEASE => {
+                let command: UEContextReleaseCommand = open(&m.value).unwrap();
+                let ids = command.protocol_ies.0.iter().find(|ie| ie.id == ID_UE_NGAP_IDS).unwrap();
+                let UENGAPIDs::uE_NGAP_ID_pair(pair) = open(&ids.value).unwrap() else { panic!() };
+                contexts.push((pair.a_mf_ue_ngap_id.0, pair.r_an_ue_ngap_id.0));
+            }
+            ID_OVERLOAD_START => overload = Some(open::<OverloadStart>(&m.value).unwrap()),
+            _ => {}
+        }
+    }
+    let start = overload.expect("Overload Start");
+    let action = open::<OverloadResponse>(&start.protocol_ies.0[0].value).unwrap();
+    assert_eq!(
+        action,
+        OverloadResponse::overloadAction(OverloadAction::permit_emergency_sessions_and_mobile_terminated_services_only)
+    );
+    assert!(s.logged("amf-1", "overloaded: 2 of 2 UE contexts, Overload Start to 1 gNB(s)"), "{:#?}", s.log.lines());
+    assert!(s.logged("alarm", "alarm raised MAJOR amf-1/1: overloaded"), "{:#?}", s.log.lines());
+
+    // One released: 50 %, under the 80 % threshold.
+    let (amf_id, ran_id) = contexts[0];
+    gnb.send(0, 1, NGAP_PPID, &release_complete(amf_id, ran_id)).unwrap();
+    let (stream, pdu) = s.receive(&gnb);
+    assert_eq!(stream, 0);
+    let _: OverloadStop = initiating(&pdu, ID_OVERLOAD_STOP);
+    assert!(s.logged("amf-1", "overload over: 1 of 2 UE contexts"));
 }

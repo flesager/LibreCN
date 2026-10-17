@@ -37,6 +37,7 @@ scripts/ueransim/ng-setup.sh       # interop with UERANSIM's gNB (UERANSIM next 
 scripts/ueransim/registration.sh   # UERANSIM gNB + UE: registration, PDU session, deregistration
 scripts/ueransim/user-plane.sh     # in Docker: UERANSIM's UE pings through the UPF
 scripts/ueransim/scale.sh          # UERANSIM at scale: GNBS gNBs x UES UEs (default 4 x 250)
+scripts/ueransim/overload.sh       # UERANSIM: Overload Start and Stop from a full AMF
 scripts/load.sh                    # capacity on 1 to 4 cores, control and user plane (BENCHMARKS.md)
 scripts/upf-modes.sh               # the UPF alone: modes, number of UEs, packet size (BENCHMARKS.md)
 ```

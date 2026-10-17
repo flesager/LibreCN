@@ -30,12 +30,20 @@ pub fn amf(mcc: &str, mnc: &str) -> Setup {
 
 /// Same, `more` adding EOs (AUSF, UDM) before the AMF starts.
 pub fn amf_with(mcc: &str, mnc: &str, more: impl FnOnce(&mut TestBed)) -> Setup {
+    amf_with_params(mcc, mnc, serde_json::json!({}), more)
+}
+
+/// Same, `extra` added to the AMF's parameters.
+pub fn amf_with_params(mcc: &str, mnc: &str, extra: serde_json::Value, more: impl FnOnce(&mut TestBed)) -> Setup {
     let mut tb = TestBed::new();
     let (sink, log) = LogSink::capture();
     tb.add(LogSink::config(), sink).unwrap();
     tb.add(AlarmManager::config(), AlarmManager::new()).unwrap();
     more(&mut tb);
-    let params = serde_json::json!({ "n2": "127.0.0.1:0", "plmn": { "mcc": mcc, "mnc": mnc } });
+    let mut params = serde_json::json!({ "n2": "127.0.0.1:0", "plmn": { "mcc": mcc, "mnc": mnc } });
+    if let (Some(params), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
+        params.extend(extra.clone());
+    }
     let amf = Amf::new(AmfConfig::from_params("amf-1", &params).unwrap());
     let bound = amf.bound_addr();
     let amf = tb.add(amf.eo_config(), amf).unwrap();

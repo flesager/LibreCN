@@ -68,6 +68,12 @@ const MESSAGES_PER_TURN: usize = 32;
 const STREAMS: u16 = 16;
 /// Alarm raised while N2 cannot be served.
 const ALARM_N2_DOWN: u32 = 0;
+/// Alarm raised while the AMF is overloaded.
+const ALARM_OVERLOAD: u32 = 1;
+/// Overload starts when the UE contexts reach this share of `max_ues` (%),
+/// and stops below the second: the gap keeps it from flapping.
+const OVERLOAD_START: usize = 90;
+const OVERLOAD_STOP: usize = 80;
 
 /// A gNB association; `node` is set once NG Setup succeeded.
 struct Gnb {
@@ -107,6 +113,8 @@ pub struct Amf {
     notices: std::collections::VecDeque<sessions::Notice>,
     notices_in_flight: usize,
     notice_timer: Option<TimerId>,
+    /// Overload Start sent to the gNBs (TS 23.501 §5.19.5.2).
+    overloaded: bool,
     buffer: Box<[u8]>,
     log: Logger,
     alarms: Alarms,
@@ -129,6 +137,7 @@ impl Amf {
             notices: std::collections::VecDeque::new(),
             notices_in_flight: 0,
             notice_timer: None,
+            overloaded: false,
             buffer: vec![0; RECEIVE_BUFFER].into_boxed_slice(),
             log: Logger::default(),
             alarms: Alarms::new(),
@@ -170,6 +179,32 @@ impl Amf {
         }
     }
 
+    /// The UE contexts changed: Overload Start or Stop to every gNB set up,
+    /// when the table crosses the thresholds.
+    fn check_load(&mut self, ctx: &mut Context<'_>) {
+        let (used, capacity) = (self.ues.len() * 100, self.config.max_ues.max(1));
+        let overloaded =
+            if self.overloaded { used >= OVERLOAD_STOP * capacity } else { used >= OVERLOAD_START * capacity };
+        if overloaded == self.overloaded {
+            return;
+        }
+        self.overloaded = overloaded;
+        let (pdu, what) =
+            if overloaded { (n2::overload_start(), "Overload Start") } else { (n2::overload_stop(), "Overload Stop") };
+        let gnbs: Vec<AssocId> = self.gnbs.iter().filter(|(_, g)| g.node.is_some()).map(|(a, _)| *a).collect();
+        for &assoc in &gnbs {
+            self.send(ctx, assoc, 0, pdu.clone(), what);
+        }
+        let (n, max) = (self.ues.len(), self.config.max_ues);
+        if overloaded {
+            log!(self.log, ctx, Error, "overloaded: {n} of {max} UE contexts, {what} to {} gNB(s)", gnbs.len());
+            self.alarms.raise(ctx, ALARM_OVERLOAD, Severity::Major, &format!("overloaded: {n} of {max} UE contexts"));
+        } else {
+            log!(self.log, ctx, Info, "overload over: {n} of {max} UE contexts, {what} to {} gNB(s)", gnbs.len());
+            self.alarms.clear(ctx, ALARM_OVERLOAD);
+        }
+    }
+
     fn error_indication(
         &mut self,
         ctx: &mut Context<'_>,
@@ -188,6 +223,7 @@ impl Amf {
             }
             Received::Down { assoc } => {
                 let released = self.forget_gnb(ctx, assoc);
+                self.check_load(ctx);
                 match self.gnbs.remove(&assoc).and_then(|g| g.node) {
                     Some((node, name)) => {
                         let label = name.unwrap_or_else(|| node.to_string());
@@ -219,6 +255,7 @@ impl Amf {
             Incoming::NgSetup(request) => self.on_ng_setup(ctx, assoc, request),
             Incoming::NgReset if set_up => {
                 let released = self.forget_gnb(ctx, assoc);
+                self.check_load(ctx);
                 self.send(ctx, assoc, 0, n2::ng_reset_acknowledge(), "NG Reset Acknowledge");
                 log!(self.log, ctx, Info, "NG Reset from association {assoc}: {released} UE(s) released, acknowledged");
             }
@@ -255,6 +292,7 @@ impl Amf {
                     if let Some(ue) = gone {
                         self.retire(ctx, ue);
                     }
+                    self.check_load(ctx);
                     let left = self.ues.len();
                     match supi {
                         Some(supi) => log!(self.log, ctx, Info, "UE {amf_id} ({supi}): released, {left} UE(s) left"),
@@ -308,6 +346,9 @@ impl Amf {
                 let gnb = self.gnbs.entry(assoc).or_insert(Gnb::new(1));
                 gnb.tas = request.tas.iter().flat_map(|ta| ta.plmns.iter().map(|(p, _)| (*p, ta.tac))).collect();
                 gnb.node = Some((request.node, request.name));
+                if self.overloaded {
+                    self.send(ctx, assoc, 0, n2::overload_start(), "Overload Start");
+                }
             }
             Err(refusal) => {
                 self.send(ctx, assoc, 0, n2::ng_setup_failure(refusal), "NG Setup Failure");
@@ -344,6 +385,7 @@ impl Amf {
         };
         let amf_id = ue.amf_id;
         self.ues.get_mut(assoc, amf_id, ran_id).expect("just created").location = location;
+        self.check_load(ctx);
         log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): Initial UE Message");
         self.resume(ctx, amf_id, nas);
         self.on_nas(ctx, amf_id, nas);
