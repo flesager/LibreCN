@@ -1,0 +1,12 @@
+# LibreCN with one AMF on 127.0.0.1:38412, PLMN 999/70, SST 1 (the defaults),
+# for scripts/ueransim/ng-setup.sh.
+[[runtime.pools]]
+name = "cp"
+workers = 1
+
+[oam]
+listen = "127.0.0.1:0"
+
+[[nf]]
+kind = "amf"
+name = "amf-1"

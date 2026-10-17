@@ -1,0 +1,22 @@
+[package]
+name = "librecn-amf"
+description = "AMF: access and mobility management function (N2 for now)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-scheduler = { path = "../../scheduler" }
+librecn-common = { path = "../../common" }
+librecn-ngap = { path = "../../proto/ngap" }
+rasn.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+librecn-oam = { path = "../../oam" }
+
+[lints]
+workspace = true

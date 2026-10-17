@@ -148,7 +148,8 @@ mod tests {
     fn example_file_is_valid() {
         let text = include_str!("../librecn.example.toml");
         AppConfig::parse(text).unwrap().runtime().unwrap();
-        assert_eq!(librecn_oam::Deployment::parse(text).unwrap().nf[0].kind, "demo");
+        let kinds: Vec<_> = librecn_oam::Deployment::parse(text).unwrap().nf.into_iter().map(|n| n.kind).collect();
+        assert_eq!(kinds, ["amf", "demo"]);
     }
 
     #[test]

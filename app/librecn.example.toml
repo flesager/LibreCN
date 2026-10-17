@@ -19,6 +19,19 @@ listen = "127.0.0.1:8080"     # web API and GUI
 
 # NFs started at boot; more through the GUI or `POST /api/nfs`.
 [[nf]]
+kind = "amf"
+name = "amf-1"
+pool = "cp"
+[nf.params]                   # all optional: these are the defaults
+n2 = "127.0.0.1:38412"
+plmn = { mcc = "999", mnc = "70" }
+amf_region = 1
+amf_set = 1
+amf_pointer = 0
+relative_capacity = 255
+slices = [{ sst = 1 }]
+
+[[nf]]
 kind = "demo"
 name = "demo-1"
 pool = "cp"

@@ -45,7 +45,14 @@ fn run() -> Result<(), String> {
     let add_failed = |e| format!("cannot start the OAM EOs: {e}");
     runtime.add(LogSink::config(), LogSink::stdout()).map_err(add_failed)?;
     runtime.add(AlarmManager::config(), AlarmManager::new()).map_err(add_failed)?;
-    let control = runtime.add(Control::config(), Control::new().kind("demo", demo::factory())).map_err(add_failed)?;
+    let control = Control::new().kind("demo", demo::factory()).kind(
+        "amf",
+        Box::new(|name, params| {
+            let (cfg, amf) = librecn_amf::Amf::from_params(name, params)?;
+            Ok((cfg, Box::new(amf) as Box<dyn librecn_scheduler::ExecutionObject>))
+        }),
+    );
+    let control = runtime.add(Control::config(), control).map_err(add_failed)?;
     runtime.add(Server::config(), Server::new(app.oam.listen)).map_err(add_failed)?;
     log::print(NAME, Level::Vip, format_args!("LibreCN started, {nfs} NF(s) to deploy"));
 
