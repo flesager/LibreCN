@@ -392,15 +392,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AMFTNLAssociationSetupItemIEExtensions(pub SequenceOf<AnonymousAMFTNLAssociationSetupItemIEExtensions>);
-    aper_sequence_of!(
-        AMFTNLAssociationSetupItemIEExtensions,
-        AnonymousAMFTNLAssociationSetupItemIEExtensions,
-        1,
-        65535
-    );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "AMF-TNLAssociationSetupItem")]
     #[non_exhaustive]
@@ -418,10 +412,9 @@ pub mod ngap_ies {
             Self { a_mf_tnlassociation_address, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"), identifier = "AMF-TNLAssociationSetupList")]
     pub struct AMFTNLAssociationSetupList(pub SequenceOf<AMFTNLAssociationSetupItem>);
-    aper_sequence_of!(AMFTNLAssociationSetupList, AMFTNLAssociationSetupItem, 1, 32);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -450,15 +443,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AMFTNLAssociationToAddItemIEExtensions(pub SequenceOf<AnonymousAMFTNLAssociationToAddItemIEExtensions>);
-    aper_sequence_of!(
-        AMFTNLAssociationToAddItemIEExtensions,
-        AnonymousAMFTNLAssociationToAddItemIEExtensions,
-        1,
-        65535
-    );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "AMF-TNLAssociationToAddItem")]
     #[non_exhaustive]
@@ -482,10 +469,9 @@ pub mod ngap_ies {
             Self { a_mf_tnlassociation_address, t_nlassociation_usage, t_nladdress_weight_factor, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"), identifier = "AMF-TNLAssociationToAddList")]
     pub struct AMFTNLAssociationToAddList(pub SequenceOf<AMFTNLAssociationToAddItem>);
-    aper_sequence_of!(AMFTNLAssociationToAddList, AMFTNLAssociationToAddItem, 1, 32);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -514,16 +500,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AMFTNLAssociationToRemoveItemIEExtensions(
         pub SequenceOf<AnonymousAMFTNLAssociationToRemoveItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        AMFTNLAssociationToRemoveItemIEExtensions,
-        AnonymousAMFTNLAssociationToRemoveItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "AMF-TNLAssociationToRemoveItem")]
@@ -542,10 +522,9 @@ pub mod ngap_ies {
             Self { a_mf_tnlassociation_address, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"), identifier = "AMF-TNLAssociationToRemoveList")]
     pub struct AMFTNLAssociationToRemoveList(pub SequenceOf<AMFTNLAssociationToRemoveItem>);
-    aper_sequence_of!(AMFTNLAssociationToRemoveList, AMFTNLAssociationToRemoveItem, 1, 32);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -574,16 +553,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AMFTNLAssociationToUpdateItemIEExtensions(
         pub SequenceOf<AnonymousAMFTNLAssociationToUpdateItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        AMFTNLAssociationToUpdateItemIEExtensions,
-        AnonymousAMFTNLAssociationToUpdateItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "AMF-TNLAssociationToUpdateItem")]
@@ -608,10 +581,9 @@ pub mod ngap_ies {
             Self { a_mf_tnlassociation_address, t_nlassociation_usage, t_nladdress_weight_factor, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"), identifier = "AMF-TNLAssociationToUpdateList")]
     pub struct AMFTNLAssociationToUpdateList(pub SequenceOf<AMFTNLAssociationToUpdateItem>);
-    aper_sequence_of!(AMFTNLAssociationToUpdateList, AMFTNLAssociationToUpdateItem, 1, 32);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, identifier = "AMF-UE-NGAP-ID", value("0..=1099511627775"))]
     pub struct AMFUENGAPID(pub u64);
@@ -685,16 +657,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AdditionalDLUPTNLInformationForHOItemIEExtensions(
         pub SequenceOf<AnonymousAdditionalDLUPTNLInformationForHOItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        AdditionalDLUPTNLInformationForHOItemIEExtensions,
-        AnonymousAdditionalDLUPTNLInformationForHOItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -725,10 +691,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " A"]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=3"))]
     pub struct AdditionalDLUPTNLInformationForHOList(pub SequenceOf<AdditionalDLUPTNLInformationForHOItem>);
-    aper_sequence_of!(AdditionalDLUPTNLInformationForHOList, AdditionalDLUPTNLInformationForHOItem, 1, 3);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -764,16 +729,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AllocationAndRetentionPriorityIEExtensions(
         pub SequenceOf<AnonymousAllocationAndRetentionPriorityIEExtensions>,
-    );
-    aper_sequence_of!(
-        AllocationAndRetentionPriorityIEExtensions,
-        AnonymousAllocationAndRetentionPriorityIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -798,10 +757,9 @@ pub mod ngap_ies {
             Self { priority_level_arp, pre_emption_capability, pre_emption_vulnerability, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=8"))]
     pub struct AllowedNSSAI(pub SequenceOf<AllowedNSSAIItem>);
-    aper_sequence_of!(AllowedNSSAI, AllowedNSSAIItem, 1, 8);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -830,10 +788,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AllowedNSSAIItemIEExtensions(pub SequenceOf<AnonymousAllowedNSSAIItemIEExtensions>);
-    aper_sequence_of!(AllowedNSSAIItemIEExtensions, AnonymousAllowedNSSAIItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "AllowedNSSAI-Item")]
     #[non_exhaustive]
@@ -848,10 +805,9 @@ pub mod ngap_ies {
             Self { s_nssai, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct AllowedTACs(pub SequenceOf<TAC>);
-    aper_sequence_of!(AllowedTACs, TAC, 1, 16);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -876,10 +832,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AreaOfInterestIEExtensions(pub SequenceOf<AnonymousAreaOfInterestIEExtensions>);
-    aper_sequence_of!(AreaOfInterestIEExtensions, AnonymousAreaOfInterestIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -931,10 +886,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AreaOfInterestCellItemIEExtensions(pub SequenceOf<AnonymousAreaOfInterestCellItemIEExtensions>);
-    aper_sequence_of!(AreaOfInterestCellItemIEExtensions, AnonymousAreaOfInterestCellItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -949,10 +903,9 @@ pub mod ngap_ies {
             Self { n_gran_cgi, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct AreaOfInterestCellList(pub SequenceOf<AreaOfInterestCellItem>);
-    aper_sequence_of!(AreaOfInterestCellList, AreaOfInterestCellItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -981,10 +934,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AreaOfInterestItemIEExtensions(pub SequenceOf<AnonymousAreaOfInterestItemIEExtensions>);
-    aper_sequence_of!(AreaOfInterestItemIEExtensions, AnonymousAreaOfInterestItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1005,10 +957,9 @@ pub mod ngap_ies {
             Self { area_of_interest, location_reporting_reference_id, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct AreaOfInterestList(pub SequenceOf<AreaOfInterestItem>);
-    aper_sequence_of!(AreaOfInterestList, AreaOfInterestItem, 1, 64);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1037,10 +988,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AreaOfInterestRANNodeItemIEExtensions(pub SequenceOf<AnonymousAreaOfInterestRANNodeItemIEExtensions>);
-    aper_sequence_of!(AreaOfInterestRANNodeItemIEExtensions, AnonymousAreaOfInterestRANNodeItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1058,10 +1008,9 @@ pub mod ngap_ies {
             Self { global_rannode_id, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct AreaOfInterestRANNodeList(pub SequenceOf<AreaOfInterestRANNodeItem>);
-    aper_sequence_of!(AreaOfInterestRANNodeList, AreaOfInterestRANNodeItem, 1, 64);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1090,10 +1039,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AreaOfInterestTAIItemIEExtensions(pub SequenceOf<AnonymousAreaOfInterestTAIItemIEExtensions>);
-    aper_sequence_of!(AreaOfInterestTAIItemIEExtensions, AnonymousAreaOfInterestTAIItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1108,10 +1056,9 @@ pub mod ngap_ies {
             Self { t_ai, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct AreaOfInterestTAIList(pub SequenceOf<AreaOfInterestTAIItem>);
-    aper_sequence_of!(AreaOfInterestTAIList, AreaOfInterestTAIItem, 1, 16);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1140,10 +1087,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AssistanceDataForPagingIEExtensions(pub SequenceOf<AnonymousAssistanceDataForPagingIEExtensions>);
-    aper_sequence_of!(AssistanceDataForPagingIEExtensions, AnonymousAssistanceDataForPagingIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1192,16 +1138,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AssistanceDataForRecommendedCellsIEExtensions(
         pub SequenceOf<AnonymousAssistanceDataForRecommendedCellsIEExtensions>,
-    );
-    aper_sequence_of!(
-        AssistanceDataForRecommendedCellsIEExtensions,
-        AnonymousAssistanceDataForRecommendedCellsIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -1256,10 +1196,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct AssociatedQosFlowItemIEExtensions(pub SequenceOf<AnonymousAssociatedQosFlowItemIEExtensions>);
-    aper_sequence_of!(AssociatedQosFlowItemIEExtensions, AnonymousAssociatedQosFlowItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1280,10 +1219,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, qos_flow_mapping_indication, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct AssociatedQosFlowList(pub SequenceOf<AssociatedQosFlowItem>);
-    aper_sequence_of!(AssociatedQosFlowList, AssociatedQosFlowItem, 1, 64);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, value("0..=4095", extensible))]
     pub struct AveragingWindow(pub Integer);
@@ -1387,10 +1325,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct BroadcastPLMNItemIEExtensions(pub SequenceOf<AnonymousBroadcastPLMNItemIEExtensions>);
-    aper_sequence_of!(BroadcastPLMNItemIEExtensions, AnonymousBroadcastPLMNItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1411,10 +1348,9 @@ pub mod ngap_ies {
             Self { p_lmnidentity, t_aislice_support_list, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=12"))]
     pub struct BroadcastPLMNList(pub SequenceOf<BroadcastPLMNItem>);
-    aper_sequence_of!(BroadcastPLMNList, BroadcastPLMNItem, 1, 12);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1443,10 +1379,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CNAssistedRANTuningIEExtensions(pub SequenceOf<AnonymousCNAssistedRANTuningIEExtensions>);
-    aper_sequence_of!(CNAssistedRANTuningIEExtensions, AnonymousCNAssistedRANTuningIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -1464,10 +1399,9 @@ pub mod ngap_ies {
             Self { expected_uebehaviour, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=15"))]
     pub struct CNTypeRestrictionsForEquivalent(pub SequenceOf<CNTypeRestrictionsForEquivalentItem>);
-    aper_sequence_of!(CNTypeRestrictionsForEquivalent, CNTypeRestrictionsForEquivalentItem, 1, 15);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1506,16 +1440,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CNTypeRestrictionsForEquivalentItemIEExtensions(
         pub SequenceOf<AnonymousCNTypeRestrictionsForEquivalentItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        CNTypeRestrictionsForEquivalentItemIEExtensions,
-        AnonymousCNTypeRestrictionsForEquivalentItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -1572,10 +1500,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct COUNTValueForPDCPSN12IEExtensions(pub SequenceOf<AnonymousCOUNTValueForPDCPSN12IEExtensions>);
-    aper_sequence_of!(COUNTValueForPDCPSN12IEExtensions, AnonymousCOUNTValueForPDCPSN12IEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "COUNTValueForPDCP-SN12")]
     #[non_exhaustive]
@@ -1624,10 +1551,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct COUNTValueForPDCPSN18IEExtensions(pub SequenceOf<AnonymousCOUNTValueForPDCPSN18IEExtensions>);
-    aper_sequence_of!(COUNTValueForPDCPSN18IEExtensions, AnonymousCOUNTValueForPDCPSN18IEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "COUNTValueForPDCP-SN18")]
     #[non_exhaustive]
@@ -1685,10 +1611,9 @@ pub mod ngap_ies {
         #[rasn(identifier = "true")]
         R_true = 0,
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CancelledCellsInEAI-EUTRA")]
     pub struct CancelledCellsInEAIEUTRA(pub SequenceOf<CancelledCellsInEAIEUTRAItem>);
-    aper_sequence_of!(CancelledCellsInEAIEUTRA, CancelledCellsInEAIEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1717,16 +1642,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CancelledCellsInEAIEUTRAItemIEExtensions(
         pub SequenceOf<AnonymousCancelledCellsInEAIEUTRAItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        CancelledCellsInEAIEUTRAItemIEExtensions,
-        AnonymousCancelledCellsInEAIEUTRAItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CancelledCellsInEAI-EUTRA-Item")]
@@ -1748,10 +1667,9 @@ pub mod ngap_ies {
             Self { e_utra_cgi, number_of_broadcasts, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CancelledCellsInEAI-NR")]
     pub struct CancelledCellsInEAINR(pub SequenceOf<CancelledCellsInEAINRItem>);
-    aper_sequence_of!(CancelledCellsInEAINR, CancelledCellsInEAINRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1780,10 +1698,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CancelledCellsInEAINRItemIEExtensions(pub SequenceOf<AnonymousCancelledCellsInEAINRItemIEExtensions>);
-    aper_sequence_of!(CancelledCellsInEAINRItemIEExtensions, AnonymousCancelledCellsInEAINRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CancelledCellsInEAI-NR-Item")]
     #[non_exhaustive]
@@ -1804,10 +1721,9 @@ pub mod ngap_ies {
             Self { n_r_cgi, number_of_broadcasts, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CancelledCellsInTAI-EUTRA")]
     pub struct CancelledCellsInTAIEUTRA(pub SequenceOf<CancelledCellsInTAIEUTRAItem>);
-    aper_sequence_of!(CancelledCellsInTAIEUTRA, CancelledCellsInTAIEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1836,16 +1752,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CancelledCellsInTAIEUTRAItemIEExtensions(
         pub SequenceOf<AnonymousCancelledCellsInTAIEUTRAItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        CancelledCellsInTAIEUTRAItemIEExtensions,
-        AnonymousCancelledCellsInTAIEUTRAItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CancelledCellsInTAI-EUTRA-Item")]
@@ -1867,10 +1777,9 @@ pub mod ngap_ies {
             Self { e_utra_cgi, number_of_broadcasts, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CancelledCellsInTAI-NR")]
     pub struct CancelledCellsInTAINR(pub SequenceOf<CancelledCellsInTAINRItem>);
-    aper_sequence_of!(CancelledCellsInTAINR, CancelledCellsInTAINRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -1899,10 +1808,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CancelledCellsInTAINRItemIEExtensions(pub SequenceOf<AnonymousCancelledCellsInTAINRItemIEExtensions>);
-    aper_sequence_of!(CancelledCellsInTAINRItemIEExtensions, AnonymousCancelledCellsInTAINRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CancelledCellsInTAI-NR-Item")]
     #[non_exhaustive]
@@ -2108,10 +2016,9 @@ pub mod ngap_ies {
         transport_resource_unavailable = 0,
         unspecified = 1,
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDBroadcastEUTRA(pub SequenceOf<CellIDBroadcastEUTRAItem>);
-    aper_sequence_of!(CellIDBroadcastEUTRA, CellIDBroadcastEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2140,10 +2047,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDBroadcastEUTRAItemIEExtensions(pub SequenceOf<AnonymousCellIDBroadcastEUTRAItemIEExtensions>);
-    aper_sequence_of!(CellIDBroadcastEUTRAItemIEExtensions, AnonymousCellIDBroadcastEUTRAItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CellIDBroadcastEUTRA-Item")]
     #[non_exhaustive]
@@ -2158,10 +2064,9 @@ pub mod ngap_ies {
             Self { e_utra_cgi, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDBroadcastNR(pub SequenceOf<CellIDBroadcastNRItem>);
-    aper_sequence_of!(CellIDBroadcastNR, CellIDBroadcastNRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2190,10 +2095,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDBroadcastNRItemIEExtensions(pub SequenceOf<AnonymousCellIDBroadcastNRItemIEExtensions>);
-    aper_sequence_of!(CellIDBroadcastNRItemIEExtensions, AnonymousCellIDBroadcastNRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CellIDBroadcastNR-Item")]
     #[non_exhaustive]
@@ -2208,10 +2112,9 @@ pub mod ngap_ies {
             Self { n_r_cgi, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDCancelledEUTRA(pub SequenceOf<CellIDCancelledEUTRAItem>);
-    aper_sequence_of!(CellIDCancelledEUTRA, CellIDCancelledEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2240,10 +2143,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDCancelledEUTRAItemIEExtensions(pub SequenceOf<AnonymousCellIDCancelledEUTRAItemIEExtensions>);
-    aper_sequence_of!(CellIDCancelledEUTRAItemIEExtensions, AnonymousCellIDCancelledEUTRAItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CellIDCancelledEUTRA-Item")]
     #[non_exhaustive]
@@ -2264,10 +2166,9 @@ pub mod ngap_ies {
             Self { e_utra_cgi, number_of_broadcasts, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDCancelledNR(pub SequenceOf<CellIDCancelledNRItem>);
-    aper_sequence_of!(CellIDCancelledNR, CellIDCancelledNRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2296,10 +2197,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellIDCancelledNRItemIEExtensions(pub SequenceOf<AnonymousCellIDCancelledNRItemIEExtensions>);
-    aper_sequence_of!(CellIDCancelledNRItemIEExtensions, AnonymousCellIDCancelledNRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CellIDCancelledNR-Item")]
     #[non_exhaustive]
@@ -2385,10 +2285,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CellTypeIEExtensions(pub SequenceOf<AnonymousCellTypeIEExtensions>);
-    aper_sequence_of!(CellTypeIEExtensions, AnonymousCellTypeIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -2406,10 +2305,9 @@ pub mod ngap_ies {
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct CommonNetworkInstance(pub OctetString);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CompletedCellsInEAI-EUTRA")]
     pub struct CompletedCellsInEAIEUTRA(pub SequenceOf<CompletedCellsInEAIEUTRAItem>);
-    aper_sequence_of!(CompletedCellsInEAIEUTRA, CompletedCellsInEAIEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2438,16 +2336,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CompletedCellsInEAIEUTRAItemIEExtensions(
         pub SequenceOf<AnonymousCompletedCellsInEAIEUTRAItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        CompletedCellsInEAIEUTRAItemIEExtensions,
-        AnonymousCompletedCellsInEAIEUTRAItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CompletedCellsInEAI-EUTRA-Item")]
@@ -2463,10 +2355,9 @@ pub mod ngap_ies {
             Self { e_utra_cgi, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CompletedCellsInEAI-NR")]
     pub struct CompletedCellsInEAINR(pub SequenceOf<CompletedCellsInEAINRItem>);
-    aper_sequence_of!(CompletedCellsInEAINR, CompletedCellsInEAINRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2495,10 +2386,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CompletedCellsInEAINRItemIEExtensions(pub SequenceOf<AnonymousCompletedCellsInEAINRItemIEExtensions>);
-    aper_sequence_of!(CompletedCellsInEAINRItemIEExtensions, AnonymousCompletedCellsInEAINRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CompletedCellsInEAI-NR-Item")]
     #[non_exhaustive]
@@ -2513,10 +2403,9 @@ pub mod ngap_ies {
             Self { n_r_cgi, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CompletedCellsInTAI-EUTRA")]
     pub struct CompletedCellsInTAIEUTRA(pub SequenceOf<CompletedCellsInTAIEUTRAItem>);
-    aper_sequence_of!(CompletedCellsInTAIEUTRA, CompletedCellsInTAIEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2545,16 +2434,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CompletedCellsInTAIEUTRAItemIEExtensions(
         pub SequenceOf<AnonymousCompletedCellsInTAIEUTRAItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        CompletedCellsInTAIEUTRAItemIEExtensions,
-        AnonymousCompletedCellsInTAIEUTRAItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CompletedCellsInTAI-EUTRA-Item")]
@@ -2570,10 +2453,9 @@ pub mod ngap_ies {
             Self { e_utra_cgi, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "CompletedCellsInTAI-NR")]
     pub struct CompletedCellsInTAINR(pub SequenceOf<CompletedCellsInTAINRItem>);
-    aper_sequence_of!(CompletedCellsInTAINR, CompletedCellsInTAINRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -2602,10 +2484,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CompletedCellsInTAINRItemIEExtensions(pub SequenceOf<AnonymousCompletedCellsInTAINRItemIEExtensions>);
-    aper_sequence_of!(CompletedCellsInTAINRItemIEExtensions, AnonymousCompletedCellsInTAINRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CompletedCellsInTAI-NR-Item")]
     #[non_exhaustive]
@@ -2677,16 +2558,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CoreNetworkAssistanceInformationForInactiveIEExtensions(
         pub SequenceOf<AnonymousCoreNetworkAssistanceInformationForInactiveIEExtensions>,
-    );
-    aper_sequence_of!(
-        CoreNetworkAssistanceInformationForInactiveIEExtensions,
-        AnonymousCoreNetworkAssistanceInformationForInactiveIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -2756,10 +2631,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CriticalityDiagnosticsIEExtensions(pub SequenceOf<AnonymousCriticalityDiagnosticsIEExtensions>);
-    aper_sequence_of!(CriticalityDiagnosticsIEExtensions, AnonymousCriticalityDiagnosticsIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -2820,16 +2694,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct CriticalityDiagnosticsIEItemIEExtensions(
         pub SequenceOf<AnonymousCriticalityDiagnosticsIEItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        CriticalityDiagnosticsIEItemIEExtensions,
-        AnonymousCriticalityDiagnosticsIEItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "CriticalityDiagnostics-IE-Item")]
@@ -2854,10 +2722,9 @@ pub mod ngap_ies {
             Self { i_ecriticality, i_e_id, type_of_error, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"), identifier = "CriticalityDiagnostics-IE-List")]
     pub struct CriticalityDiagnosticsIEList(pub SequenceOf<CriticalityDiagnosticsIEItem>);
-    aper_sequence_of!(CriticalityDiagnosticsIEList, CriticalityDiagnosticsIEItem, 1, 256);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated, identifier = "DL-NGU-TNLInformationReused")]
     #[non_exhaustive]
@@ -2929,10 +2796,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DRBStatusDL12IEExtension(pub SequenceOf<AnonymousDRBStatusDL12IEExtension>);
-    aper_sequence_of!(DRBStatusDL12IEExtension, AnonymousDRBStatusDL12IEExtension, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -2971,10 +2837,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DRBStatusDL18IEExtension(pub SequenceOf<AnonymousDRBStatusDL18IEExtension>);
-    aper_sequence_of!(DRBStatusDL18IEExtension, AnonymousDRBStatusDL18IEExtension, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -3043,10 +2908,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DRBStatusUL12IEExtension(pub SequenceOf<AnonymousDRBStatusUL12IEExtension>);
-    aper_sequence_of!(DRBStatusUL12IEExtension, AnonymousDRBStatusUL12IEExtension, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -3091,10 +2955,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DRBStatusUL18IEExtension(pub SequenceOf<AnonymousDRBStatusUL18IEExtension>);
-    aper_sequence_of!(DRBStatusUL18IEExtension, AnonymousDRBStatusUL18IEExtension, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -3143,16 +3006,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DRBsSubjectToStatusTransferItemIEExtension(
         pub SequenceOf<AnonymousDRBsSubjectToStatusTransferItemIEExtension>,
-    );
-    aper_sequence_of!(
-        DRBsSubjectToStatusTransferItemIEExtension,
-        AnonymousDRBsSubjectToStatusTransferItemIEExtension,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -3177,10 +3034,9 @@ pub mod ngap_ies {
             Self { d_rb_id, d_rbstatus_ul, d_rbstatus_dl, i_e_extension }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"))]
     pub struct DRBsSubjectToStatusTransferList(pub SequenceOf<DRBsSubjectToStatusTransferItem>);
-    aper_sequence_of!(DRBsSubjectToStatusTransferList, DRBsSubjectToStatusTransferItem, 1, 32);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -3209,10 +3065,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DRBsToQosFlowsMappingItemIEExtensions(pub SequenceOf<AnonymousDRBsToQosFlowsMappingItemIEExtensions>);
-    aper_sequence_of!(DRBsToQosFlowsMappingItemIEExtensions, AnonymousDRBsToQosFlowsMappingItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -3233,10 +3088,9 @@ pub mod ngap_ies {
             Self { d_rb_id, associated_qos_flow_list, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"))]
     pub struct DRBsToQosFlowsMappingList(pub SequenceOf<DRBsToQosFlowsMappingItem>);
-    aper_sequence_of!(DRBsToQosFlowsMappingList, DRBsToQosFlowsMappingItem, 1, 32);
     #[doc = " D"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
@@ -3283,16 +3137,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct DataForwardingResponseDRBItemIEExtensions(
         pub SequenceOf<AnonymousDataForwardingResponseDRBItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        DataForwardingResponseDRBItemIEExtensions,
-        AnonymousDataForwardingResponseDRBItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -3317,10 +3165,9 @@ pub mod ngap_ies {
             Self { d_rb_id, d_lforwarding_up_tnlinformation, u_lforwarding_up_tnlinformation, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"))]
     pub struct DataForwardingResponseDRBList(pub SequenceOf<DataForwardingResponseDRBItem>);
-    aper_sequence_of!(DataForwardingResponseDRBList, DataForwardingResponseDRBItem, 1, 32);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -3365,10 +3212,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct Dynamic5QIDescriptorIEExtensions(pub SequenceOf<AnonymousDynamic5QIDescriptorIEExtensions>);
-    aper_sequence_of!(Dynamic5QIDescriptorIEExtensions, AnonymousDynamic5QIDescriptorIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -3444,10 +3290,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ERABInformationItemIEExtensions(pub SequenceOf<AnonymousERABInformationItemIEExtensions>);
-    aper_sequence_of!(ERABInformationItemIEExtensions, AnonymousERABInformationItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "E-RABInformationItem")]
     #[non_exhaustive]
@@ -3468,10 +3313,9 @@ pub mod ngap_ies {
             Self { e_rab_id, d_lforwarding, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"), identifier = "E-RABInformationList")]
     pub struct ERABInformationList(pub SequenceOf<ERABInformationItem>);
-    aper_sequence_of!(ERABInformationList, ERABInformationItem, 1, 256);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, identifier = "EN-DCSONConfigurationTransfer")]
     pub struct ENDCSONConfigurationTransfer(pub OctetString);
@@ -3502,10 +3346,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EPSTAIIEExtensions(pub SequenceOf<AnonymousEPSTAIIEExtensions>);
-    aper_sequence_of!(EPSTAIIEExtensions, AnonymousEPSTAIIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "EPS-TAI")]
     #[non_exhaustive]
@@ -3546,10 +3389,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EUTRACGIIEExtensions(pub SequenceOf<AnonymousEUTRACGIIEExtensions>);
-    aper_sequence_of!(EUTRACGIIEExtensions, AnonymousEUTRACGIIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "EUTRA-CGI")]
     #[non_exhaustive]
@@ -3570,14 +3412,12 @@ pub mod ngap_ies {
             Self { p_lmnidentity, e_utracell_identity, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"), identifier = "EUTRA-CGIList")]
     pub struct EUTRACGIList(pub SequenceOf<EUTRACGI>);
-    aper_sequence_of!(EUTRACGIList, EUTRACGI, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "EUTRA-CGIListForWarning")]
     pub struct EUTRACGIListForWarning(pub SequenceOf<EUTRACGI>);
-    aper_sequence_of!(EUTRACGIListForWarning, EUTRACGI, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct EUTRACellIdentity(pub FixedBitString<28usize>);
@@ -3591,10 +3431,9 @@ pub mod ngap_ies {
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct EmergencyAreaID(pub FixedOctetString<3usize>);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDBroadcastEUTRA(pub SequenceOf<EmergencyAreaIDBroadcastEUTRAItem>);
-    aper_sequence_of!(EmergencyAreaIDBroadcastEUTRA, EmergencyAreaIDBroadcastEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -3623,16 +3462,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDBroadcastEUTRAItemIEExtensions(
         pub SequenceOf<AnonymousEmergencyAreaIDBroadcastEUTRAItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        EmergencyAreaIDBroadcastEUTRAItemIEExtensions,
-        AnonymousEmergencyAreaIDBroadcastEUTRAItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "EmergencyAreaIDBroadcastEUTRA-Item")]
@@ -3654,10 +3487,9 @@ pub mod ngap_ies {
             Self { emergency_area_id, completed_cells_in_eai_eutra, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDBroadcastNR(pub SequenceOf<EmergencyAreaIDBroadcastNRItem>);
-    aper_sequence_of!(EmergencyAreaIDBroadcastNR, EmergencyAreaIDBroadcastNRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -3686,16 +3518,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDBroadcastNRItemIEExtensions(
         pub SequenceOf<AnonymousEmergencyAreaIDBroadcastNRItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        EmergencyAreaIDBroadcastNRItemIEExtensions,
-        AnonymousEmergencyAreaIDBroadcastNRItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "EmergencyAreaIDBroadcastNR-Item")]
@@ -3717,10 +3543,9 @@ pub mod ngap_ies {
             Self { emergency_area_id, completed_cells_in_eai_nr, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDCancelledEUTRA(pub SequenceOf<EmergencyAreaIDCancelledEUTRAItem>);
-    aper_sequence_of!(EmergencyAreaIDCancelledEUTRA, EmergencyAreaIDCancelledEUTRAItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -3749,16 +3574,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDCancelledEUTRAItemIEExtensions(
         pub SequenceOf<AnonymousEmergencyAreaIDCancelledEUTRAItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        EmergencyAreaIDCancelledEUTRAItemIEExtensions,
-        AnonymousEmergencyAreaIDCancelledEUTRAItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "EmergencyAreaIDCancelledEUTRA-Item")]
@@ -3780,10 +3599,9 @@ pub mod ngap_ies {
             Self { emergency_area_id, cancelled_cells_in_eai_eutra, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDCancelledNR(pub SequenceOf<EmergencyAreaIDCancelledNRItem>);
-    aper_sequence_of!(EmergencyAreaIDCancelledNR, EmergencyAreaIDCancelledNRItem, 1, 65535);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -3812,16 +3630,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDCancelledNRItemIEExtensions(
         pub SequenceOf<AnonymousEmergencyAreaIDCancelledNRItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        EmergencyAreaIDCancelledNRItemIEExtensions,
-        AnonymousEmergencyAreaIDCancelledNRItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "EmergencyAreaIDCancelledNR-Item")]
@@ -3843,14 +3655,12 @@ pub mod ngap_ies {
             Self { emergency_area_id, cancelled_cells_in_eai_nr, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyAreaIDList(pub SequenceOf<EmergencyAreaID>);
-    aper_sequence_of!(EmergencyAreaIDList, EmergencyAreaID, 1, 65535);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct EmergencyAreaIDListForRestart(pub SequenceOf<EmergencyAreaID>);
-    aper_sequence_of!(EmergencyAreaIDListForRestart, EmergencyAreaID, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -3879,15 +3689,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EmergencyFallbackIndicatorIEExtensions(pub SequenceOf<AnonymousEmergencyFallbackIndicatorIEExtensions>);
-    aper_sequence_of!(
-        EmergencyFallbackIndicatorIEExtensions,
-        AnonymousEmergencyFallbackIndicatorIEExtensions,
-        1,
-        65535
-    );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -3950,10 +3754,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct EndpointIPAddressAndPortIEExtensions(pub SequenceOf<AnonymousEndpointIPAddressAndPortIEExtensions>);
-    aper_sequence_of!(EndpointIPAddressAndPortIEExtensions, AnonymousEndpointIPAddressAndPortIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     pub struct EndpointIPAddressAndPort {
@@ -3973,10 +3776,9 @@ pub mod ngap_ies {
             Self { endpoint_ipaddress, port_number, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=15"))]
     pub struct EquivalentPLMNs(pub SequenceOf<PLMNIdentity>);
-    aper_sequence_of!(EquivalentPLMNs, PLMNIdentity, 1, 15);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -4040,16 +3842,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ExpectedUEActivityBehaviourIEExtensions(
         pub SequenceOf<AnonymousExpectedUEActivityBehaviourIEExtensions>,
-    );
-    aper_sequence_of!(
-        ExpectedUEActivityBehaviourIEExtensions,
-        AnonymousExpectedUEActivityBehaviourIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -4107,10 +3903,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ExpectedUEBehaviourIEExtensions(pub SequenceOf<AnonymousExpectedUEBehaviourIEExtensions>);
-    aper_sequence_of!(ExpectedUEBehaviourIEExtensions, AnonymousExpectedUEBehaviourIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -4150,10 +3945,9 @@ pub mod ngap_ies {
         stationary = 0,
         mobile = 1,
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct ExpectedUEMovingTrajectory(pub SequenceOf<ExpectedUEMovingTrajectoryItem>);
-    aper_sequence_of!(ExpectedUEMovingTrajectory, ExpectedUEMovingTrajectoryItem, 1, 16);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -4182,16 +3976,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ExpectedUEMovingTrajectoryItemIEExtensions(
         pub SequenceOf<AnonymousExpectedUEMovingTrajectoryItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        ExpectedUEMovingTrajectoryItemIEExtensions,
-        AnonymousExpectedUEMovingTrajectoryItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -4237,10 +4025,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct FiveGSTMSIIEExtensions(pub SequenceOf<AnonymousFiveGSTMSIIEExtensions>);
-    aper_sequence_of!(FiveGSTMSIIEExtensions, AnonymousFiveGSTMSIIEExtensions, 1, 65535);
     #[doc = " F"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "FiveG-S-TMSI")]
@@ -4271,10 +4058,9 @@ pub mod ngap_ies {
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, value("0..=255", extensible))]
     pub struct FiveQI(pub Integer);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct ForbiddenAreaInformation(pub SequenceOf<ForbiddenAreaInformationItem>);
-    aper_sequence_of!(ForbiddenAreaInformation, ForbiddenAreaInformationItem, 1, 16);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -4303,16 +4089,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ForbiddenAreaInformationItemIEExtensions(
         pub SequenceOf<AnonymousForbiddenAreaInformationItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        ForbiddenAreaInformationItemIEExtensions,
-        AnonymousForbiddenAreaInformationItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "ForbiddenAreaInformation-Item")]
@@ -4334,10 +4114,9 @@ pub mod ngap_ies {
             Self { p_lmnidentity, forbidden_tacs, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=4096"))]
     pub struct ForbiddenTACs(pub SequenceOf<TAC>);
-    aper_sequence_of!(ForbiddenTACs, TAC, 1, 4096);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -4366,10 +4145,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct GBRQosInformationIEExtensions(pub SequenceOf<AnonymousGBRQosInformationIEExtensions>);
-    aper_sequence_of!(GBRQosInformationIEExtensions, AnonymousGBRQosInformationIEExtensions, 1, 65535);
     #[doc = " G"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "GBR-QosInformation")]
@@ -4472,10 +4250,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct GTPTunnelIEExtensions(pub SequenceOf<AnonymousGTPTunnelIEExtensions>);
-    aper_sequence_of!(GTPTunnelIEExtensions, AnonymousGTPTunnelIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -4520,10 +4297,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct GUAMIIEExtensions(pub SequenceOf<AnonymousGUAMIIEExtensions>);
-    aper_sequence_of!(GUAMIIEExtensions, AnonymousGUAMIIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -4574,10 +4350,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct GlobalGNBIDIEExtensions(pub SequenceOf<AnonymousGlobalGNBIDIEExtensions>);
-    aper_sequence_of!(GlobalGNBIDIEExtensions, AnonymousGlobalGNBIDIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "GlobalGNB-ID")]
     #[non_exhaustive]
@@ -4622,10 +4397,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct GlobalN3IWFIDIEExtensions(pub SequenceOf<AnonymousGlobalN3IWFIDIEExtensions>);
-    aper_sequence_of!(GlobalN3IWFIDIEExtensions, AnonymousGlobalN3IWFIDIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "GlobalN3IWF-ID")]
     #[non_exhaustive]
@@ -4670,10 +4444,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct GlobalNgENBIDIEExtensions(pub SequenceOf<AnonymousGlobalNgENBIDIEExtensions>);
-    aper_sequence_of!(GlobalNgENBIDIEExtensions, AnonymousGlobalNgENBIDIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "GlobalNgENB-ID")]
     #[non_exhaustive]
@@ -4756,10 +4529,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct HandoverCommandTransferIEExtensions(pub SequenceOf<AnonymousHandoverCommandTransferIEExtensions>);
-    aper_sequence_of!(HandoverCommandTransferIEExtensions, AnonymousHandoverCommandTransferIEExtensions, 1, 65535);
     #[doc = " H"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -4824,16 +4596,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct HandoverPreparationUnsuccessfulTransferIEExtensions(
         pub SequenceOf<AnonymousHandoverPreparationUnsuccessfulTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        HandoverPreparationUnsuccessfulTransferIEExtensions,
-        AnonymousHandoverPreparationUnsuccessfulTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -4876,16 +4642,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct HandoverRequestAcknowledgeTransferIEExtensions(
         pub SequenceOf<AnonymousHandoverRequestAcknowledgeTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        HandoverRequestAcknowledgeTransferIEExtensions,
-        AnonymousHandoverRequestAcknowledgeTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -4955,10 +4715,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct HandoverRequiredTransferIEExtensions(pub SequenceOf<AnonymousHandoverRequiredTransferIEExtensions>);
-    aper_sequence_of!(HandoverRequiredTransferIEExtensions, AnonymousHandoverRequiredTransferIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -5004,16 +4763,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct HandoverResourceAllocationUnsuccessfulTransferIEExtensions(
         pub SequenceOf<AnonymousHandoverResourceAllocationUnsuccessfulTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        HandoverResourceAllocationUnsuccessfulTransferIEExtensions,
-        AnonymousHandoverResourceAllocationUnsuccessfulTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -5084,16 +4837,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct InfoOnRecommendedCellsAndRANNodesForPagingIEExtensions(
         pub SequenceOf<AnonymousInfoOnRecommendedCellsAndRANNodesForPagingIEExtensions>,
-    );
-    aper_sequence_of!(
-        InfoOnRecommendedCellsAndRANNodesForPagingIEExtensions,
-        AnonymousInfoOnRecommendedCellsAndRANNodesForPagingIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -5201,10 +4948,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct LastVisitedCellItemIEExtensions(pub SequenceOf<AnonymousLastVisitedCellItemIEExtensions>);
-    aper_sequence_of!(LastVisitedCellItemIEExtensions, AnonymousLastVisitedCellItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -5256,16 +5002,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct LastVisitedNGRANCellInformationIEExtensions(
         pub SequenceOf<AnonymousLastVisitedNGRANCellInformationIEExtensions>,
-    );
-    aper_sequence_of!(
-        LastVisitedNGRANCellInformationIEExtensions,
-        AnonymousLastVisitedNGRANCellInformationIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -5343,16 +5083,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct LocationReportingRequestTypeIEExtensions(
         pub SequenceOf<AnonymousLocationReportingRequestTypeIEExtensions>,
-    );
-    aper_sequence_of!(
-        LocationReportingRequestTypeIEExtensions,
-        AnonymousLocationReportingRequestTypeIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -5439,10 +5173,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct MobilityRestrictionListIEExtensions(pub SequenceOf<AnonymousMobilityRestrictionListIEExtensions>);
-    aper_sequence_of!(MobilityRestrictionListIEExtensions, AnonymousMobilityRestrictionListIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -5576,16 +5309,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct NGRANTNLAssociationToRemoveItemIEExtensions(
         pub SequenceOf<AnonymousNGRANTNLAssociationToRemoveItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        NGRANTNLAssociationToRemoveItemIEExtensions,
-        AnonymousNGRANTNLAssociationToRemoveItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "NGRAN-TNLAssociationToRemoveItem")]
@@ -5610,10 +5337,9 @@ pub mod ngap_ies {
             }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"), identifier = "NGRAN-TNLAssociationToRemoveList")]
     pub struct NGRANTNLAssociationToRemoveList(pub SequenceOf<NGRANTNLAssociationToRemoveItem>);
-    aper_sequence_of!(NGRANTNLAssociationToRemoveList, NGRANTNLAssociationToRemoveItem, 1, 32);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct NGRANTraceID(pub FixedOctetString<8usize>);
@@ -5641,10 +5367,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct NRCGIIEExtensions(pub SequenceOf<AnonymousNRCGIIEExtensions>);
-    aper_sequence_of!(NRCGIIEExtensions, AnonymousNRCGIIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "NR-CGI")]
     #[non_exhaustive]
@@ -5665,14 +5390,12 @@ pub mod ngap_ies {
             Self { p_lmnidentity, n_rcell_identity, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16384"), identifier = "NR-CGIList")]
     pub struct NRCGIList(pub SequenceOf<NRCGI>);
-    aper_sequence_of!(NRCGIList, NRCGI, 1, 16384);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"), identifier = "NR-CGIListForWarning")]
     pub struct NRCGIListForWarning(pub SequenceOf<NRCGI>);
-    aper_sequence_of!(NRCGIListForWarning, NRCGI, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct NRCellIdentity(pub FixedBitString<36usize>);
@@ -5767,10 +5490,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct NonDynamic5QIDescriptorIEExtensions(pub SequenceOf<AnonymousNonDynamic5QIDescriptorIEExtensions>);
-    aper_sequence_of!(NonDynamic5QIDescriptorIEExtensions, AnonymousNonDynamic5QIDescriptorIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -5797,10 +5519,9 @@ pub mod ngap_ies {
             Self { five_qi, priority_level_qos, averaging_window, maximum_data_burst_volume, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct NotAllowedTACs(pub SequenceOf<TAC>);
-    aper_sequence_of!(NotAllowedTACs, TAC, 1, 16);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -5893,10 +5614,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct OverloadStartNSSAIItemIEExtensions(pub SequenceOf<AnonymousOverloadStartNSSAIItemIEExtensions>);
-    aper_sequence_of!(OverloadStartNSSAIItemIEExtensions, AnonymousOverloadStartNSSAIItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -5925,10 +5645,9 @@ pub mod ngap_ies {
             }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=1024"))]
     pub struct OverloadStartNSSAIList(pub SequenceOf<OverloadStartNSSAIItem>);
-    aper_sequence_of!(OverloadStartNSSAIList, OverloadStartNSSAIItem, 1, 1024);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -5957,16 +5676,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionAggregateMaximumBitRateIEExtensions(
         pub SequenceOf<AnonymousPDUSessionAggregateMaximumBitRateIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionAggregateMaximumBitRateIEExtensions,
-        AnonymousPDUSessionAggregateMaximumBitRateIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6023,16 +5736,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceAdmittedItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceAdmittedItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceAdmittedItemIEExtensions,
-        AnonymousPDUSessionResourceAdmittedItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6054,10 +5761,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, handover_request_acknowledge_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceAdmittedList(pub SequenceOf<PDUSessionResourceAdmittedItem>);
-    aper_sequence_of!(PDUSessionResourceAdmittedList, PDUSessionResourceAdmittedItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -6086,16 +5792,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToModifyItemModCfmIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToModifyItemModCfmIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToModifyItemModCfmIEExtensions,
-        AnonymousPDUSessionResourceFailedToModifyItemModCfmIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6145,16 +5845,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToModifyItemModResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToModifyItemModResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToModifyItemModResIEExtensions,
-        AnonymousPDUSessionResourceFailedToModifyItemModResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6176,14 +5870,12 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_modify_unsuccessful_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToModifyListModCfm(pub SequenceOf<PDUSessionResourceFailedToModifyItemModCfm>);
-    aper_sequence_of!(PDUSessionResourceFailedToModifyListModCfm, PDUSessionResourceFailedToModifyItemModCfm, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToModifyListModRes(pub SequenceOf<PDUSessionResourceFailedToModifyItemModRes>);
-    aper_sequence_of!(PDUSessionResourceFailedToModifyListModRes, PDUSessionResourceFailedToModifyItemModRes, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -6212,16 +5904,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToSetupItemCxtFailIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToSetupItemCxtFailIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToSetupItemCxtFailIEExtensions,
-        AnonymousPDUSessionResourceFailedToSetupItemCxtFailIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6271,16 +5957,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToSetupItemCxtResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToSetupItemCxtResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToSetupItemCxtResIEExtensions,
-        AnonymousPDUSessionResourceFailedToSetupItemCxtResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6330,16 +6010,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToSetupItemHOAckIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToSetupItemHOAckIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToSetupItemHOAckIEExtensions,
-        AnonymousPDUSessionResourceFailedToSetupItemHOAckIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6389,16 +6063,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToSetupItemPSReqIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToSetupItemPSReqIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToSetupItemPSReqIEExtensions,
-        AnonymousPDUSessionResourceFailedToSetupItemPSReqIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6448,16 +6116,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceFailedToSetupItemSUResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceFailedToSetupItemSUResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceFailedToSetupItemSUResIEExtensions,
-        AnonymousPDUSessionResourceFailedToSetupItemSUResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6479,26 +6141,21 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_setup_unsuccessful_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToSetupListCxtFail(pub SequenceOf<PDUSessionResourceFailedToSetupItemCxtFail>);
-    aper_sequence_of!(PDUSessionResourceFailedToSetupListCxtFail, PDUSessionResourceFailedToSetupItemCxtFail, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToSetupListCxtRes(pub SequenceOf<PDUSessionResourceFailedToSetupItemCxtRes>);
-    aper_sequence_of!(PDUSessionResourceFailedToSetupListCxtRes, PDUSessionResourceFailedToSetupItemCxtRes, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToSetupListHOAck(pub SequenceOf<PDUSessionResourceFailedToSetupItemHOAck>);
-    aper_sequence_of!(PDUSessionResourceFailedToSetupListHOAck, PDUSessionResourceFailedToSetupItemHOAck, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToSetupListPSReq(pub SequenceOf<PDUSessionResourceFailedToSetupItemPSReq>);
-    aper_sequence_of!(PDUSessionResourceFailedToSetupListPSReq, PDUSessionResourceFailedToSetupItemPSReq, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceFailedToSetupListSURes(pub SequenceOf<PDUSessionResourceFailedToSetupItemSURes>);
-    aper_sequence_of!(PDUSessionResourceFailedToSetupListSURes, PDUSessionResourceFailedToSetupItemSURes, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -6527,16 +6184,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceHandoverItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceHandoverItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceHandoverItemIEExtensions,
-        AnonymousPDUSessionResourceHandoverItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6558,10 +6209,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, handover_command_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceHandoverList(pub SequenceOf<PDUSessionResourceHandoverItem>);
-    aper_sequence_of!(PDUSessionResourceHandoverList, PDUSessionResourceHandoverItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -6590,16 +6240,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceInformationItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceInformationItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceInformationItemIEExtensions,
-        AnonymousPDUSessionResourceInformationItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6624,10 +6268,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, qos_flow_information_list, d_rbs_to_qos_flows_mapping_list, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceInformationList(pub SequenceOf<PDUSessionResourceInformationItem>);
-    aper_sequence_of!(PDUSessionResourceInformationList, PDUSessionResourceInformationItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -6656,16 +6299,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceItemCxtRelCplIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceItemCxtRelCplIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceItemCxtRelCplIEExtensions,
-        AnonymousPDUSessionResourceItemCxtRelCplIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6712,16 +6349,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceItemCxtRelReqIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceItemCxtRelReqIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceItemCxtRelReqIEExtensions,
-        AnonymousPDUSessionResourceItemCxtRelReqIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6768,16 +6399,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceItemHORqdIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceItemHORqdIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceItemHORqdIEExtensions,
-        AnonymousPDUSessionResourceItemHORqdIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6799,18 +6424,15 @@ pub mod ngap_ies {
             Self { p_dusession_id, handover_required_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceListCxtRelCpl(pub SequenceOf<PDUSessionResourceItemCxtRelCpl>);
-    aper_sequence_of!(PDUSessionResourceListCxtRelCpl, PDUSessionResourceItemCxtRelCpl, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceListCxtRelReq(pub SequenceOf<PDUSessionResourceItemCxtRelReq>);
-    aper_sequence_of!(PDUSessionResourceListCxtRelReq, PDUSessionResourceItemCxtRelReq, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceListHORqd(pub SequenceOf<PDUSessionResourceItemHORqd>);
-    aper_sequence_of!(PDUSessionResourceListHORqd, PDUSessionResourceItemHORqd, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -6839,16 +6461,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyConfirmTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyConfirmTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyConfirmTransferIEExtensions,
-        AnonymousPDUSessionResourceModifyConfirmTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6910,16 +6526,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyIndicationTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyIndicationTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyIndicationTransferIEExtensions,
-        AnonymousPDUSessionResourceModifyIndicationTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -6969,16 +6579,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyIndicationUnsuccessfulTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyIndicationUnsuccessfulTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyIndicationUnsuccessfulTransferIEExtensions,
-        AnonymousPDUSessionResourceModifyIndicationUnsuccessfulTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7024,16 +6628,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyItemModCfmIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyItemModCfmIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyItemModCfmIEExtensions,
-        AnonymousPDUSessionResourceModifyItemModCfmIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7083,16 +6681,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyItemModIndIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyItemModIndIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyItemModIndIEExtensions,
-        AnonymousPDUSessionResourceModifyItemModIndIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7142,16 +6734,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyItemModReqIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyItemModReqIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyItemModReqIEExtensions,
-        AnonymousPDUSessionResourceModifyItemModReqIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7204,16 +6790,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyItemModResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyItemModResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyItemModResIEExtensions,
-        AnonymousPDUSessionResourceModifyItemModResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7235,22 +6815,18 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_modify_response_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceModifyListModCfm(pub SequenceOf<PDUSessionResourceModifyItemModCfm>);
-    aper_sequence_of!(PDUSessionResourceModifyListModCfm, PDUSessionResourceModifyItemModCfm, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceModifyListModInd(pub SequenceOf<PDUSessionResourceModifyItemModInd>);
-    aper_sequence_of!(PDUSessionResourceModifyListModInd, PDUSessionResourceModifyItemModInd, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceModifyListModReq(pub SequenceOf<PDUSessionResourceModifyItemModReq>);
-    aper_sequence_of!(PDUSessionResourceModifyListModReq, PDUSessionResourceModifyItemModReq, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceModifyListModRes(pub SequenceOf<PDUSessionResourceModifyItemModRes>);
-    aper_sequence_of!(PDUSessionResourceModifyListModRes, PDUSessionResourceModifyItemModRes, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -7278,16 +6854,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceModifyRequestTransferProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceModifyRequestTransferProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyRequestTransferProtocolIEs,
-        AnonymousPDUSessionResourceModifyRequestTransferProtocolIEs,
-        0,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7329,16 +6899,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyResponseTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyResponseTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyResponseTransferIEExtensions,
-        AnonymousPDUSessionResourceModifyResponseTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7404,16 +6968,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceModifyUnsuccessfulTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceModifyUnsuccessfulTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyUnsuccessfulTransferIEExtensions,
-        AnonymousPDUSessionResourceModifyUnsuccessfulTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7462,16 +7020,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceNotifyItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceNotifyItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceNotifyItemIEExtensions,
-        AnonymousPDUSessionResourceNotifyItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7493,10 +7045,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_notify_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceNotifyList(pub SequenceOf<PDUSessionResourceNotifyItem>);
-    aper_sequence_of!(PDUSessionResourceNotifyList, PDUSessionResourceNotifyItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -7525,16 +7076,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceNotifyReleasedTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceNotifyReleasedTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceNotifyReleasedTransferIEExtensions,
-        AnonymousPDUSessionResourceNotifyReleasedTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7577,16 +7122,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceNotifyTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceNotifyTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceNotifyTransferIEExtensions,
-        AnonymousPDUSessionResourceNotifyTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7636,16 +7175,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceReleaseCommandTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceReleaseCommandTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleaseCommandTransferIEExtensions,
-        AnonymousPDUSessionResourceReleaseCommandTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7688,16 +7221,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceReleaseResponseTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceReleaseResponseTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleaseResponseTransferIEExtensions,
-        AnonymousPDUSessionResourceReleaseResponseTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7739,16 +7266,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceReleasedItemNotIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceReleasedItemNotIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleasedItemNotIEExtensions,
-        AnonymousPDUSessionResourceReleasedItemNotIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7798,16 +7319,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceReleasedItemPSAckIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceReleasedItemPSAckIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleasedItemPSAckIEExtensions,
-        AnonymousPDUSessionResourceReleasedItemPSAckIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7857,16 +7372,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceReleasedItemPSFailIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceReleasedItemPSFailIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleasedItemPSFailIEExtensions,
-        AnonymousPDUSessionResourceReleasedItemPSFailIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7916,16 +7425,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceReleasedItemRelResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceReleasedItemRelResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleasedItemRelResIEExtensions,
-        AnonymousPDUSessionResourceReleasedItemRelResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -7947,22 +7450,18 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_release_response_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceReleasedListNot(pub SequenceOf<PDUSessionResourceReleasedItemNot>);
-    aper_sequence_of!(PDUSessionResourceReleasedListNot, PDUSessionResourceReleasedItemNot, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceReleasedListPSAck(pub SequenceOf<PDUSessionResourceReleasedItemPSAck>);
-    aper_sequence_of!(PDUSessionResourceReleasedListPSAck, PDUSessionResourceReleasedItemPSAck, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceReleasedListPSFail(pub SequenceOf<PDUSessionResourceReleasedItemPSFail>);
-    aper_sequence_of!(PDUSessionResourceReleasedListPSFail, PDUSessionResourceReleasedItemPSFail, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceReleasedListRelRes(pub SequenceOf<PDUSessionResourceReleasedItemRelRes>);
-    aper_sequence_of!(PDUSessionResourceReleasedListRelRes, PDUSessionResourceReleasedItemRelRes, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -7991,16 +7490,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSecondaryRATUsageItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSecondaryRATUsageItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSecondaryRATUsageItemIEExtensions,
-        AnonymousPDUSessionResourceSecondaryRATUsageItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8022,10 +7515,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, secondary_ratdata_usage_report_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSecondaryRATUsageList(pub SequenceOf<PDUSessionResourceSecondaryRATUsageItem>);
-    aper_sequence_of!(PDUSessionResourceSecondaryRATUsageList, PDUSessionResourceSecondaryRATUsageItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -8054,16 +7546,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupItemCxtReqIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupItemCxtReqIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupItemCxtReqIEExtensions,
-        AnonymousPDUSessionResourceSetupItemCxtReqIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8119,16 +7605,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupItemCxtResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupItemCxtResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupItemCxtResIEExtensions,
-        AnonymousPDUSessionResourceSetupItemCxtResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8178,16 +7658,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupItemHOReqIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupItemHOReqIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupItemHOReqIEExtensions,
-        AnonymousPDUSessionResourceSetupItemHOReqIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8240,16 +7714,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupItemSUReqIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupItemSUReqIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupItemSUReqIEExtensions,
-        AnonymousPDUSessionResourceSetupItemSUReqIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8311,16 +7779,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupItemSUResIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupItemSUResIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupItemSUResIEExtensions,
-        AnonymousPDUSessionResourceSetupItemSUResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8342,26 +7804,21 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_setup_response_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSetupListCxtReq(pub SequenceOf<PDUSessionResourceSetupItemCxtReq>);
-    aper_sequence_of!(PDUSessionResourceSetupListCxtReq, PDUSessionResourceSetupItemCxtReq, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSetupListCxtRes(pub SequenceOf<PDUSessionResourceSetupItemCxtRes>);
-    aper_sequence_of!(PDUSessionResourceSetupListCxtRes, PDUSessionResourceSetupItemCxtRes, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSetupListHOReq(pub SequenceOf<PDUSessionResourceSetupItemHOReq>);
-    aper_sequence_of!(PDUSessionResourceSetupListHOReq, PDUSessionResourceSetupItemHOReq, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSetupListSUReq(pub SequenceOf<PDUSessionResourceSetupItemSUReq>);
-    aper_sequence_of!(PDUSessionResourceSetupListSUReq, PDUSessionResourceSetupItemSUReq, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSetupListSURes(pub SequenceOf<PDUSessionResourceSetupItemSURes>);
-    aper_sequence_of!(PDUSessionResourceSetupListSURes, PDUSessionResourceSetupItemSURes, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -8389,16 +7846,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceSetupRequestTransferProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceSetupRequestTransferProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupRequestTransferProtocolIEs,
-        AnonymousPDUSessionResourceSetupRequestTransferProtocolIEs,
-        0,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8440,16 +7891,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupResponseTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupResponseTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupResponseTransferIEExtensions,
-        AnonymousPDUSessionResourceSetupResponseTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8511,16 +7956,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSetupUnsuccessfulTransferIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSetupUnsuccessfulTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupUnsuccessfulTransferIEExtensions,
-        AnonymousPDUSessionResourceSetupUnsuccessfulTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8569,16 +8008,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceSwitchedItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceSwitchedItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSwitchedItemIEExtensions,
-        AnonymousPDUSessionResourceSwitchedItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8600,10 +8033,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, path_switch_request_acknowledge_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceSwitchedList(pub SequenceOf<PDUSessionResourceSwitchedItem>);
-    aper_sequence_of!(PDUSessionResourceSwitchedList, PDUSessionResourceSwitchedItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -8632,16 +8064,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceToBeSwitchedDLItemIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceToBeSwitchedDLItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceToBeSwitchedDLItemIEExtensions,
-        AnonymousPDUSessionResourceToBeSwitchedDLItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8663,10 +8089,9 @@ pub mod ngap_ies {
             Self { p_dusession_id, path_switch_request_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceToBeSwitchedDLList(pub SequenceOf<PDUSessionResourceToBeSwitchedDLItem>);
-    aper_sequence_of!(PDUSessionResourceToBeSwitchedDLList, PDUSessionResourceToBeSwitchedDLItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -8695,16 +8120,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceToReleaseItemHOCmdIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceToReleaseItemHOCmdIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceToReleaseItemHOCmdIEExtensions,
-        AnonymousPDUSessionResourceToReleaseItemHOCmdIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8754,16 +8173,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionResourceToReleaseItemRelCmdIEExtensions(
         pub SequenceOf<AnonymousPDUSessionResourceToReleaseItemRelCmdIEExtensions>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceToReleaseItemRelCmdIEExtensions,
-        AnonymousPDUSessionResourceToReleaseItemRelCmdIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -8785,14 +8198,12 @@ pub mod ngap_ies {
             Self { p_dusession_id, p_dusession_resource_release_command_transfer, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceToReleaseListHOCmd(pub SequenceOf<PDUSessionResourceToReleaseItemHOCmd>);
-    aper_sequence_of!(PDUSessionResourceToReleaseListHOCmd, PDUSessionResourceToReleaseItemHOCmd, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct PDUSessionResourceToReleaseListRelCmd(pub SequenceOf<PDUSessionResourceToReleaseItemRelCmd>);
-    aper_sequence_of!(PDUSessionResourceToReleaseListRelCmd, PDUSessionResourceToReleaseItemRelCmd, 1, 256);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -8839,10 +8250,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PDUSessionUsageReportIEExtensions(pub SequenceOf<AnonymousPDUSessionUsageReportIEExtensions>);
-    aper_sequence_of!(PDUSessionUsageReportIEExtensions, AnonymousPDUSessionUsageReportIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -8894,10 +8304,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PLMNSupportItemIEExtensions(pub SequenceOf<AnonymousPLMNSupportItemIEExtensions>);
-    aper_sequence_of!(PLMNSupportItemIEExtensions, AnonymousPLMNSupportItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -8918,10 +8327,9 @@ pub mod ngap_ies {
             Self { p_lmnidentity, slice_support_list, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=12"))]
     pub struct PLMNSupportList(pub SequenceOf<PLMNSupportItem>);
-    aper_sequence_of!(PLMNSupportList, PLMNSupportItem, 1, 12);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
@@ -8986,10 +8394,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PacketErrorRateIEExtensions(pub SequenceOf<AnonymousPacketErrorRateIEExtensions>);
-    aper_sequence_of!(PacketErrorRateIEExtensions, AnonymousPacketErrorRateIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9044,10 +8451,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PagingAttemptInformationIEExtensions(pub SequenceOf<AnonymousPagingAttemptInformationIEExtensions>);
-    aper_sequence_of!(PagingAttemptInformationIEExtensions, AnonymousPagingAttemptInformationIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9128,16 +8534,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PathSwitchRequestAcknowledgeTransferIEExtensions(
         pub SequenceOf<AnonymousPathSwitchRequestAcknowledgeTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PathSwitchRequestAcknowledgeTransferIEExtensions,
-        AnonymousPathSwitchRequestAcknowledgeTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9187,16 +8587,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PathSwitchRequestSetupFailedTransferIEExtensions(
         pub SequenceOf<AnonymousPathSwitchRequestSetupFailedTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PathSwitchRequestSetupFailedTransferIEExtensions,
-        AnonymousPathSwitchRequestSetupFailedTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9239,10 +8633,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PathSwitchRequestTransferIEExtensions(pub SequenceOf<AnonymousPathSwitchRequestTransferIEExtensions>);
-    aper_sequence_of!(PathSwitchRequestTransferIEExtensions, AnonymousPathSwitchRequestTransferIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9303,16 +8696,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PathSwitchRequestUnsuccessfulTransferIEExtensions(
         pub SequenceOf<AnonymousPathSwitchRequestUnsuccessfulTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        PathSwitchRequestUnsuccessfulTransferIEExtensions,
-        AnonymousPathSwitchRequestUnsuccessfulTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9380,10 +8767,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QoSFlowsUsageReportItemIEExtensions(pub SequenceOf<AnonymousQoSFlowsUsageReportItemIEExtensions>);
-    aper_sequence_of!(QoSFlowsUsageReportItemIEExtensions, AnonymousQoSFlowsUsageReportItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "QoSFlowsUsageReport-Item")]
     #[non_exhaustive]
@@ -9407,10 +8793,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, r_attype, qo_sflows_timed_report_list, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QoSFlowsUsageReportList(pub SequenceOf<QoSFlowsUsageReportItem>);
-    aper_sequence_of!(QoSFlowsUsageReportList, QoSFlowsUsageReportItem, 1, 64);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9448,10 +8833,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowAcceptedItemIEExtensions(pub SequenceOf<AnonymousQosFlowAcceptedItemIEExtensions>);
-    aper_sequence_of!(QosFlowAcceptedItemIEExtensions, AnonymousQosFlowAcceptedItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9469,10 +8853,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowAcceptedList(pub SequenceOf<QosFlowAcceptedItem>);
-    aper_sequence_of!(QosFlowAcceptedList, QosFlowAcceptedItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9488,16 +8871,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowAddOrModifyRequestItemIEExtensions(
         pub SequenceOf<AnonymousQosFlowAddOrModifyRequestItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        QosFlowAddOrModifyRequestItemIEExtensions,
-        AnonymousQosFlowAddOrModifyRequestItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9522,10 +8899,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, qos_flow_level_qos_parameters, e_rab_id, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowAddOrModifyRequestList(pub SequenceOf<QosFlowAddOrModifyRequestItem>);
-    aper_sequence_of!(QosFlowAddOrModifyRequestList, QosFlowAddOrModifyRequestItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9541,16 +8917,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowAddOrModifyResponseItemIEExtensions(
         pub SequenceOf<AnonymousQosFlowAddOrModifyResponseItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        QosFlowAddOrModifyResponseItemIEExtensions,
-        AnonymousQosFlowAddOrModifyResponseItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9569,10 +8939,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowAddOrModifyResponseList(pub SequenceOf<QosFlowAddOrModifyResponseItem>);
-    aper_sequence_of!(QosFlowAddOrModifyResponseList, QosFlowAddOrModifyResponseItem, 1, 64);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, value("0..=63", extensible))]
     pub struct QosFlowIdentifier(pub Integer);
@@ -9591,10 +8960,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowInformationItemIEExtensions(pub SequenceOf<AnonymousQosFlowInformationItemIEExtensions>);
-    aper_sequence_of!(QosFlowInformationItemIEExtensions, AnonymousQosFlowInformationItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9615,10 +8983,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, d_lforwarding, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowInformationList(pub SequenceOf<QosFlowInformationItem>);
-    aper_sequence_of!(QosFlowInformationList, QosFlowInformationItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9634,16 +9001,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowItemWithDataForwardingIEExtensions(
         pub SequenceOf<AnonymousQosFlowItemWithDataForwardingIEExtensions>,
-    );
-    aper_sequence_of!(
-        QosFlowItemWithDataForwardingIEExtensions,
-        AnonymousQosFlowItemWithDataForwardingIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9680,10 +9041,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowLevelQosParametersIEExtensions(pub SequenceOf<AnonymousQosFlowLevelQosParametersIEExtensions>);
-    aper_sequence_of!(QosFlowLevelQosParametersIEExtensions, AnonymousQosFlowLevelQosParametersIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9720,14 +9080,12 @@ pub mod ngap_ies {
             }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowListWithCause(pub SequenceOf<QosFlowWithCauseItem>);
-    aper_sequence_of!(QosFlowListWithCause, QosFlowWithCauseItem, 1, 64);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowListWithDataForwarding(pub SequenceOf<QosFlowItemWithDataForwarding>);
-    aper_sequence_of!(QosFlowListWithDataForwarding, QosFlowItemWithDataForwarding, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9743,10 +9101,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowModifyConfirmItemIEExtensions(pub SequenceOf<AnonymousQosFlowModifyConfirmItemIEExtensions>);
-    aper_sequence_of!(QosFlowModifyConfirmItemIEExtensions, AnonymousQosFlowModifyConfirmItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9764,10 +9121,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowModifyConfirmList(pub SequenceOf<QosFlowModifyConfirmItem>);
-    aper_sequence_of!(QosFlowModifyConfirmList, QosFlowModifyConfirmItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9783,10 +9139,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowNotifyItemIEExtensions(pub SequenceOf<AnonymousQosFlowNotifyItemIEExtensions>);
-    aper_sequence_of!(QosFlowNotifyItemIEExtensions, AnonymousQosFlowNotifyItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9807,10 +9162,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, notification_cause, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowNotifyList(pub SequenceOf<QosFlowNotifyItem>);
-    aper_sequence_of!(QosFlowNotifyList, QosFlowNotifyItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9826,10 +9180,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowPerTNLInformationIEExtensions(pub SequenceOf<AnonymousQosFlowPerTNLInformationIEExtensions>);
-    aper_sequence_of!(QosFlowPerTNLInformationIEExtensions, AnonymousQosFlowPerTNLInformationIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9865,16 +9218,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowPerTNLInformationItemIEExtensions(
         pub SequenceOf<AnonymousQosFlowPerTNLInformationItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        QosFlowPerTNLInformationItemIEExtensions,
-        AnonymousQosFlowPerTNLInformationItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9893,10 +9240,9 @@ pub mod ngap_ies {
             Self { qos_flow_per_tnlinformation, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=3"))]
     pub struct QosFlowPerTNLInformationList(pub SequenceOf<QosFlowPerTNLInformationItem>);
-    aper_sequence_of!(QosFlowPerTNLInformationList, QosFlowPerTNLInformationItem, 1, 3);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9912,10 +9258,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowSetupRequestItemIEExtensions(pub SequenceOf<AnonymousQosFlowSetupRequestItemIEExtensions>);
-    aper_sequence_of!(QosFlowSetupRequestItemIEExtensions, AnonymousQosFlowSetupRequestItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -9939,10 +9284,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, qos_flow_level_qos_parameters, e_rab_id, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowSetupRequestList(pub SequenceOf<QosFlowSetupRequestItem>);
-    aper_sequence_of!(QosFlowSetupRequestList, QosFlowSetupRequestItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -9958,16 +9302,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowSetupResponseItemSUResIEExtensions(
         pub SequenceOf<AnonymousQosFlowSetupResponseItemSUResIEExtensions>,
-    );
-    aper_sequence_of!(
-        QosFlowSetupResponseItemSUResIEExtensions,
-        AnonymousQosFlowSetupResponseItemSUResIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -9986,10 +9324,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowSetupResponseListSURes(pub SequenceOf<QosFlowSetupResponseItemSURes>);
-    aper_sequence_of!(QosFlowSetupResponseListSURes, QosFlowSetupResponseItemSURes, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10005,10 +9342,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowToBeForwardedItemIEExtensions(pub SequenceOf<AnonymousQosFlowToBeForwardedItemIEExtensions>);
-    aper_sequence_of!(QosFlowToBeForwardedItemIEExtensions, AnonymousQosFlowToBeForwardedItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10026,10 +9362,9 @@ pub mod ngap_ies {
             Self { qos_flow_identifier, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct QosFlowToBeForwardedList(pub SequenceOf<QosFlowToBeForwardedItem>);
-    aper_sequence_of!(QosFlowToBeForwardedList, QosFlowToBeForwardedItem, 1, 64);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10045,10 +9380,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct QosFlowWithCauseItemIEExtensions(pub SequenceOf<AnonymousQosFlowWithCauseItemIEExtensions>);
-    aper_sequence_of!(QosFlowWithCauseItemIEExtensions, AnonymousQosFlowWithCauseItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10093,16 +9427,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct RANStatusTransferTransparentContainerIEExtensions(
         pub SequenceOf<AnonymousRANStatusTransferTransparentContainerIEExtensions>,
-    );
-    aper_sequence_of!(
-        RANStatusTransferTransparentContainerIEExtensions,
-        AnonymousRANStatusTransferTransparentContainerIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "RANStatusTransfer-TransparentContainer")]
@@ -10124,10 +9452,9 @@ pub mod ngap_ies {
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("8", extensible))]
     pub struct RATRestrictionInformation(pub BitString);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct RATRestrictions(pub SequenceOf<RATRestrictionsItem>);
-    aper_sequence_of!(RATRestrictions, RATRestrictionsItem, 1, 16);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10143,10 +9470,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct RATRestrictionsItemIEExtensions(pub SequenceOf<AnonymousRATRestrictionsItemIEExtensions>);
-    aper_sequence_of!(RATRestrictionsItemIEExtensions, AnonymousRATRestrictionsItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "RATRestrictions-Item")]
     #[non_exhaustive]
@@ -10228,10 +9554,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct RecommendedCellItemIEExtensions(pub SequenceOf<AnonymousRecommendedCellItemIEExtensions>);
-    aper_sequence_of!(RecommendedCellItemIEExtensions, AnonymousRecommendedCellItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10252,10 +9577,9 @@ pub mod ngap_ies {
             Self { n_gran_cgi, time_stayed_in_cell, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct RecommendedCellList(pub SequenceOf<RecommendedCellItem>);
-    aper_sequence_of!(RecommendedCellList, RecommendedCellItem, 1, 16);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10271,10 +9595,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct RecommendedCellsForPagingIEExtensions(pub SequenceOf<AnonymousRecommendedCellsForPagingIEExtensions>);
-    aper_sequence_of!(RecommendedCellsForPagingIEExtensions, AnonymousRecommendedCellsForPagingIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10307,10 +9630,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct RecommendedRANNodeItemIEExtensions(pub SequenceOf<AnonymousRecommendedRANNodeItemIEExtensions>);
-    aper_sequence_of!(RecommendedRANNodeItemIEExtensions, AnonymousRecommendedRANNodeItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10328,10 +9650,9 @@ pub mod ngap_ies {
             Self { a_mfpaging_target, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct RecommendedRANNodeList(pub SequenceOf<RecommendedRANNodeItem>);
-    aper_sequence_of!(RecommendedRANNodeList, RecommendedRANNodeItem, 1, 16);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10347,16 +9668,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct RecommendedRANNodesForPagingIEExtensions(
         pub SequenceOf<AnonymousRecommendedRANNodesForPagingIEExtensions>,
-    );
-    aper_sequence_of!(
-        RecommendedRANNodesForPagingIEExtensions,
-        AnonymousRecommendedRANNodesForPagingIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -10459,10 +9774,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SNSSAIIEExtensions(pub SequenceOf<AnonymousSNSSAIIEExtensions>);
-    aper_sequence_of!(SNSSAIIEExtensions, AnonymousSNSSAIIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "S-NSSAI")]
     #[non_exhaustive]
@@ -10480,10 +9794,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " S"]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=2"), identifier = "SCTP-TLAs")]
     pub struct SCTPTLAs(pub SequenceOf<TransportLayerAddress>);
-    aper_sequence_of!(SCTPTLAs, TransportLayerAddress, 1, 2);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct SD(pub FixedOctetString<3usize>);
@@ -10502,10 +9815,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SONConfigurationTransferIEExtensions(pub SequenceOf<AnonymousSONConfigurationTransferIEExtensions>);
-    aper_sequence_of!(SONConfigurationTransferIEExtensions, AnonymousSONConfigurationTransferIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10568,10 +9880,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SONInformationReplyIEExtensions(pub SequenceOf<AnonymousSONInformationReplyIEExtensions>);
-    aper_sequence_of!(SONInformationReplyIEExtensions, AnonymousSONInformationReplyIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10614,16 +9925,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SecondaryRATDataUsageReportTransferIEExtensions(
         pub SequenceOf<AnonymousSecondaryRATDataUsageReportTransferIEExtensions>,
-    );
-    aper_sequence_of!(
-        SecondaryRATDataUsageReportTransferIEExtensions,
-        AnonymousSecondaryRATDataUsageReportTransferIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -10657,16 +9962,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SecondaryRATUsageInformationIEExtension(
         pub SequenceOf<AnonymousSecondaryRATUsageInformationIEExtension>,
-    );
-    aper_sequence_of!(
-        SecondaryRATUsageInformationIEExtension,
-        AnonymousSecondaryRATUsageInformationIEExtension,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -10703,10 +10002,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SecurityContextIEExtensions(pub SequenceOf<AnonymousSecurityContextIEExtensions>);
-    aper_sequence_of!(SecurityContextIEExtensions, AnonymousSecurityContextIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10742,10 +10040,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SecurityIndicationIEExtensions(pub SequenceOf<AnonymousSecurityIndicationIEExtensions>);
-    aper_sequence_of!(SecurityIndicationIEExtensions, AnonymousSecurityIndicationIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10792,10 +10089,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SecurityResultIEExtensions(pub SequenceOf<AnonymousSecurityResultIEExtensions>);
-    aper_sequence_of!(SecurityResultIEExtensions, AnonymousSecurityResultIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10834,10 +10130,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ServedGUAMIItemIEExtensions(pub SequenceOf<AnonymousServedGUAMIItemIEExtensions>);
-    aper_sequence_of!(ServedGUAMIItemIEExtensions, AnonymousServedGUAMIItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10858,14 +10153,12 @@ pub mod ngap_ies {
             Self { g_uami, backup_amfname, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct ServedGUAMIList(pub SequenceOf<ServedGUAMIItem>);
-    aper_sequence_of!(ServedGUAMIList, ServedGUAMIItem, 1, 256);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct ServiceAreaInformation(pub SequenceOf<ServiceAreaInformationItem>);
-    aper_sequence_of!(ServiceAreaInformation, ServiceAreaInformationItem, 1, 16);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10881,15 +10174,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ServiceAreaInformationItemIEExtensions(pub SequenceOf<AnonymousServiceAreaInformationItemIEExtensions>);
-    aper_sequence_of!(
-        ServiceAreaInformationItemIEExtensions,
-        AnonymousServiceAreaInformationItemIEExtensions,
-        1,
-        65535
-    );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "ServiceAreaInformation-Item")]
     #[non_exhaustive]
@@ -10928,10 +10215,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SliceOverloadItemIEExtensions(pub SequenceOf<AnonymousSliceOverloadItemIEExtensions>);
-    aper_sequence_of!(SliceOverloadItemIEExtensions, AnonymousSliceOverloadItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10946,10 +10232,9 @@ pub mod ngap_ies {
             Self { s_nssai, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=1024"))]
     pub struct SliceOverloadList(pub SequenceOf<SliceOverloadItem>);
-    aper_sequence_of!(SliceOverloadList, SliceOverloadItem, 1, 1024);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -10965,10 +10250,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SliceSupportItemIEExtensions(pub SequenceOf<AnonymousSliceSupportItemIEExtensions>);
-    aper_sequence_of!(SliceSupportItemIEExtensions, AnonymousSliceSupportItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -10983,10 +10267,9 @@ pub mod ngap_ies {
             Self { s_nssai, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=1024"))]
     pub struct SliceSupportList(pub SequenceOf<SliceSupportItem>);
-    aper_sequence_of!(SliceSupportList, SliceSupportItem, 1, 1024);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11002,16 +10285,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SourceNGRANNodeToTargetNGRANNodeTransparentContainerIEExtensions(
         pub SequenceOf<AnonymousSourceNGRANNodeToTargetNGRANNodeTransparentContainerIEExtensions>,
-    );
-    aper_sequence_of!(
-        SourceNGRANNodeToTargetNGRANNodeTransparentContainerIEExtensions,
-        AnonymousSourceNGRANNodeToTargetNGRANNodeTransparentContainerIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SourceNGRANNode-ToTargetNGRANNode-TransparentContainer")]
@@ -11076,10 +10353,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SourceRANNodeIDIEExtensions(pub SequenceOf<AnonymousSourceRANNodeIDIEExtensions>);
-    aper_sequence_of!(SourceRANNodeIDIEExtensions, AnonymousSourceRANNodeIDIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11115,16 +10391,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SourceToTargetAMFInformationRerouteIEExtensions(
         pub SequenceOf<AnonymousSourceToTargetAMFInformationRerouteIEExtensions>,
-    );
-    aper_sequence_of!(
-        SourceToTargetAMFInformationRerouteIEExtensions,
-        AnonymousSourceToTargetAMFInformationRerouteIEExtensions,
-        1,
-        65535
     );
     #[doc = " This IE includes a transparent container from the source RAN node to the target RAN node."]
     #[doc = " The octets of the OCTET STRING are encoded according to the specifications of the target system."]
@@ -11169,10 +10439,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct SupportedTAItemIEExtensions(pub SequenceOf<AnonymousSupportedTAItemIEExtensions>);
-    aper_sequence_of!(SupportedTAItemIEExtensions, AnonymousSupportedTAItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11193,10 +10462,9 @@ pub mod ngap_ies {
             Self { t_ac, broadcast_plmnlist, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct SupportedTAList(pub SequenceOf<SupportedTAItem>);
-    aper_sequence_of!(SupportedTAList, SupportedTAItem, 1, 256);
     #[doc = " T"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
@@ -11216,10 +10484,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIIEExtensions(pub SequenceOf<AnonymousTAIIEExtensions>);
-    aper_sequence_of!(TAIIEExtensions, AnonymousTAIIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11236,10 +10503,9 @@ pub mod ngap_ies {
             Self { p_lmnidentity, t_ac, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIBroadcastEUTRA(pub SequenceOf<TAIBroadcastEUTRAItem>);
-    aper_sequence_of!(TAIBroadcastEUTRA, TAIBroadcastEUTRAItem, 1, 65535);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11255,10 +10521,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIBroadcastEUTRAItemIEExtensions(pub SequenceOf<AnonymousTAIBroadcastEUTRAItemIEExtensions>);
-    aper_sequence_of!(TAIBroadcastEUTRAItemIEExtensions, AnonymousTAIBroadcastEUTRAItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "TAIBroadcastEUTRA-Item")]
     #[non_exhaustive]
@@ -11279,10 +10544,9 @@ pub mod ngap_ies {
             Self { t_ai, completed_cells_in_tai_eutra, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIBroadcastNR(pub SequenceOf<TAIBroadcastNRItem>);
-    aper_sequence_of!(TAIBroadcastNR, TAIBroadcastNRItem, 1, 65535);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11298,10 +10562,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIBroadcastNRItemIEExtensions(pub SequenceOf<AnonymousTAIBroadcastNRItemIEExtensions>);
-    aper_sequence_of!(TAIBroadcastNRItemIEExtensions, AnonymousTAIBroadcastNRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "TAIBroadcastNR-Item")]
     #[non_exhaustive]
@@ -11322,10 +10585,9 @@ pub mod ngap_ies {
             Self { t_ai, completed_cells_in_tai_nr, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAICancelledEUTRA(pub SequenceOf<TAICancelledEUTRAItem>);
-    aper_sequence_of!(TAICancelledEUTRA, TAICancelledEUTRAItem, 1, 65535);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11341,10 +10603,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAICancelledEUTRAItemIEExtensions(pub SequenceOf<AnonymousTAICancelledEUTRAItemIEExtensions>);
-    aper_sequence_of!(TAICancelledEUTRAItemIEExtensions, AnonymousTAICancelledEUTRAItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "TAICancelledEUTRA-Item")]
     #[non_exhaustive]
@@ -11365,10 +10626,9 @@ pub mod ngap_ies {
             Self { t_ai, cancelled_cells_in_tai_eutra, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAICancelledNR(pub SequenceOf<TAICancelledNRItem>);
-    aper_sequence_of!(TAICancelledNR, TAICancelledNRItem, 1, 65535);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11384,10 +10644,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAICancelledNRItemIEExtensions(pub SequenceOf<AnonymousTAICancelledNRItemIEExtensions>);
-    aper_sequence_of!(TAICancelledNRItemIEExtensions, AnonymousTAICancelledNRItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "TAICancelledNR-Item")]
     #[non_exhaustive]
@@ -11408,10 +10667,9 @@ pub mod ngap_ies {
             Self { t_ai, cancelled_cells_in_tai_nr, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct TAIListForInactive(pub SequenceOf<TAIListForInactiveItem>);
-    aper_sequence_of!(TAIListForInactive, TAIListForInactiveItem, 1, 16);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11427,10 +10685,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIListForInactiveItemIEExtensions(pub SequenceOf<AnonymousTAIListForInactiveItemIEExtensions>);
-    aper_sequence_of!(TAIListForInactiveItemIEExtensions, AnonymousTAIListForInactiveItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11445,10 +10702,9 @@ pub mod ngap_ies {
             Self { t_ai, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct TAIListForPaging(pub SequenceOf<TAIListForPagingItem>);
-    aper_sequence_of!(TAIListForPaging, TAIListForPagingItem, 1, 16);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11464,10 +10720,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIListForPagingItemIEExtensions(pub SequenceOf<AnonymousTAIListForPagingItemIEExtensions>);
-    aper_sequence_of!(TAIListForPagingItemIEExtensions, AnonymousTAIListForPagingItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11482,14 +10737,12 @@ pub mod ngap_ies {
             Self { t_ai, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=2048"))]
     pub struct TAIListForRestart(pub SequenceOf<TAI>);
-    aper_sequence_of!(TAIListForRestart, TAI, 1, 2048);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TAIListForWarning(pub SequenceOf<TAI>);
-    aper_sequence_of!(TAIListForWarning, TAI, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, value("0..=255"))]
     pub struct TNLAddressWeightFactor(pub u8);
@@ -11508,10 +10761,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TNLAssociationItemIEExtensions(pub SequenceOf<AnonymousTNLAssociationItemIEExtensions>);
-    aper_sequence_of!(TNLAssociationItemIEExtensions, AnonymousTNLAssociationItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11531,10 +10783,9 @@ pub mod ngap_ies {
             Self { t_nlassociation_address, cause, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=32"))]
     pub struct TNLAssociationList(pub SequenceOf<TNLAssociationItem>);
-    aper_sequence_of!(TNLAssociationList, TNLAssociationItem, 1, 32);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -11581,16 +10832,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TargetNGRANNodeToSourceNGRANNodeTransparentContainerIEExtensions(
         pub SequenceOf<AnonymousTargetNGRANNodeToSourceNGRANNodeTransparentContainerIEExtensions>,
-    );
-    aper_sequence_of!(
-        TargetNGRANNodeToSourceNGRANNodeTransparentContainerIEExtensions,
-        AnonymousTargetNGRANNodeToSourceNGRANNodeTransparentContainerIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "TargetNGRANNode-ToSourceNGRANNode-TransparentContainer")]
@@ -11624,10 +10869,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TargetRANNodeIDIEExtensions(pub SequenceOf<AnonymousTargetRANNodeIDIEExtensions>);
-    aper_sequence_of!(TargetRANNodeIDIEExtensions, AnonymousTargetRANNodeIDIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11666,10 +10910,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TargeteNBIDIEExtensions(pub SequenceOf<AnonymousTargeteNBIDIEExtensions>);
-    aper_sequence_of!(TargeteNBIDIEExtensions, AnonymousTargeteNBIDIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "TargeteNB-ID")]
     #[non_exhaustive]
@@ -11734,10 +10977,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct TraceActivationIEExtensions(pub SequenceOf<AnonymousTraceActivationIEExtensions>);
-    aper_sequence_of!(TraceActivationIEExtensions, AnonymousTraceActivationIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -11804,10 +11046,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UENGAPIDPairIEExtensions(pub SequenceOf<AnonymousUENGAPIDPairIEExtensions>);
-    aper_sequence_of!(UENGAPIDPairIEExtensions, AnonymousUENGAPIDPairIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "UE-NGAP-ID-pair")]
     #[non_exhaustive]
@@ -11866,16 +11107,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UEAssociatedLogicalNGConnectionItemIEExtensions(
         pub SequenceOf<AnonymousUEAssociatedLogicalNGConnectionItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        UEAssociatedLogicalNGConnectionItemIEExtensions,
-        AnonymousUEAssociatedLogicalNGConnectionItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "UE-associatedLogicalNG-connectionItem")]
@@ -11897,10 +11132,9 @@ pub mod ngap_ies {
             Self { a_mf_ue_ngap_id, r_an_ue_ngap_id, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65536"), identifier = "UE-associatedLogicalNG-connectionList")]
     pub struct UEAssociatedLogicalNGConnectionList(pub SequenceOf<UEAssociatedLogicalNGConnectionItem>);
-    aper_sequence_of!(UEAssociatedLogicalNGConnectionList, UEAssociatedLogicalNGConnectionItem, 1, 65536);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -11916,10 +11150,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UEAggregateMaximumBitRateIEExtensions(pub SequenceOf<AnonymousUEAggregateMaximumBitRateIEExtensions>);
-    aper_sequence_of!(UEAggregateMaximumBitRateIEExtensions, AnonymousUEAggregateMaximumBitRateIEExtensions, 1, 65535);
     #[doc = " U"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -11947,10 +11180,9 @@ pub mod ngap_ies {
     pub enum UEContextRequest {
         requested = 0,
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct UEHistoryInformation(pub SequenceOf<LastVisitedCellItem>);
-    aper_sequence_of!(UEHistoryInformation, LastVisitedCellItem, 1, 16);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12017,16 +11249,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UEPresenceInAreaOfInterestItemIEExtensions(
         pub SequenceOf<AnonymousUEPresenceInAreaOfInterestItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        UEPresenceInAreaOfInterestItemIEExtensions,
-        AnonymousUEPresenceInAreaOfInterestItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12048,10 +11274,9 @@ pub mod ngap_ies {
             Self { location_reporting_reference_id, u_epresence, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=64"))]
     pub struct UEPresenceInAreaOfInterestList(pub SequenceOf<UEPresenceInAreaOfInterestItem>);
-    aper_sequence_of!(UEPresenceInAreaOfInterestList, UEPresenceInAreaOfInterestItem, 1, 64);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate)]
     pub struct UERadioCapability(pub OctetString);
@@ -12070,15 +11295,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UERadioCapabilityForPagingIEExtensions(pub SequenceOf<AnonymousUERadioCapabilityForPagingIEExtensions>);
-    aper_sequence_of!(
-        UERadioCapabilityForPagingIEExtensions,
-        AnonymousUERadioCapabilityForPagingIEExtensions,
-        1,
-        65535
-    );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -12127,10 +11346,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UESecurityCapabilitiesIEExtensions(pub SequenceOf<AnonymousUESecurityCapabilitiesIEExtensions>);
-    aper_sequence_of!(UESecurityCapabilitiesIEExtensions, AnonymousUESecurityCapabilitiesIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -12178,10 +11396,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct ULNGUUPTNLModifyItemIEExtensions(pub SequenceOf<AnonymousULNGUUPTNLModifyItemIEExtensions>);
-    aper_sequence_of!(ULNGUUPTNLModifyItemIEExtensions, AnonymousULNGUUPTNLModifyItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "UL-NGU-UP-TNLModifyItem")]
     #[non_exhaustive]
@@ -12202,10 +11419,9 @@ pub mod ngap_ies {
             Self { u_l_ngu_up_tnlinformation, d_l_ngu_up_tnlinformation, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=4"), identifier = "UL-NGU-UP-TNLModifyList")]
     pub struct ULNGUUPTNLModifyList(pub SequenceOf<ULNGUUPTNLModifyItem>);
-    aper_sequence_of!(ULNGUUPTNLModifyList, ULNGUUPTNLModifyItem, 1, 4);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash, Copy)]
     #[rasn(enumerated)]
     #[non_exhaustive]
@@ -12248,16 +11464,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UPTransportLayerInformationItemIEExtensions(
         pub SequenceOf<AnonymousUPTransportLayerInformationItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        UPTransportLayerInformationItemIEExtensions,
-        AnonymousUPTransportLayerInformationItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12276,10 +11486,9 @@ pub mod ngap_ies {
             Self { n_gu_up_tnlinformation, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=3"))]
     pub struct UPTransportLayerInformationList(pub SequenceOf<UPTransportLayerInformationItem>);
-    aper_sequence_of!(UPTransportLayerInformationList, UPTransportLayerInformationItem, 1, 3);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -12295,16 +11504,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UPTransportLayerInformationPairItemIEExtensions(
         pub SequenceOf<AnonymousUPTransportLayerInformationPairItemIEExtensions>,
-    );
-    aper_sequence_of!(
-        UPTransportLayerInformationPairItemIEExtensions,
-        AnonymousUPTransportLayerInformationPairItemIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12326,10 +11529,9 @@ pub mod ngap_ies {
             Self { u_l_ngu_up_tnlinformation, d_l_ngu_up_tnlinformation, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=3"))]
     pub struct UPTransportLayerInformationPairList(pub SequenceOf<UPTransportLayerInformationPairItem>);
-    aper_sequence_of!(UPTransportLayerInformationPairList, UPTransportLayerInformationPairItem, 1, 3);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -12345,10 +11547,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UnavailableGUAMIItemIEExtensions(pub SequenceOf<AnonymousUnavailableGUAMIItemIEExtensions>);
-    aper_sequence_of!(UnavailableGUAMIItemIEExtensions, AnonymousUnavailableGUAMIItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -12372,10 +11573,9 @@ pub mod ngap_ies {
             Self { g_uami, timer_approach_for_guamiremoval, backup_amfname, i_e_extensions }
         }
     }
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=256"))]
     pub struct UnavailableGUAMIList(pub SequenceOf<UnavailableGUAMIItem>);
-    aper_sequence_of!(UnavailableGUAMIList, UnavailableGUAMIItem, 1, 256);
     #[doc = " Inner type "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12413,16 +11613,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UserLocationInformationEUTRAIEExtensions(
         pub SequenceOf<AnonymousUserLocationInformationEUTRAIEExtensions>,
-    );
-    aper_sequence_of!(
-        UserLocationInformationEUTRAIEExtensions,
-        AnonymousUserLocationInformationEUTRAIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12462,16 +11656,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UserLocationInformationN3IWFIEExtensions(
         pub SequenceOf<AnonymousUserLocationInformationN3IWFIEExtensions>,
-    );
-    aper_sequence_of!(
-        UserLocationInformationN3IWFIEExtensions,
-        AnonymousUserLocationInformationN3IWFIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12508,10 +11696,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UserLocationInformationNRIEExtensions(pub SequenceOf<AnonymousUserLocationInformationNRIEExtensions>);
-    aper_sequence_of!(UserLocationInformationNRIEExtensions, AnonymousUserLocationInformationNRIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -12550,16 +11737,10 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct UserPlaneSecurityInformationIEExtensions(
         pub SequenceOf<AnonymousUserPlaneSecurityInformationIEExtensions>,
-    );
-    aper_sequence_of!(
-        UserPlaneSecurityInformationIEExtensions,
-        AnonymousUserPlaneSecurityInformationIEExtensions,
-        1,
-        65535
     );
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
@@ -12596,10 +11777,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct VolumeTimedReportItemIEExtensions(pub SequenceOf<AnonymousVolumeTimedReportItemIEExtensions>);
-    aper_sequence_of!(VolumeTimedReportItemIEExtensions, AnonymousVolumeTimedReportItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "VolumeTimedReport-Item")]
     #[non_exhaustive]
@@ -12627,10 +11807,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " V"]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=2"))]
     pub struct VolumeTimedReportList(pub SequenceOf<VolumeTimedReportItem>);
-    aper_sequence_of!(VolumeTimedReportList, VolumeTimedReportItem, 1, 2);
     #[doc = " W"]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=1024"))]
@@ -12684,10 +11863,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct XnExtTLAItemIEExtensions(pub SequenceOf<AnonymousXnExtTLAItemIEExtensions>);
-    aper_sequence_of!(XnExtTLAItemIEExtensions, AnonymousXnExtTLAItemIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "XnExtTLA-Item")]
     #[non_exhaustive]
@@ -12709,18 +11887,15 @@ pub mod ngap_ies {
         }
     }
     #[doc = " X"]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"))]
     pub struct XnExtTLAs(pub SequenceOf<XnExtTLAItem>);
-    aper_sequence_of!(XnExtTLAs, XnExtTLAItem, 1, 16);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=16"), identifier = "XnGTP-TLAs")]
     pub struct XnGTPTLAs(pub SequenceOf<TransportLayerAddress>);
-    aper_sequence_of!(XnGTPTLAs, TransportLayerAddress, 1, 16);
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=2"))]
     pub struct XnTLAs(pub SequenceOf<TransportLayerAddress>);
-    aper_sequence_of!(XnTLAs, TransportLayerAddress, 1, 2);
     #[doc = " Anonymous SEQUENCE OF member "]
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags, identifier = "SEQUENCE")]
@@ -12736,10 +11911,9 @@ pub mod ngap_ies {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct XnTNLConfigurationInfoIEExtensions(pub SequenceOf<AnonymousXnTNLConfigurationInfoIEExtensions>);
-    aper_sequence_of!(XnTNLConfigurationInfoIEExtensions, AnonymousXnTNLConfigurationInfoIEExtensions, 1, 65535);
     #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(automatic_tags)]
     #[non_exhaustive]
@@ -12794,10 +11968,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct AMFConfigurationUpdateProtocolIEs(pub SequenceOf<AnonymousAMFConfigurationUpdateProtocolIEs>);
-    aper_sequence_of!(AMFConfigurationUpdateProtocolIEs, AnonymousAMFConfigurationUpdateProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " AMF Configuration Update Elementary Procedure"]
@@ -12847,16 +12020,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct AMFConfigurationUpdateAcknowledgeProtocolIEs(
         pub SequenceOf<AnonymousAMFConfigurationUpdateAcknowledgeProtocolIEs>,
-    );
-    aper_sequence_of!(
-        AMFConfigurationUpdateAcknowledgeProtocolIEs,
-        AnonymousAMFConfigurationUpdateAcknowledgeProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -12902,16 +12069,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct AMFConfigurationUpdateFailureProtocolIEs(
         pub SequenceOf<AnonymousAMFConfigurationUpdateFailureProtocolIEs>,
-    );
-    aper_sequence_of!(
-        AMFConfigurationUpdateFailureProtocolIEs,
-        AnonymousAMFConfigurationUpdateFailureProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -12953,10 +12114,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct AMFStatusIndicationProtocolIEs(pub SequenceOf<AnonymousAMFStatusIndicationProtocolIEs>);
-    aper_sequence_of!(AMFStatusIndicationProtocolIEs, AnonymousAMFStatusIndicationProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " AMF Status Indication Elementary Procedure"]
@@ -13002,10 +12162,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct CellTrafficTraceProtocolIEs(pub SequenceOf<AnonymousCellTrafficTraceProtocolIEs>);
-    aper_sequence_of!(CellTrafficTraceProtocolIEs, AnonymousCellTrafficTraceProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " CELL TRAFFIC TRACE"]
@@ -13046,10 +12205,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct DeactivateTraceProtocolIEs(pub SequenceOf<AnonymousDeactivateTraceProtocolIEs>);
-    aper_sequence_of!(DeactivateTraceProtocolIEs, AnonymousDeactivateTraceProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " DEACTIVATE TRACE"]
@@ -13090,10 +12248,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct DownlinkNASTransportProtocolIEs(pub SequenceOf<AnonymousDownlinkNASTransportProtocolIEs>);
-    aper_sequence_of!(DownlinkNASTransportProtocolIEs, AnonymousDownlinkNASTransportProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " DOWNLINK NAS TRANSPORT"]
@@ -13138,16 +12295,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct DownlinkNonUEAssociatedNRPPaTransportProtocolIEs(
         pub SequenceOf<AnonymousDownlinkNonUEAssociatedNRPPaTransportProtocolIEs>,
-    );
-    aper_sequence_of!(
-        DownlinkNonUEAssociatedNRPPaTransportProtocolIEs,
-        AnonymousDownlinkNonUEAssociatedNRPPaTransportProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -13193,16 +12344,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct DownlinkRANConfigurationTransferProtocolIEs(
         pub SequenceOf<AnonymousDownlinkRANConfigurationTransferProtocolIEs>,
-    );
-    aper_sequence_of!(
-        DownlinkRANConfigurationTransferProtocolIEs,
-        AnonymousDownlinkRANConfigurationTransferProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -13244,10 +12389,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct DownlinkRANStatusTransferProtocolIEs(pub SequenceOf<AnonymousDownlinkRANStatusTransferProtocolIEs>);
-    aper_sequence_of!(DownlinkRANStatusTransferProtocolIEs, AnonymousDownlinkRANStatusTransferProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Downlink RAN Status Transfer Elementary Procedure"]
@@ -13297,16 +12441,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct DownlinkUEAssociatedNRPPaTransportProtocolIEs(
         pub SequenceOf<AnonymousDownlinkUEAssociatedNRPPaTransportProtocolIEs>,
-    );
-    aper_sequence_of!(
-        DownlinkUEAssociatedNRPPaTransportProtocolIEs,
-        AnonymousDownlinkUEAssociatedNRPPaTransportProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -13353,10 +12491,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct ErrorIndicationProtocolIEs(pub SequenceOf<AnonymousErrorIndicationProtocolIEs>);
-    aper_sequence_of!(ErrorIndicationProtocolIEs, AnonymousErrorIndicationProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Error Indication Elementary Procedure"]
@@ -13402,10 +12539,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverCancelProtocolIEs(pub SequenceOf<AnonymousHandoverCancelProtocolIEs>);
-    aper_sequence_of!(HandoverCancelProtocolIEs, AnonymousHandoverCancelProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Handover Cancellation Elementary Procedure"]
@@ -13451,10 +12587,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverCancelAcknowledgeProtocolIEs(pub SequenceOf<AnonymousHandoverCancelAcknowledgeProtocolIEs>);
-    aper_sequence_of!(HandoverCancelAcknowledgeProtocolIEs, AnonymousHandoverCancelAcknowledgeProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " HANDOVER CANCEL ACKNOWLEDGE"]
@@ -13495,10 +12630,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverCommandProtocolIEs(pub SequenceOf<AnonymousHandoverCommandProtocolIEs>);
-    aper_sequence_of!(HandoverCommandProtocolIEs, AnonymousHandoverCommandProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " HANDOVER COMMAND"]
@@ -13539,10 +12673,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverFailureProtocolIEs(pub SequenceOf<AnonymousHandoverFailureProtocolIEs>);
-    aper_sequence_of!(HandoverFailureProtocolIEs, AnonymousHandoverFailureProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " HANDOVER FAILURE"]
@@ -13583,10 +12716,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverNotifyProtocolIEs(pub SequenceOf<AnonymousHandoverNotifyProtocolIEs>);
-    aper_sequence_of!(HandoverNotifyProtocolIEs, AnonymousHandoverNotifyProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Handover Notification Elementary Procedure"]
@@ -13636,10 +12768,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverPreparationFailureProtocolIEs(pub SequenceOf<AnonymousHandoverPreparationFailureProtocolIEs>);
-    aper_sequence_of!(HandoverPreparationFailureProtocolIEs, AnonymousHandoverPreparationFailureProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " HANDOVER PREPARATION FAILURE"]
@@ -13680,10 +12811,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverRequestProtocolIEs(pub SequenceOf<AnonymousHandoverRequestProtocolIEs>);
-    aper_sequence_of!(HandoverRequestProtocolIEs, AnonymousHandoverRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Handover Resource Allocation Elementary Procedure"]
@@ -13733,10 +12863,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverRequestAcknowledgeProtocolIEs(pub SequenceOf<AnonymousHandoverRequestAcknowledgeProtocolIEs>);
-    aper_sequence_of!(HandoverRequestAcknowledgeProtocolIEs, AnonymousHandoverRequestAcknowledgeProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " HANDOVER REQUEST ACKNOWLEDGE"]
@@ -13777,10 +12906,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct HandoverRequiredProtocolIEs(pub SequenceOf<AnonymousHandoverRequiredProtocolIEs>);
-    aper_sequence_of!(HandoverRequiredProtocolIEs, AnonymousHandoverRequiredProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UE MOBILITY MANAGEMENT ELEMENTARY PROCEDURES"]
@@ -13835,10 +12963,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct InitialContextSetupFailureProtocolIEs(pub SequenceOf<AnonymousInitialContextSetupFailureProtocolIEs>);
-    aper_sequence_of!(InitialContextSetupFailureProtocolIEs, AnonymousInitialContextSetupFailureProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " INITIAL CONTEXT SETUP FAILURE"]
@@ -13883,10 +13010,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct InitialContextSetupRequestProtocolIEs(pub SequenceOf<AnonymousInitialContextSetupRequestProtocolIEs>);
-    aper_sequence_of!(InitialContextSetupRequestProtocolIEs, AnonymousInitialContextSetupRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UE CONTEXT MANAGEMENT ELEMENTARY PROCEDURES"]
@@ -13941,15 +13067,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct InitialContextSetupResponseProtocolIEs(pub SequenceOf<AnonymousInitialContextSetupResponseProtocolIEs>);
-    aper_sequence_of!(
-        InitialContextSetupResponseProtocolIEs,
-        AnonymousInitialContextSetupResponseProtocolIEs,
-        0,
-        65535
-    );
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " INITIAL CONTEXT SETUP RESPONSE"]
@@ -13990,10 +13110,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct InitialUEMessageProtocolIEs(pub SequenceOf<AnonymousInitialUEMessageProtocolIEs>);
-    aper_sequence_of!(InitialUEMessageProtocolIEs, AnonymousInitialUEMessageProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " NAS TRANSPORT ELEMENTARY PROCEDURES"]
@@ -14039,10 +13158,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct LocationReportProtocolIEs(pub SequenceOf<AnonymousLocationReportProtocolIEs>);
-    aper_sequence_of!(LocationReportProtocolIEs, AnonymousLocationReportProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " LOCATION REPORT"]
@@ -14083,10 +13201,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct LocationReportingControlProtocolIEs(pub SequenceOf<AnonymousLocationReportingControlProtocolIEs>);
-    aper_sequence_of!(LocationReportingControlProtocolIEs, AnonymousLocationReportingControlProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " LOCATION REPORTING ELEMENTARY PROCEDURES"]
@@ -14136,16 +13253,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct LocationReportingFailureIndicationProtocolIEs(
         pub SequenceOf<AnonymousLocationReportingFailureIndicationProtocolIEs>,
-    );
-    aper_sequence_of!(
-        LocationReportingFailureIndicationProtocolIEs,
-        AnonymousLocationReportingFailureIndicationProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14187,10 +13298,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct NASNonDeliveryIndicationProtocolIEs(pub SequenceOf<AnonymousNASNonDeliveryIndicationProtocolIEs>);
-    aper_sequence_of!(NASNonDeliveryIndicationProtocolIEs, AnonymousNASNonDeliveryIndicationProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " NAS NON DELIVERY INDICATION"]
@@ -14231,10 +13341,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct NGResetProtocolIEs(pub SequenceOf<AnonymousNGResetProtocolIEs>);
-    aper_sequence_of!(NGResetProtocolIEs, AnonymousNGResetProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " NG Reset Elementary Procedure"]
@@ -14280,10 +13389,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct NGResetAcknowledgeProtocolIEs(pub SequenceOf<AnonymousNGResetAcknowledgeProtocolIEs>);
-    aper_sequence_of!(NGResetAcknowledgeProtocolIEs, AnonymousNGResetAcknowledgeProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " NG RESET ACKNOWLEDGE"]
@@ -14324,10 +13432,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct NGSetupFailureProtocolIEs(pub SequenceOf<AnonymousNGSetupFailureProtocolIEs>);
-    aper_sequence_of!(NGSetupFailureProtocolIEs, AnonymousNGSetupFailureProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " NG SETUP FAILURE"]
@@ -14368,10 +13475,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct NGSetupRequestProtocolIEs(pub SequenceOf<AnonymousNGSetupRequestProtocolIEs>);
-    aper_sequence_of!(NGSetupRequestProtocolIEs, AnonymousNGSetupRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " INTERFACE MANAGEMENT ELEMENTARY PROCEDURES"]
@@ -14422,10 +13528,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct NGSetupResponseProtocolIEs(pub SequenceOf<AnonymousNGSetupResponseProtocolIEs>);
-    aper_sequence_of!(NGSetupResponseProtocolIEs, AnonymousNGSetupResponseProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " NG SETUP RESPONSE"]
@@ -14466,10 +13571,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct OverloadStartProtocolIEs(pub SequenceOf<AnonymousOverloadStartProtocolIEs>);
-    aper_sequence_of!(OverloadStartProtocolIEs, AnonymousOverloadStartProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " OVERLOAD START"]
@@ -14510,10 +13614,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct OverloadStopProtocolIEs(pub SequenceOf<AnonymousOverloadStopProtocolIEs>);
-    aper_sequence_of!(OverloadStopProtocolIEs, AnonymousOverloadStopProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " OVERLOAD STOP"]
@@ -14558,16 +13661,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceModifyConfirmProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceModifyConfirmProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyConfirmProtocolIEs,
-        AnonymousPDUSessionResourceModifyConfirmProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14613,16 +13710,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceModifyIndicationProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceModifyIndicationProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyIndicationProtocolIEs,
-        AnonymousPDUSessionResourceModifyIndicationProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14673,16 +13764,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceModifyRequestProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceModifyRequestProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyRequestProtocolIEs,
-        AnonymousPDUSessionResourceModifyRequestProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14733,16 +13818,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceModifyResponseProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceModifyResponseProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceModifyResponseProtocolIEs,
-        AnonymousPDUSessionResourceModifyResponseProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14784,10 +13863,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceNotifyProtocolIEs(pub SequenceOf<AnonymousPDUSessionResourceNotifyProtocolIEs>);
-    aper_sequence_of!(PDUSessionResourceNotifyProtocolIEs, AnonymousPDUSessionResourceNotifyProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PDU Session Resource Notify Elementary Procedure"]
@@ -14837,16 +13915,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceReleaseCommandProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceReleaseCommandProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleaseCommandProtocolIEs,
-        AnonymousPDUSessionResourceReleaseCommandProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14897,16 +13969,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceReleaseResponseProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceReleaseResponseProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceReleaseResponseProtocolIEs,
-        AnonymousPDUSessionResourceReleaseResponseProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -14952,16 +14018,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceSetupRequestProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceSetupRequestProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupRequestProtocolIEs,
-        AnonymousPDUSessionResourceSetupRequestProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15017,16 +14077,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PDUSessionResourceSetupResponseProtocolIEs(
         pub SequenceOf<AnonymousPDUSessionResourceSetupResponseProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PDUSessionResourceSetupResponseProtocolIEs,
-        AnonymousPDUSessionResourceSetupResponseProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15068,10 +14122,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PWSCancelRequestProtocolIEs(pub SequenceOf<AnonymousPWSCancelRequestProtocolIEs>);
-    aper_sequence_of!(PWSCancelRequestProtocolIEs, AnonymousPWSCancelRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PWS Cancel Elementary Procedure"]
@@ -15117,10 +14170,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PWSCancelResponseProtocolIEs(pub SequenceOf<AnonymousPWSCancelResponseProtocolIEs>);
-    aper_sequence_of!(PWSCancelResponseProtocolIEs, AnonymousPWSCancelResponseProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PWS CANCEL RESPONSE"]
@@ -15161,10 +14213,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PWSFailureIndicationProtocolIEs(pub SequenceOf<AnonymousPWSFailureIndicationProtocolIEs>);
-    aper_sequence_of!(PWSFailureIndicationProtocolIEs, AnonymousPWSFailureIndicationProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PWS Failure Indication Elementary Procedure"]
@@ -15210,10 +14261,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PWSRestartIndicationProtocolIEs(pub SequenceOf<AnonymousPWSRestartIndicationProtocolIEs>);
-    aper_sequence_of!(PWSRestartIndicationProtocolIEs, AnonymousPWSRestartIndicationProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PWS Restart Indication Elementary Procedure"]
@@ -15259,10 +14309,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PagingProtocolIEs(pub SequenceOf<AnonymousPagingProtocolIEs>);
-    aper_sequence_of!(PagingProtocolIEs, AnonymousPagingProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PAGING ELEMENTARY PROCEDURE"]
@@ -15308,10 +14357,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PathSwitchRequestProtocolIEs(pub SequenceOf<AnonymousPathSwitchRequestProtocolIEs>);
-    aper_sequence_of!(PathSwitchRequestProtocolIEs, AnonymousPathSwitchRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Path Switch Request Elementary Procedure"]
@@ -15361,16 +14409,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PathSwitchRequestAcknowledgeProtocolIEs(
         pub SequenceOf<AnonymousPathSwitchRequestAcknowledgeProtocolIEs>,
-    );
-    aper_sequence_of!(
-        PathSwitchRequestAcknowledgeProtocolIEs,
-        AnonymousPathSwitchRequestAcknowledgeProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15412,10 +14454,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct PathSwitchRequestFailureProtocolIEs(pub SequenceOf<AnonymousPathSwitchRequestFailureProtocolIEs>);
-    aper_sequence_of!(PathSwitchRequestFailureProtocolIEs, AnonymousPathSwitchRequestFailureProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PATH SWITCH REQUEST FAILURE"]
@@ -15447,10 +14488,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("1..=65535"))]
     pub struct PrivateMessagePrivateIEs(pub SequenceOf<AnonymousPrivateMessagePrivateIEs>);
-    aper_sequence_of!(PrivateMessagePrivateIEs, AnonymousPrivateMessagePrivateIEs, 1, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " PRIVATE MESSAGE ELEMENTARY PROCEDURE"]
@@ -15487,10 +14527,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct RANConfigurationUpdateProtocolIEs(pub SequenceOf<AnonymousRANConfigurationUpdateProtocolIEs>);
-    aper_sequence_of!(RANConfigurationUpdateProtocolIEs, AnonymousRANConfigurationUpdateProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " RAN Configuration Update Elementary Procedure"]
@@ -15527,16 +14566,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct RANConfigurationUpdateAcknowledgeProtocolIEs(
         pub SequenceOf<AnonymousRANConfigurationUpdateAcknowledgeProtocolIEs>,
-    );
-    aper_sequence_of!(
-        RANConfigurationUpdateAcknowledgeProtocolIEs,
-        AnonymousRANConfigurationUpdateAcknowledgeProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15569,16 +14602,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct RANConfigurationUpdateFailureProtocolIEs(
         pub SequenceOf<AnonymousRANConfigurationUpdateFailureProtocolIEs>,
-    );
-    aper_sequence_of!(
-        RANConfigurationUpdateFailureProtocolIEs,
-        AnonymousRANConfigurationUpdateFailureProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15611,15 +14638,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct RRCInactiveTransitionReportProtocolIEs(pub SequenceOf<AnonymousRRCInactiveTransitionReportProtocolIEs>);
-    aper_sequence_of!(
-        RRCInactiveTransitionReportProtocolIEs,
-        AnonymousRRCInactiveTransitionReportProtocolIEs,
-        0,
-        65535
-    );
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " RRC INACTIVE TRANSITION REPORT"]
@@ -15651,10 +14672,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct RerouteNASRequestProtocolIEs(pub SequenceOf<AnonymousRerouteNASRequestProtocolIEs>);
-    aper_sequence_of!(RerouteNASRequestProtocolIEs, AnonymousRerouteNASRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " REROUTE NAS REQUEST"]
@@ -15686,15 +14706,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct SecondaryRATDataUsageReportProtocolIEs(pub SequenceOf<AnonymousSecondaryRATDataUsageReportProtocolIEs>);
-    aper_sequence_of!(
-        SecondaryRATDataUsageReportProtocolIEs,
-        AnonymousSecondaryRATDataUsageReportProtocolIEs,
-        0,
-        65535
-    );
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " DATA USAGE REPORTING ELEMENTARY PROCEDURES"]
@@ -15731,10 +14745,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct TraceFailureIndicationProtocolIEs(pub SequenceOf<AnonymousTraceFailureIndicationProtocolIEs>);
-    aper_sequence_of!(TraceFailureIndicationProtocolIEs, AnonymousTraceFailureIndicationProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " TRACE FAILURE INDICATION"]
@@ -15766,10 +14779,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct TraceStartProtocolIEs(pub SequenceOf<AnonymousTraceStartProtocolIEs>);
-    aper_sequence_of!(TraceStartProtocolIEs, AnonymousTraceStartProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " TRACE ELEMENTARY PROCEDURES"]
@@ -15806,16 +14818,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UEContextModificationFailureProtocolIEs(
         pub SequenceOf<AnonymousUEContextModificationFailureProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UEContextModificationFailureProtocolIEs,
-        AnonymousUEContextModificationFailureProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15848,16 +14854,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UEContextModificationRequestProtocolIEs(
         pub SequenceOf<AnonymousUEContextModificationRequestProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UEContextModificationRequestProtocolIEs,
-        AnonymousUEContextModificationRequestProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15895,16 +14895,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UEContextModificationResponseProtocolIEs(
         pub SequenceOf<AnonymousUEContextModificationResponseProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UEContextModificationResponseProtocolIEs,
-        AnonymousUEContextModificationResponseProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -15937,10 +14931,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UEContextReleaseCommandProtocolIEs(pub SequenceOf<AnonymousUEContextReleaseCommandProtocolIEs>);
-    aper_sequence_of!(UEContextReleaseCommandProtocolIEs, AnonymousUEContextReleaseCommandProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UE Context Release Elementary Procedure"]
@@ -15977,10 +14970,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UEContextReleaseCompleteProtocolIEs(pub SequenceOf<AnonymousUEContextReleaseCompleteProtocolIEs>);
-    aper_sequence_of!(UEContextReleaseCompleteProtocolIEs, AnonymousUEContextReleaseCompleteProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UE CONTEXT RELEASE COMPLETE"]
@@ -16012,10 +15004,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UEContextReleaseRequestProtocolIEs(pub SequenceOf<AnonymousUEContextReleaseRequestProtocolIEs>);
-    aper_sequence_of!(UEContextReleaseRequestProtocolIEs, AnonymousUEContextReleaseRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UE Context Release Request Elementary Procedure"]
@@ -16052,16 +15043,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UERadioCapabilityCheckRequestProtocolIEs(
         pub SequenceOf<AnonymousUERadioCapabilityCheckRequestProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UERadioCapabilityCheckRequestProtocolIEs,
-        AnonymousUERadioCapabilityCheckRequestProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -16099,16 +15084,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UERadioCapabilityCheckResponseProtocolIEs(
         pub SequenceOf<AnonymousUERadioCapabilityCheckResponseProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UERadioCapabilityCheckResponseProtocolIEs,
-        AnonymousUERadioCapabilityCheckResponseProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -16141,16 +15120,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UERadioCapabilityInfoIndicationProtocolIEs(
         pub SequenceOf<AnonymousUERadioCapabilityInfoIndicationProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UERadioCapabilityInfoIndicationProtocolIEs,
-        AnonymousUERadioCapabilityInfoIndicationProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -16188,15 +15161,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UETNLABindingReleaseRequestProtocolIEs(pub SequenceOf<AnonymousUETNLABindingReleaseRequestProtocolIEs>);
-    aper_sequence_of!(
-        UETNLABindingReleaseRequestProtocolIEs,
-        AnonymousUETNLABindingReleaseRequestProtocolIEs,
-        0,
-        65535
-    );
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UE TNLA BINDING ELEMENTARY PROCEDURES"]
@@ -16233,10 +15200,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UplinkNASTransportProtocolIEs(pub SequenceOf<AnonymousUplinkNASTransportProtocolIEs>);
-    aper_sequence_of!(UplinkNASTransportProtocolIEs, AnonymousUplinkNASTransportProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " UPLINK NAS TRANSPORT"]
@@ -16268,16 +15234,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UplinkNonUEAssociatedNRPPaTransportProtocolIEs(
         pub SequenceOf<AnonymousUplinkNonUEAssociatedNRPPaTransportProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UplinkNonUEAssociatedNRPPaTransportProtocolIEs,
-        AnonymousUplinkNonUEAssociatedNRPPaTransportProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -16310,16 +15270,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UplinkRANConfigurationTransferProtocolIEs(
         pub SequenceOf<AnonymousUplinkRANConfigurationTransferProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UplinkRANConfigurationTransferProtocolIEs,
-        AnonymousUplinkRANConfigurationTransferProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -16357,10 +15311,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UplinkRANStatusTransferProtocolIEs(pub SequenceOf<AnonymousUplinkRANStatusTransferProtocolIEs>);
-    aper_sequence_of!(UplinkRANStatusTransferProtocolIEs, AnonymousUplinkRANStatusTransferProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " Uplink RAN Status Transfer Elementary Procedure"]
@@ -16397,16 +15350,10 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct UplinkUEAssociatedNRPPaTransportProtocolIEs(
         pub SequenceOf<AnonymousUplinkUEAssociatedNRPPaTransportProtocolIEs>,
-    );
-    aper_sequence_of!(
-        UplinkUEAssociatedNRPPaTransportProtocolIEs,
-        AnonymousUplinkUEAssociatedNRPPaTransportProtocolIEs,
-        0,
-        65535
     );
     #[doc = " **************************************************************"]
     #[doc = ""]
@@ -16439,10 +15386,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct WriteReplaceWarningRequestProtocolIEs(pub SequenceOf<AnonymousWriteReplaceWarningRequestProtocolIEs>);
-    aper_sequence_of!(WriteReplaceWarningRequestProtocolIEs, AnonymousWriteReplaceWarningRequestProtocolIEs, 0, 65535);
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " WARNING MESSAGE TRANSMISSION ELEMENTARY PROCEDURES"]
@@ -16484,15 +15430,9 @@ pub mod ngap_pdu_contents {
         }
     }
     #[doc = " Inner type "]
-    #[derive(AsnType, Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq, Eq, Hash)]
     #[rasn(delegate, size("0..=65535"))]
     pub struct WriteReplaceWarningResponseProtocolIEs(pub SequenceOf<AnonymousWriteReplaceWarningResponseProtocolIEs>);
-    aper_sequence_of!(
-        WriteReplaceWarningResponseProtocolIEs,
-        AnonymousWriteReplaceWarningResponseProtocolIEs,
-        0,
-        65535
-    );
     #[doc = " **************************************************************"]
     #[doc = ""]
     #[doc = " WRITE-REPLACE WARNING RESPONSE"]

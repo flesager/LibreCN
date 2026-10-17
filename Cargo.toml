@@ -33,3 +33,7 @@ undocumented_unsafe_blocks = "warn"
 [profile.release]
 panic = "abort"
 debug = "line-tables-only"
+
+# rasn with the APER fixes found by proto/ngap (see proto/ngap/README.md).
+[patch.crates-io]
+rasn = { git = "https://github.com/flesager/rasn", rev = "c763fedbd0eee325812bef0e59d86b2f16b78be5" }

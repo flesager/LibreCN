@@ -72,8 +72,9 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
   - `oxirush-ngap` serves only as a cross-check.
   - **Release**: start with Rel-15 (v15.13.0, `38413-fd0`) to validate the process, then move to Rel-19 (the code roughly doubles).
   - **ASN.1 source**: the 3GPP FTP archive, `https://www.3gpp.org/ftp/Specs/archive/38_series/38.413/` (needs a browser user agent). Version letters: f=15, g=16, h=17, i=18, j=19. The zip holds only the spec as `.doc`/`.docx`; the ASN.1 is between `-- ASN1START` / `-- ASN1STOP`, with smart quotes and non-breaking spaces to normalise.
-- **`rasn` 0.29 has APER bugs**, found by the deep round trip; see `proto/ngap/README.md` for the list and reproductions.
-  - We fix them in a fork of `rasn` on the owner's personal GitHub, used through `[patch.crates-io]`. The owner has done the same before for the C asn1 compiler.
+- **`rasn` 0.29 has APER bugs** (four, found by the deep round trip, cross-checked with asn1tools; see `proto/ngap/README.md`).
+  - They are fixed in a fork: branch `librecn-aper-fixes` from tag `rasn-v0.29.0`, on the owner's personal GitHub, used through `[patch.crates-io]`. The owner has done the same before for the C asn1 compiler.
+  - The fork's commit is also kept as `proto/ngap/rasn/0001-*.patch`, so it can always be recreated.
   - Reporting them upstream is deferred until the project is more mature and legitimate.
 - **hampi rejected**: it refuses a whole message on an unknown IE, and decodes an enumeration's extension value as value 0.
 - **Isolation**: ASN.1 types stay in the codec crate and the N2 code. The NF logic sees only small domain types, so the codec can be replaced.

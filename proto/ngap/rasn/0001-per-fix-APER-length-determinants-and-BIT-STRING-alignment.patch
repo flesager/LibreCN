@@ -1,0 +1,401 @@
+From c763fedbd0eee325812bef0e59d86b2f16b78be5 Mon Sep 17 00:00:00 2001
+From: flesager <lesager.florian@gmail.com>
+Date: Sat, 17 Oct 2026 11:57:42 +0200
+Subject: [PATCH] per: fix APER length determinants and fixed BIT STRING
+ alignment
+
+Found with real 3GPP NGAP (TS 38.413) encodings from free5GC; expected
+encodings cross-checked with asn1tools 0.169 (aligned PER).
+
+- decode: a bit-field length of a SEQUENCE OF was followed by octet
+  alignment; the components follow at once (X.691 11.9.3.3, 20.6). Only
+  bit and octet string contents are octet-aligned after their length.
+- encode: a length of range 256 or more (one or two octets) was not
+  octet-aligned first (X.691 11.5.7.2-3); decode did not align for
+  range 256.
+- encode and decode: a constrained length requires "ub" less than 64K
+  (X.691 11.9.3.3); SIZE(..65536) was treated as constrained.
+- decode: a fixed-size BIT STRING of more than 16 bits was not
+  octet-aligned (X.691 16.10), unlike what the encoder writes.
+
+tests/issue501.rs asserted the first behaviour for APER; corrected to the
+X.691 encoding, which equals UPER for a SEQUENCE OF BOOLEAN.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ src/per/de.rs                       | 100 ++++++++++++++++--------
+ src/per/enc.rs                      |  10 ++-
+ tests/aper_lengths_and_alignment.rs | 114 ++++++++++++++++++++++++++++
+ tests/issue501.rs                   |   6 +-
+ 4 files changed, 194 insertions(+), 36 deletions(-)
+ create mode 100644 tests/aper_lengths_and_alignment.rs
+
+diff --git a/src/per/de.rs b/src/per/de.rs
+index 359445f..140e7bd 100644
+--- a/src/per/de.rs
++++ b/src/per/de.rs
+@@ -244,18 +244,23 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+         self.check_size(size, total_length)
+     }
+ 
++    /// `aligned_contents`: whether the contents following a constrained
++    /// length are octet-aligned in the ALIGNED variant (bit and octet strings,
++    /// X.691 §16.11, §17.8) or follow at once (SEQUENCE OF components, §20.6).
+     fn decode_extensible_container(
+         &mut self,
++        aligned_contents: bool,
+         constraints: &Constraints,
+         mut decode_fn: impl FnMut(InputSlice<'input>, usize) -> Result<InputSlice<'input>>,
+     ) -> Result<()> {
+         let extensible_is_present = self.parse_extensible_bit(constraints)?;
+         let size = constraints.size().filter(|_| !extensible_is_present);
+         let mut total_length = 0usize;
+-        let input = self.decode_length(self.input, size, &mut |input, length| {
+-            total_length += length;
+-            decode_fn(input, length)
+-        })?;
++        let input =
++            self.decode_length(self.input, size, aligned_contents, &mut |input, length| {
++                total_length += length;
++                decode_fn(input, length)
++            })?;
+         self.input = input;
+         self.check_size(size, total_length)
+     }
+@@ -267,19 +272,24 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+         let mut open = OpenType::Empty;
+         let codec = self.codec();
+ 
+-        let input = self.decode_length(self.input, <_>::default(), &mut |mut input, length| {
+-            let data = take(&mut input, length * 8, codec)?;
+-            open = match core::mem::replace(&mut open, OpenType::Empty) {
+-                OpenType::Empty => OpenType::Borrowed(data),
+-                previous => {
+-                    let mut gathered = types::BitString::new();
+-                    crate::bits::extend_bitstring(&mut gathered, previous.bits());
+-                    crate::bits::extend_bitstring(&mut gathered, data.bits());
+-                    OpenType::Gathered(gathered)
+-                }
+-            };
+-            Ok(input)
+-        })?;
++        let input = self.decode_length(
++            self.input,
++            <_>::default(),
++            true,
++            &mut |mut input, length| {
++                let data = take(&mut input, length * 8, codec)?;
++                open = match core::mem::replace(&mut open, OpenType::Empty) {
++                    OpenType::Empty => OpenType::Borrowed(data),
++                    previous => {
++                        let mut gathered = types::BitString::new();
++                        crate::bits::extend_bitstring(&mut gathered, previous.bits());
++                        crate::bits::extend_bitstring(&mut gathered, data.bits());
++                        OpenType::Gathered(gathered)
++                    }
++                };
++                Ok(input)
++            },
++        )?;
+ 
+         self.input = input;
+         Ok(open)
+@@ -337,10 +347,12 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+         };
+ 
+         let size_constraint = constraints.constraint;
+-        if let Some(range) = size_constraint
+-            .range()
+-            .filter(|range| *range <= SIXTY_FOUR_K as usize)
+-        {
++        // X.691 §11.9.3.3: a constrained length needs "ub" less than 64K.
++        if let Some(range) = size_constraint.range().filter(|_| {
++            size_constraint
++                .as_end()
++                .is_some_and(|ub| *ub < SIXTY_FOUR_K as usize)
++        }) {
+             if range == 0 {
+                 Ok(input)
+             } else if range == 1 {
+@@ -349,8 +361,12 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+                 }
+                 (decode_fn)(input, size_constraint.minimum())
+             } else {
+-                let range = if self.options.aligned && range > 256 {
++                // X.691 §11.5.7.2-3: from a range of 256, the length is one or two
++                // octets, octet-aligned in the ALIGNED variant.
++                if self.options.aligned && range >= 256 {
+                     input = self.parse_padding(input)?;
++                }
++                let range = if self.options.aligned && range > 256 {
+                     let range = crate::num::log2(range as i128);
+                     crate::bits::range_from_len(if range.is_power_of_two() {
+                         range
+@@ -380,6 +396,7 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+         &mut self,
+         mut input: InputSlice<'input>,
+         constraints: Option<&Extensible<constraints::Size>>,
++        aligned_contents: bool,
+         decode_fn: &mut impl FnMut(InputSlice<'input>, usize) -> Result<InputSlice<'input>>,
+     ) -> Result<InputSlice<'input>> {
+         let Some(constraints) = constraints else {
+@@ -387,17 +404,23 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+         };
+ 
+         let size_constraint = constraints.constraint;
+-        if let Some(range) = size_constraint
+-            .range()
+-            .filter(|range| *range <= SIXTY_FOUR_K as usize)
+-        {
++        // X.691 §11.9.3.3: a constrained length needs "ub" less than 64K.
++        if let Some(range) = size_constraint.range().filter(|_| {
++            size_constraint
++                .as_end()
++                .is_some_and(|ub| *ub < SIXTY_FOUR_K as usize)
++        }) {
+             if range == 0 {
+                 Ok(input)
+             } else if range == 1 {
+                 (decode_fn)(input, size_constraint.minimum())
+             } else {
+-                let range = if self.options.aligned && range > 256 {
++                // X.691 §11.5.7.2-3: from a range of 256, the length is one or two
++                // octets, octet-aligned in the ALIGNED variant.
++                if self.options.aligned && range >= 256 {
+                     input = self.parse_padding(input)?;
++                }
++                let range = if self.options.aligned && range > 256 {
+                     let range = crate::num::log2(range as i128);
+                     crate::bits::range_from_len(if range.is_power_of_two() {
+                         range
+@@ -410,7 +433,9 @@ impl<'input, const RFC: usize, const EFC: usize> Decoder<'input, RFC, EFC> {
+ 
+                 let bits = crate::num::log2(range) as usize;
+                 let length = take(&mut input, bits, self.codec())?;
+-                input = self.parse_padding(input)?;
++                if aligned_contents {
++                    input = self.parse_padding(input)?;
++                }
+                 (length.first_bits(bits) as usize)
+                     .checked_add(size_constraint.minimum())
+                     .ok_or_else(|| DecodeError::exceeds_max_length(usize::MAX.into(), self.codec()))
+@@ -747,7 +772,7 @@ impl<'input, const RFC: usize, const EFC: usize> crate::Decoder for Decoder<'inp
+         let mut octet_string = Vec::new();
+         let codec = self.codec();
+ 
+-        self.decode_extensible_container(&Constraints::default(), |mut input, length| {
++        self.decode_extensible_container(true, &Constraints::default(), |mut input, length| {
+             let part = take(&mut input, length * 8, codec)?;
+             crate::bits::extend_vec_from_bitslice(&mut octet_string, part.bits());
+             Ok(input)
+@@ -835,7 +860,7 @@ impl<'input, const RFC: usize, const EFC: usize> crate::Decoder for Decoder<'inp
+             self.input = self.parse_padding(self.input)?;
+         }
+ 
+-        self.decode_extensible_container(constraints, |mut input, length| {
++        self.decode_extensible_container(true, constraints, |mut input, length| {
+             let part = take(&mut input, length * 8, codec)?;
+ 
+             octets = match core::mem::replace(&mut octets, Octets::None) {
+@@ -884,7 +909,18 @@ impl<'input, const RFC: usize, const EFC: usize> crate::Decoder for Decoder<'inp
+         let mut bit_string = types::BitString::default();
+         let codec = self.codec();
+ 
+-        self.decode_extensible_container(constraints, |mut input, length| {
++        // Aligned PER (X.691 §16.10): a fixed-size BIT STRING of more than 16
++        // bits is octet-aligned, as the encoder writes it.
++        if let Some(size) = constraints.size()
++            && size.extensible.is_none()
++            && size.constraint.range() == Some(1)
++            && size.constraint.as_start() > Some(&16)
++            && self.options.aligned
++        {
++            self.input = self.parse_padding(self.input)?;
++        }
++
++        self.decode_extensible_container(true, constraints, |mut input, length| {
+             let part = take(&mut input, length, codec)?;
+             crate::bits::extend_bitstring(&mut bit_string, part.bits());
+             Ok(input)
+@@ -1023,7 +1059,7 @@ impl<'input, const RFC: usize, const EFC: usize> crate::Decoder for Decoder<'inp
+         let mut sequence_of = Vec::new();
+         let mut options = self.options;
+         options.remaining_depth = options.remaining_depth.saturating_sub(1);
+-        self.decode_extensible_container(constraints, |mut input, length| {
++        self.decode_extensible_container(false, constraints, |mut input, length| {
+             // Reserve for the claimed count only as far as the remaining input
+             // could hold, so a length determinant alone cannot force a large
+             // allocation.
+diff --git a/src/per/enc.rs b/src/per/enc.rs
+index 35d2aa1..a22eedb 100644
+--- a/src/per/enc.rs
++++ b/src/per/enc.rs
+@@ -514,14 +514,20 @@ impl<const RCL: usize, const ECL: usize> Encoder<RCL, ECL> {
+         let constraints = constraints.constraint;
+ 
+         match constraints.start_and_end() {
+-            (Some(_), Some(_)) => {
++            (Some(_), Some(&ub)) => {
+                 let range = constraints.range().unwrap();
+ 
+                 if range == 0 {
+                     Ok(())
+                 } else if range == 1 {
+                     (encode_fn)(buffer, 0..length)
+-                } else if range <= SIXTY_FOUR_K as usize {
++                } else if ub < SIXTY_FOUR_K as usize {
++                    // X.691 §11.9.3.3: a constrained length needs "ub" less than 64K;
++                    // §11.5.7.2-3: from a range of 256 it is one or two octets,
++                    // octet-aligned in the ALIGNED variant.
++                    if self.options.aligned && range >= 256 {
++                        self.pad_to_alignment(buffer);
++                    }
+                     let effective_length = constraints.effective_value(length).into_inner();
+                     let range = if self.options.aligned && range > 256 {
+                         {
+diff --git a/tests/aper_lengths_and_alignment.rs b/tests/aper_lengths_and_alignment.rs
+new file mode 100644
+index 0000000..e111aaa
+--- /dev/null
++++ b/tests/aper_lengths_and_alignment.rs
+@@ -0,0 +1,114 @@
++//! Aligned PER (X.691) length determinants and alignment, checked against
++//! encodings from 3GPP NGAP (TS 38.413) as produced by other implementations.
++
++use rasn::prelude::*;
++
++#[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq)]
++#[rasn(automatic_tags)]
++#[non_exhaustive]
++struct Item {
++    a: FixedOctetString<3>,
++    b: Option<u8>,
++}
++
++/// SIZE(1..12): 4-bit length, sharing its octet with the first item's preamble.
++#[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq)]
++#[rasn(delegate, size("1..=12"))]
++struct SmallList(SequenceOf<Item>);
++
++/// SIZE(0..65535): two-octet length, octet-aligned.
++#[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq)]
++#[rasn(automatic_tags)]
++#[non_exhaustive]
++struct WithLargeList {
++    #[rasn(size("0..=65535"))]
++    items: SequenceOf<u8>,
++}
++
++/// SIZE(1..256): one-octet length, octet-aligned.
++#[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq)]
++#[rasn(automatic_tags)]
++#[non_exhaustive]
++struct WithList256 {
++    #[rasn(size("1..=256"))]
++    items: SequenceOf<u8>,
++}
++
++/// SIZE(1..65536): "ub" is not less than 64K, a general length determinant.
++#[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq)]
++#[rasn(automatic_tags)]
++#[non_exhaustive]
++struct With64KList {
++    #[rasn(size("1..=65536"))]
++    items: SequenceOf<u8>,
++}
++
++#[derive(AsnType, Debug, Clone, Decode, Encode, PartialEq)]
++#[rasn(automatic_tags)]
++#[non_exhaustive]
++struct WithKey {
++    #[rasn(value("0..=7"))]
++    count: u8,
++    key: FixedBitString<256>,
++    ext: Option<u8>,
++}
++
++fn round_trip<T: Encode + Decode + PartialEq + core::fmt::Debug>(value: &T, expected: &[u8]) {
++    let encoded = rasn::aper::encode(value).unwrap();
++    assert_eq!(encoded, expected, "encoding");
++    assert_eq!(
++        &rasn::aper::decode::<T>(expected).unwrap(),
++        value,
++        "decoding"
++    );
++}
++
++#[test]
++fn sequence_of_components_follow_a_bit_field_length_without_alignment() {
++    // length 1 (4 bits: 0000), item preamble (2 bits: 00), padding, then `a`.
++    let list = SmallList(vec![Item {
++        a: FixedOctetString::new([0x02, 0xf8, 0x39]),
++        b: None,
++    }]);
++    round_trip(&list, &[0x00, 0x02, 0xf8, 0x39]);
++}
++
++#[test]
++fn two_octet_lengths_are_octet_aligned() {
++    // extension bit, padding, then 0x0004 (NGAP: an IE container of 4 IEs).
++    let value = WithLargeList {
++        items: vec![1, 2, 3, 4],
++    };
++    round_trip(&value, &[0x00, 0x00, 0x04, 1, 2, 3, 4]);
++}
++
++#[test]
++fn one_octet_lengths_of_range_256_are_octet_aligned() {
++    // extension bit, padding, then length - 1 = 0x01.
++    let value = WithList256 { items: vec![7, 8] };
++    round_trip(&value, &[0x00, 0x01, 7, 8]);
++}
++
++#[test]
++fn an_upper_bound_of_64k_uses_a_general_length() {
++    // extension bit, padding, then the general form: one octet, 1.
++    // (NGAP UE-associatedLogicalNG-connectionList, SIZE(1..65536).)
++    let value = With64KList { items: vec![9] };
++    round_trip(&value, &[0x00, 0x01, 9]);
++}
++
++#[test]
++fn fixed_bit_strings_above_16_bits_are_octet_aligned_when_decoding() {
++    // NGAP SecurityContext: extension bit, optional bit, 3-bit count = 2,
++    // padding, then the 256-bit key from the next octet.
++    let mut key = FixedBitString::<256>::default();
++    key.set(0, true);
++    let value = WithKey {
++        count: 2,
++        key,
++        ext: None,
++    };
++    let mut expected = vec![0x10, 0x80];
++    expected.resize(33, 0);
++    round_trip(&value, &expected);
++}
+diff --git a/tests/issue501.rs b/tests/issue501.rs
+index de19cd9..57a7df2 100644
+--- a/tests/issue501.rs
++++ b/tests/issue501.rs
+@@ -39,14 +39,16 @@ fn aper_rejects_surplus_constraint_values() {
+     ));
+     assert_eq!(aper::decode::<S1>(&[0x90]).unwrap(), S1(10));
+ 
+-    // APER aligns the sequence contents after the four-bit length determinant.
+     let error = aper::decode::<S2>(&[0xf0, 0xff, 0xff]).unwrap_err();
+     assert!(matches!(
+         *error.kind,
+         DecodeErrorKind::SizeConstraintNotSatisfied { size: Some(16), .. }
+     ));
++    // X.691 §11.9.3.3, §20.6: the components follow a bit-field length
++    // determinant without octet alignment, so ten `true` are 0x9f 0xfc in APER
++    // as in UPER (cross-checked with asn1tools 0.169 aligned PER).
+     assert_eq!(
+-        aper::decode::<S2>(&[0x90, 0xff, 0xc0]).unwrap(),
++        aper::decode::<S2>(&[0x9f, 0xfc]).unwrap(),
+         S2(SequenceOf::from(vec![true; 10]))
+     );
+ }
+-- 
+2.53.0
+

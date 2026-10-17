@@ -36,33 +36,47 @@ let node: GlobalRANNodeID = librecn_ngap::open(&ie.value)?;    // one IE
   - `h*`: fuzzer findings, malformed on purpose.
 - **Byte-identical round trip**:
   - every valid PDU at the top level;
-  - every level for the 16 procedures present (1,756 values).
+  - every level for the 16 procedures present (1,774 values).
 - **Robustness**: every truncation and random bit flips of every vector must never make `decode` or `check` panic.
 - **Regressions**: the extension value of an enumeration (`ci0832`), and an unknown IE.
 
-## `rasn` 0.29 APER issues found
+## `rasn` 0.29 APER bugs, fixed in our fork
 
-Found by the deep round trip on the free5GC vectors.
+Found by the deep round trip on the free5GC vectors. The expected encodings
+were cross-checked with an independent implementation, asn1tools 0.169
+(aligned PER).
 
-1. **`SEQUENCE OF` length, decoding** (`per/de.rs`, `decode_length`): after a bit-field length (range ≤ 255) the decoder octet-aligns. That is right for strings (`decode_string_length` does it conditionally) but wrong for `SEQUENCE OF`, whose components follow at once. `BroadcastPLMNList` (4-bit length sharing an octet with its first item's preamble) then fails to decode.
-2. **`SEQUENCE OF` length, encoding**: a two-octet length (range above 256) is written without octet-aligning first. For example `NGSetupRequest` with 4 IEs gives `00 02 00` instead of `00 00 04`.
-3. **Upper bound of exactly 64K** (`SIZE(1..65536)`, `UE-associatedLogicalNG-connectionList`): treated as constrained (`range <= 64K`), where X.691 11.9.3.3 requires `ub < 64K` (general length determinant).
-4. **Fixed `BIT STRING` over 16 bits, encoding**, after unaligned fields in the same `SEQUENCE`: the alignment padding misses the earlier fields. The 256-bit `SecurityKey` of `SecurityContext` comes out shifted by 3 bits (`10 00 cb 88…` instead of `10 06 5c 43…`). Decoding is right.
+| # | Bug (`src/per/`) | NGAP symptom |
+|---|---|---|
+| 1 | decode: a bit-field length of a `SEQUENCE OF` is followed by octet alignment; the components follow at once (X.691 §11.9.3.3, §20.6) | `BroadcastPLMNList` (4-bit length) misread |
+| 2 | encode: a length of range 256 or more (one or two octets) is not octet-aligned first (§11.5.7.2–3); decode does not align for range 256 | an IE container of 4 IEs written `00 02 00` instead of `00 00 04` |
+| 3 | both: a constrained length needs `ub` < 64K (§11.9.3.3), not `range` ≤ 64K | `UE-associatedLogicalNG-connectionList` (`SIZE(1..65536)`) misread |
+| 4 | decode: a fixed `BIT STRING` over 16 bits is not octet-aligned (§16.10) | `SecurityKey` of `SecurityContext` read 3 bits early; also `NRCellIdentity` (36 bits) when it does not follow an aligned field |
 
-**Workarounds:**
-- **1–3**: the generator replaces the derived `Encode`/`Decode` of the 400 size-constrained `SEQUENCE OF` wrappers with `aper_sequence_of!` (`src/lib.rs`), which codes the length as the constrained whole number it is, or as a general length from 64K on.
-- **4**: no workaround from outside `rasn`. The two affected vectors are listed as known failures in `tests/vectors.rs`.
+`rasn`'s own test `issue501` asserted bug 1 for APER; the fork corrects it
+(ten `BOOLEAN`s are `9f fc` in APER as in UPER).
 
-Not reported upstream yet. Remove the workarounds once `rasn` is fixed.
+**The fork**: branch `librecn-aper-fixes` from tag `rasn-v0.29.0`, with one
+commit, kept as `rasn/0001-*.patch` in this directory. It is used through
+`[patch.crates-io]` in the workspace `Cargo.toml`. It passes `rasn`'s 566 tests
+and 5 regression tests for the bugs above. To recreate it:
+
+```
+git clone https://github.com/librasn/rasn && cd rasn
+git checkout -b librecn-aper-fixes rasn-v0.29.0
+git am <LibreCN>/proto/ngap/rasn/0001-*.patch
+```
+
+Not reported upstream yet (see `CLAUDE.md`).
 
 ## Compared with hampi (`asn1-codecs` 0.7.2), same Rel-15 ASN.1 and vectors
 
-| | rasn + workarounds | hampi |
+| | rasn (fork) | hampi |
 |---|---|---|
-| Valid PDUs round-tripped at every level | 351 / 353 (issue 4) | 352 / 353 |
+| Valid PDUs round-tripped at every level | 353 / 353 (fork) | 352 / 353 |
 | Panics on 38,000+ damaged inputs | 0 | 0 |
 | Extension value of an enumeration (`ci0832`) | `notAvailable` | **decoded as `emergency`** (value 0) |
 | Unknown IE from a later release | skipped | **whole message refused** ("Key 999 Not Found") |
 | Decoding | level by level, only what is used | always everything; `log::trace!` calls in the decoders |
 
-hampi's two failures are structural (typed open types with no room for the unknown), and both break interoperability with newer gNBs. `rasn`'s are local codec bugs, with a reproduction for each.
+hampi's two failures are structural (typed open types with no room for the unknown), and both break interoperability with newer gNBs. `rasn`'s were local codec bugs, each now fixed with a regression test.

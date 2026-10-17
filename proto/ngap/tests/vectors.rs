@@ -56,13 +56,7 @@ fn valid_vectors_survive_a_round_trip_at_every_level() {
             Err(e) => failures.push(format!("{name} ({}): {e}", procedure_name(code).unwrap_or("?"))),
         }
     }
-    // rasn 0.29 mis-aligns a fixed BIT STRING of more than 16 bits (here the
-    // 256-bit SecurityKey) after unaligned fields when encoding; decoding is
-    // right. Not fixable from outside rasn. This list must shrink, never grow.
-    let known = ["ci0133", "ci0150"];
-    let unexpected: Vec<_> = failures.iter().filter(|f| !known.iter().any(|k| f.starts_with(k))).collect();
-    assert!(unexpected.is_empty(), "{} new failure(s):\n{unexpected:#?}", unexpected.len());
-    assert_eq!(failures.len(), known.len(), "a known rasn bug is fixed: update the list: {failures:#?}");
+    assert!(failures.is_empty(), "{} failure(s):\n{}", failures.len(), failures.join("\n"));
     println!("{values} values checked across {} procedures: {procedures:?}", procedures.len());
     assert!(values > 1000, "{values}");
 }
