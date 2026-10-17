@@ -1,5 +1,6 @@
-# LibreCN with one AMF on 127.0.0.1:38412, PLMN 999/70, SST 1 (the defaults),
-# for scripts/ueransim/ng-setup.sh.
+# LibreCN with an AMF on 127.0.0.1:38412, PLMN 999/70, SST 1 (the defaults),
+# an AUSF and a UDM knowing UERANSIM's sample UE (ue.yaml), for the scripts
+# of scripts/ueransim/.
 [[runtime.pools]]
 name = "cp"
 workers = 1
@@ -10,3 +11,15 @@ listen = "127.0.0.1:0"
 [[nf]]
 kind = "amf"
 name = "amf-1"
+
+[[nf]]
+kind = "ausf"
+name = "ausf"
+
+[[nf]]
+kind = "udm"
+name = "udm"
+[[nf.params.subscribers]]
+supi = "imsi-999700000000001"
+k = "465B5CE8B199B49FAA5F0A2EE238A6BC"
+opc = "E8ED289DEBA952E4283B54E88E6183CA"

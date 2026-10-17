@@ -19,6 +19,25 @@ listen = "127.0.0.1:8080"     # web API and GUI
 
 # NFs started at boot; more through the GUI or `POST /api/nfs`.
 [[nf]]
+kind = "udm"
+name = "udm"
+pool = "cp"
+[[nf.params.subscribers]]     # UERANSIM's sample UE
+supi = "imsi-999700000000001"
+k = "465B5CE8B199B49FAA5F0A2EE238A6BC"
+opc = "E8ED289DEBA952E4283B54E88E6183CA"
+amf = "8000"                  # optional: the default
+sqn = "000000000000"          # optional: the last SQN used
+
+[[nf]]
+kind = "ausf"
+name = "ausf"
+pool = "cp"
+[nf.params]                   # all optional: these are the defaults
+udm = "udm"
+max_contexts = 1024
+
+[[nf]]
 kind = "amf"
 name = "amf-1"
 pool = "cp"
@@ -30,6 +49,9 @@ amf_set = 1
 amf_pointer = 0
 relative_capacity = 255
 slices = [{ sst = 1 }]
+max_ues = 1024
+ausf = "ausf"
+ciphering = ["NEA2", "NEA0"]
 
 [[nf]]
 kind = "demo"

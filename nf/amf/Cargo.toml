@@ -1,6 +1,6 @@
 [package]
 name = "librecn-amf"
-description = "AMF: access and mobility management function (N2 for now)"
+description = "AMF: access and mobility management function (N2, registration)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,9 @@ license.workspace = true
 librecn-scheduler = { path = "../../scheduler" }
 librecn-common = { path = "../../common" }
 librecn-ngap = { path = "../../proto/ngap" }
+librecn-nas = { path = "../../proto/nas" }
+librecn-sbi = { path = "../../proto/sbi" }
+librecn-security = { path = "../../proto/security" }
 rasn.workspace = true
 libc.workspace = true
 serde.workspace = true
@@ -17,6 +20,10 @@ serde_json.workspace = true
 
 [dev-dependencies]
 librecn-oam = { path = "../../oam" }
+librecn-ausf = { path = "../ausf" }
+librecn-udm = { path = "../udm" }
+proptest.workspace = true
+zerocopy.workspace = true
 
 [lints]
 workspace = true

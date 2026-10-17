@@ -13,54 +13,20 @@
 //! relative_capacity = 255
 //! slices = [{ sst = 1 }, { sst = 1, sd = "010203" }]
 //! max_ues = 1024
+//! ausf = "ausf"                 # the AUSF's EO name
+//! ciphering = ["NEA2", "NEA0"]  # NAS ciphering by preference
 //! ```
 //!
 //! Every field is optional; the defaults are test values matching UERANSIM's
-//! sample gNB configuration (PLMN 999/70, SST 1).
+//! sample gNB configuration (PLMN 999/70, SST 1). NAS integrity is always
+//! NIA2, the only integrity algorithm implemented.
 
 use std::net::SocketAddr;
 
+use librecn_nas::security::{NEA0, NEA2};
+pub use librecn_nas::{Plmn, Snssai};
+use librecn_sbi::ServingNetwork;
 use serde::Deserialize;
-
-/// A PLMN, as the 3 BCD octets of 3GPP TS 38.413 §9.3.3.5.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Plmn(pub [u8; 3]);
-
-impl Plmn {
-    /// From MCC (3 digits) and MNC (2 or 3 digits).
-    pub fn new(mcc: &str, mnc: &str) -> Result<Self, String> {
-        let digits = |s: &str, n: &[usize]| -> Result<Vec<u8>, String> {
-            if !n.contains(&s.len()) || !s.bytes().all(|b| b.is_ascii_digit()) {
-                return Err(format!("{s:?}: expected {n:?} digits"));
-            }
-            Ok(s.bytes().map(|b| b - b'0').collect())
-        };
-        let (c, n) = (digits(mcc, &[3])?, digits(mnc, &[2, 3])?);
-        let mnc3 = n.get(2).copied().unwrap_or(0xF);
-        Ok(Plmn([c[1] << 4 | c[0], mnc3 << 4 | c[2], n[1] << 4 | n[0]]))
-    }
-}
-
-impl std::fmt::Display for Plmn {
-    /// `mcc/mnc`.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let [a, b, c] = self.0;
-        write!(f, "{}{}{}/{}{}", a & 0xF, a >> 4, b & 0xF, c & 0xF, c >> 4)?;
-        if b >> 4 != 0xF {
-            write!(f, "{}", b >> 4)?;
-        }
-        Ok(())
-    }
-}
-
-/// A network slice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Snssai {
-    /// Slice/service type.
-    pub sst: u8,
-    /// Slice differentiator.
-    pub sd: Option<[u8; 3]>,
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +53,8 @@ struct Params {
     relative_capacity: u8,
     slices: Vec<SliceParams>,
     max_ues: usize,
+    ausf: String,
+    ciphering: Vec<String>,
 }
 
 impl Default for Params {
@@ -100,6 +68,8 @@ impl Default for Params {
             relative_capacity: 255,
             slices: vec![SliceParams { sst: 1, sd: None }],
             max_ues: 1024,
+            ausf: "ausf".into(),
+            ciphering: vec!["NEA2".into(), "NEA0".into()],
         }
     }
 }
@@ -125,6 +95,10 @@ pub struct AmfConfig {
     pub slices: Vec<Snssai>,
     /// UE contexts kept at most.
     pub max_ues: usize,
+    /// The AUSF's EO name.
+    pub ausf: String,
+    /// NAS ciphering algorithm identities, by preference.
+    pub ciphering: Vec<u8>,
 }
 
 impl AmfConfig {
@@ -146,6 +120,15 @@ impl AmfConfig {
                 Ok(Snssai { sst: s.sst, sd })
             })
             .collect::<Result<_, String>>()?;
+        let ciphering = p
+            .ciphering
+            .iter()
+            .map(|c| match c.as_str() {
+                "NEA0" => Ok(NEA0),
+                "NEA2" => Ok(NEA2),
+                other => Err(format!("ciphering {other:?}: NEA0 or NEA2")),
+            })
+            .collect::<Result<_, String>>()?;
         Ok(AmfConfig {
             name: name.to_string(),
             n2: p.n2,
@@ -156,7 +139,15 @@ impl AmfConfig {
             relative_capacity: p.relative_capacity,
             slices,
             max_ues: p.max_ues,
+            ausf: p.ausf,
+            ciphering,
         })
+    }
+
+    /// `5G:mnc<mnc>.mcc<mcc>.3gppnetwork.org` (TS 24.501 §9.12.1).
+    pub fn serving_network(&self) -> ServingNetwork {
+        let (mcc, mnc) = (self.plmn.mcc(), self.plmn.mnc());
+        ServingNetwork::format(format_args!("5G:mnc{mnc:0>3}.mcc{mcc}.3gppnetwork.org")).expect("32 characters")
     }
 }
 
@@ -175,16 +166,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plmn_is_bcd_encoded() {
-        assert_eq!(Plmn::new("208", "93").unwrap().0, [0x02, 0xf8, 0x39], "free5GC's test PLMN");
-        assert_eq!(Plmn::new("999", "70").unwrap().0, [0x99, 0xf9, 0x07]);
-        assert_eq!(Plmn::new("310", "410").unwrap().0, [0x13, 0x00, 0x14], "3-digit MNC");
-        assert_eq!(Plmn::new("310", "410").unwrap().to_string(), "310/410");
-        assert_eq!(Plmn::new("999", "70").unwrap().to_string(), "999/70");
-        assert!(Plmn::new("99", "70").is_err() && Plmn::new("999", "7a").is_err());
-    }
-
-    #[test]
     fn defaults_are_the_test_values_and_params_override_them() {
         let d = AmfConfig::from_params("amf", &serde_json::Value::Null).unwrap();
         assert_eq!((d.plmn.to_string(), d.n2.port(), d.slices.len()), ("999/70".into(), 38412, 1));
@@ -195,5 +176,8 @@ mod tests {
         assert_eq!(c.slices, [Snssai { sst: 1, sd: Some([1, 2, 3]) }]);
         assert!(AmfConfig::from_params("amf", &serde_json::json!({ "amf_set": 1024 })).is_err());
         assert!(AmfConfig::from_params("amf", &serde_json::json!({ "plmm": {} })).is_err(), "typos are refused");
+        assert_eq!((d.ciphering.as_slice(), d.ausf.as_str()), (&[NEA2, NEA0][..], "ausf"));
+        assert_eq!(d.serving_network().as_str(), "5G:mnc070.mcc999.3gppnetwork.org");
+        assert!(AmfConfig::from_params("amf", &serde_json::json!({ "ciphering": ["NEA1"] })).is_err());
     }
 }

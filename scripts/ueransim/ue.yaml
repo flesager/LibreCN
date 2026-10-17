@@ -28,11 +28,8 @@ uacAcc:
   class13: false
   class14: false
   class15: false
-sessions:
-  - type: 'IPv4'
-    apn: 'internet'
-    slice:
-      sst: 1
+# No PDU session: the AMF has no SMF yet (step 4).
+sessions: []
 configured-nssai:
   - sst: 1
 default-nssai:

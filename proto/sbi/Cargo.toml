@@ -1,0 +1,15 @@
+[package]
+name = "librecn-sbi"
+description = "The service-based interfaces between LibreCN NFs, as EO messages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-scheduler = { path = "../../scheduler" }
+librecn-common = { path = "../../common" }
+zerocopy.workspace = true
+
+[lints]
+workspace = true

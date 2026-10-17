@@ -1,0 +1,18 @@
+[package]
+name = "librecn-security"
+description = "3GPP security: Milenage (TS 35.206), 5G key derivation (TS 33.501 Annex A), 128-NIA2 and 128-NEA2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aes.workspace = true
+cmac.workspace = true
+ctr.workspace = true
+hmac.workspace = true
+rustix.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

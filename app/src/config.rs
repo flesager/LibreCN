@@ -148,8 +148,12 @@ mod tests {
     fn example_file_is_valid() {
         let text = include_str!("../librecn.example.toml");
         AppConfig::parse(text).unwrap().runtime().unwrap();
-        let kinds: Vec<_> = librecn_oam::Deployment::parse(text).unwrap().nf.into_iter().map(|n| n.kind).collect();
-        assert_eq!(kinds, ["amf", "demo"]);
+        let nfs = librecn_oam::Deployment::parse(text).unwrap().nf;
+        assert_eq!(nfs.iter().map(|n| n.kind.as_str()).collect::<Vec<_>>(), ["udm", "ausf", "amf", "demo"]);
+        // The NFs' parameters are valid too.
+        librecn_udm::Udm::from_params("udm", &nfs[0].params).unwrap();
+        librecn_ausf::Ausf::from_params("ausf", &nfs[1].params).unwrap();
+        librecn_amf::Amf::from_params("amf", &nfs[2].params).unwrap();
     }
 
     #[test]

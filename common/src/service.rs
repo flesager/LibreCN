@@ -1,5 +1,6 @@
-//! Finding well-known service EOs by name, cheaply.
+//! Finding service EOs by name, cheaply.
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use librecn_scheduler::{Context, EoId, Time};
@@ -21,7 +22,7 @@ const RETRY: Duration = Duration::from_secs(1);
 /// [`forget`](Self::forget) or, while absent, once per second.
 #[derive(Clone, Debug)]
 pub struct Service {
-    name: &'static str,
+    name: Cow<'static, str>,
     id: Option<EoId>,
     retry_at: Time,
 }
@@ -29,13 +30,23 @@ pub struct Service {
 impl Service {
     /// A service known by `name`, not looked up yet.
     pub const fn new(name: &'static str) -> Self {
-        Service { name, id: None, retry_at: Time::ZERO }
+        Service { name: Cow::Borrowed(name), id: None, retry_at: Time::ZERO }
+    }
+
+    /// A service whose name is configured (a peer NF).
+    pub fn named(name: String) -> Self {
+        Service { name: Cow::Owned(name), id: None, retry_at: Time::ZERO }
+    }
+
+    /// The name looked for.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// The service's id, if it runs.
     pub fn get(&mut self, ctx: &Context<'_>) -> Option<EoId> {
         if self.id.is_none() && ctx.now() >= self.retry_at {
-            self.id = ctx.find(self.name);
+            self.id = ctx.find(&self.name);
             self.retry_at = ctx.now() + RETRY;
         }
         self.id

@@ -12,6 +12,7 @@ use librecn_common::log::{self, Level};
 use librecn_oam::proto::Deploy;
 use librecn_oam::{AlarmManager, Control, Deployment, LogSink, Server};
 use librecn_scheduler::runtime::Runtime;
+use librecn_scheduler::{EoConfig, ExecutionObject};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use zerocopy::FromZeros;
 
@@ -27,6 +28,18 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// A control EO factory from an NF's `from_params`.
+fn factory<E, F>(from_params: F) -> librecn_oam::Factory
+where
+    E: ExecutionObject,
+    F: Fn(&str, &serde_json::Value) -> Result<(EoConfig, E), String> + Send + 'static,
+{
+    Box::new(move |name, params| {
+        let (cfg, eo) = from_params(name, params)?;
+        Ok((cfg, Box::new(eo) as Box<dyn ExecutionObject>))
+    })
 }
 
 fn run() -> Result<(), String> {
@@ -45,13 +58,11 @@ fn run() -> Result<(), String> {
     let add_failed = |e| format!("cannot start the OAM EOs: {e}");
     runtime.add(LogSink::config(), LogSink::stdout()).map_err(add_failed)?;
     runtime.add(AlarmManager::config(), AlarmManager::new()).map_err(add_failed)?;
-    let control = Control::new().kind("demo", demo::factory()).kind(
-        "amf",
-        Box::new(|name, params| {
-            let (cfg, amf) = librecn_amf::Amf::from_params(name, params)?;
-            Ok((cfg, Box::new(amf) as Box<dyn librecn_scheduler::ExecutionObject>))
-        }),
-    );
+    let control = Control::new()
+        .kind("demo", demo::factory())
+        .kind("amf", factory(librecn_amf::Amf::from_params))
+        .kind("ausf", factory(librecn_ausf::Ausf::from_params))
+        .kind("udm", factory(librecn_udm::Udm::from_params));
     let control = runtime.add(Control::config(), control).map_err(add_failed)?;
     runtime.add(Server::config(), Server::new(app.oam.listen)).map_err(add_failed)?;
     log::print(NAME, Level::Vip, format_args!("LibreCN started, {nfs} NF(s) to deploy"));

@@ -1,6 +1,18 @@
 [workspace]
 resolver = "3"
-members = ["scheduler", "common", "oam", "app", "proto/ngap", "nf/amf"]
+members = [
+    "scheduler",
+    "common",
+    "oam",
+    "app",
+    "proto/ngap",
+    "proto/nas",
+    "proto/security",
+    "proto/sbi",
+    "nf/amf",
+    "nf/ausf",
+    "nf/udm",
+]
 exclude = ["proto/ngap/codegen"]
 
 [workspace.package]
@@ -12,7 +24,7 @@ license = "MIT"
 [workspace.dependencies]
 thiserror = "2"
 zerocopy = { version = "0.8", features = ["derive"] }
-rustix = { version = "1", features = ["event", "thread"] }
+rustix = { version = "1", features = ["event", "thread", "rand"] }
 proptest = "1"
 loom = "0.7"
 criterion = { version = "0.7", default-features = false }
@@ -23,6 +35,11 @@ httparse = "1"
 rasn = "0.29"
 libc = "0.2"
 signal-hook = "0.3"
+aes = "0.8"
+cmac = "0.7"
+ctr = "0.9"
+hmac = "0.12"
+sha2 = "0.10"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

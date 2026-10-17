@@ -1,38 +1,48 @@
 //! AMF, the access and mobility management function, hosted in one EO.
 //!
-//! This release covers N2: SCTP (one-to-many), NG Setup, NG Reset, Error
-//! Indication, and UE-associated signalling (Initial UE Message, NAS
-//! transport both ways, UE Context Release). NAS itself is a stub
-//! ([`nas`]) until the NAS codec lands.
+//! This release covers N2 (SCTP one-to-many, NG Setup, NG Reset, Error
+//! Indication, UE-associated signalling) and registration: 5G AKA through
+//! the AUSF, NAS security, Registration Accept, UE-originating
+//! deregistration.
 //!
 //! - [`sctp`], the transport;
 //! - `n2`, NGAP ↔ domain values (the only module seeing ASN.1);
 //! - `setup`, the NG Setup decision, on domain values;
 //! - `ue`, UE contexts and AMF-UE-NGAP-ID allocation;
-//! - [`nas`], the NAS layer behind one function;
+//! - `mm`, 5GMM for one UE, on domain values;
 //! - [`config`], identity and addresses, from the deployment `params`.
+//!
+//! The AUSF is reached by EO messages (`librecn-sbi`); the `corr_id` of a
+//! request is the UE's AMF-UE-NGAP-ID.
 
 pub mod config;
+mod mm;
 mod n2;
-pub mod nas;
 pub mod sctp;
 mod setup;
 mod ue;
 
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use librecn_common::Service;
 use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
-use librecn_common::log::Logger;
+use librecn_common::log::{Level, Logger};
+use librecn_common::msg::flags;
+use librecn_nas::ie::Tai;
 use librecn_ngap::{
     Cause, CauseNas, CauseProtocol, CauseRadioNetwork, Criticality, ID_INITIAL_UEMESSAGE, ID_NGRESET,
     ID_UECONTEXT_RELEASE_REQUEST, ID_UPLINK_NASTRANSPORT, procedure_name,
 };
+use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
+use librecn_sbi::{ServingNetwork, SupiOrSuci};
 use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message};
 
 use config::AmfConfig;
+use mm::{Effects, Release};
 use n2::Incoming;
 use sctp::{AssocId, NGAP_PPID, Received, SctpSocket};
 use setup::RanNodeId;
@@ -57,6 +67,8 @@ struct Gnb {
 /// The AMF EO.
 pub struct Amf {
     config: AmfConfig,
+    serving_network: ServingNetwork,
+    ausf: Service,
     socket: Option<(SctpSocket, IoToken)>,
     bound: Arc<Mutex<Option<SocketAddr>>>,
     gnbs: HashMap<AssocId, Gnb>,
@@ -71,6 +83,8 @@ impl Amf {
     pub fn new(config: AmfConfig) -> Self {
         Amf {
             ues: UeTable::new(config.max_ues),
+            serving_network: config.serving_network(),
+            ausf: Service::named(config.ausf.clone()),
             config,
             socket: None,
             bound: Arc::default(),
@@ -87,7 +101,8 @@ impl Amf {
         Ok((Self::eo_config(name), Self::new(config)))
     }
 
-    /// N2 traffic arrives through the SCTP socket, not the mailbox: small lanes and buffers.
+    /// N2 traffic arrives through the SCTP socket, not the mailbox: small
+    /// lanes, and buffers for the AUSF's answers.
     pub fn eo_config(name: &str) -> EoConfig {
         EoConfig::new(name).max_io(1).max_timers(4).system_capacity(16).buffers(&[(256, 64)])
     }
@@ -162,17 +177,16 @@ impl Amf {
             Incoming::ErrorIndication(cause) => {
                 log!(self.log, ctx, Error, "Error Indication from association {assoc}: {cause}");
             }
-            Incoming::InitialUe { ran_id, nas, location } if set_up => {
-                self.on_initial_ue(ctx, assoc, ran_id, &nas, location)
+            Incoming::InitialUe { ran_id, mut nas, location } if set_up => {
+                self.on_initial_ue(ctx, assoc, ran_id, &mut nas, location)
             }
-            Incoming::UplinkNas { amf_id, ran_id, nas, location } if set_up => {
+            Incoming::UplinkNas { amf_id, ran_id, mut nas, location } if set_up => {
                 match self.ues.get_mut(assoc, amf_id, ran_id) {
                     Ok(ue) => {
                         if location.is_some() {
                             ue.location = location;
                         }
-                        log!(self.log, ctx, Info, "UE {amf_id}: uplink {}", nas::describe(&nas));
-                        self.on_nas(ctx, amf_id, &nas);
+                        self.on_nas(ctx, amf_id, &mut nas);
                     }
                     Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
                 }
@@ -188,8 +202,12 @@ impl Amf {
             }
             Incoming::ReleaseComplete { amf_id, ran_id } => match self.ues.get_mut(assoc, amf_id, ran_id) {
                 Ok(_) => {
-                    self.ues.remove(amf_id);
-                    log!(self.log, ctx, Info, "UE {amf_id}: released, {} UE(s) left", self.ues.len());
+                    let supi = self.ues.remove(amf_id).and_then(|ue| ue.mm.supi().copied());
+                    let left = self.ues.len();
+                    match supi {
+                        Some(supi) => log!(self.log, ctx, Info, "UE {amf_id} ({supi}): released, {left} UE(s) left"),
+                        None => log!(self.log, ctx, Info, "UE {amf_id}: released, {left} UE(s) left"),
+                    }
                 }
                 // A late Complete for a context already gone: nothing to do (criticality ignore).
                 Err(_) => log!(self.log, ctx, Debug, "UE Context Release Complete for unknown UE {amf_id}"),
@@ -232,7 +250,7 @@ impl Amf {
         ctx: &mut Context<'_>,
         assoc: AssocId,
         ran_id: RanUeId,
-        nas: &[u8],
+        nas: &mut [u8],
         location: Option<Location>,
     ) {
         // The gNB reuses a RAN-UE-NGAP-ID only for a new UE: the old context is stale.
@@ -253,21 +271,53 @@ impl Amf {
         };
         let amf_id = ue.amf_id;
         self.ues.get_mut(assoc, amf_id, ran_id).expect("just created").location = location;
-        log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): initial {}", nas::describe(nas));
+        log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): Initial UE Message");
         self.on_nas(ctx, amf_id, nas);
     }
 
-    /// Hands an uplink NAS PDU to the NAS layer and carries out its answer.
-    fn on_nas(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, pdu: &[u8]) {
-        match nas::on_uplink(pdu) {
-            nas::Answer::SendAndRelease { nas } => {
-                let Some(ue) = self.ues.get(amf_id) else { return };
-                let (assoc, stream, ran_id) = (ue.assoc, ue.stream, ue.ran_id);
-                let downlink = n2::downlink_nas_transport(amf_id, ran_id, &nas);
-                self.send(ctx, assoc, stream, downlink, "Downlink NAS Transport");
-                log!(self.log, ctx, Info, "UE {amf_id}: downlink {}", nas::describe(&nas));
-                self.release(ctx, amf_id, Cause::nas(CauseNas::normal_release));
-            }
+    /// Runs `step` on the UE's 5GMM context, then releases the UE if 5GMM asked.
+    fn with_mm(
+        &mut self,
+        ctx: &mut Context<'_>,
+        amf_id: AmfUeId,
+        step: impl FnOnce(&mut mm::Mm, &AmfConfig, Option<Tai>, &mut Port<'_, '_, '_>),
+    ) {
+        let Some(ue) = self.ues.get_mut_by_id(amf_id) else {
+            return log!(self.log, ctx, Debug, "UE {amf_id} gone: answer dropped");
+        };
+        let tai = ue.location.map(|l| Tai { plmn: l.tai.0, tac: l.tai.1 });
+        let mut port = Port {
+            ctx,
+            socket: self.socket.as_ref().map(|(s, _)| s),
+            log: &mut self.log,
+            ausf: &mut self.ausf,
+            serving_network: &self.serving_network,
+            ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
+            release: None,
+        };
+        step(&mut ue.mm, &self.config, tai, &mut port);
+        if let Some(why) = port.release {
+            let cause = match why {
+                Release::Normal => CauseNas::normal_release,
+                Release::Deregister => CauseNas::deregister,
+                Release::AuthenticationFailure => CauseNas::authentication_failure,
+            };
+            self.release(ctx, amf_id, Cause::nas(cause));
+        }
+    }
+
+    /// An uplink NAS PDU for the UE's 5GMM context.
+    fn on_nas(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, pdu: &mut [u8]) {
+        self.with_mm(ctx, amf_id, |mm, config, tai, port| mm.on_uplink(config, tai, pdu, port));
+    }
+
+    /// An answer of the AUSF, for the UE its `corr_id` names.
+    fn on_ausf(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>) {
+        let amf_id = AmfUeId::from(msg.corr_id());
+        if let Some(result) = msg.body::<AuthenticateResult>() {
+            self.with_mm(ctx, amf_id, |mm, _, _, port| mm.on_authenticate_result(result, port));
+        } else if let Some(result) = msg.body::<ConfirmResult>() {
+            self.with_mm(ctx, amf_id, |mm, config, _, port| mm.on_confirm_result(config, result, port));
         }
     }
 
@@ -348,7 +398,7 @@ impl ExecutionObject for Amf {
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if msg.io().is_none() {
-            return;
+            return self.on_ausf(ctx, msg);
         }
         let mut buffer = std::mem::take(&mut self.buffer);
         for _ in 0..MESSAGES_PER_TURN {
@@ -370,10 +420,84 @@ impl ExecutionObject for Amf {
             self.log,
             ctx,
             Info,
-            "AMF {} stopping, {} gNB association(s), {} UE(s)",
+            "AMF {} stopping, {} gNB association(s), {} UE(s), {} registered",
             self.config.name,
             self.gnbs.len(),
-            self.ues.len()
+            self.ues.len(),
+            self.ues.registered()
         );
+    }
+}
+
+/// 5GMM's effects for one UE: NAS over N2, requests to the AUSF, logs.
+struct Port<'a, 'c, 's> {
+    ctx: &'a mut Context<'c>,
+    socket: Option<&'s SctpSocket>,
+    log: &'a mut Logger,
+    ausf: &'a mut Service,
+    serving_network: &'a ServingNetwork,
+    /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
+    ids: (AmfUeId, RanUeId, AssocId, u16),
+    release: Option<Release>,
+}
+
+impl Port<'_, '_, '_> {
+    /// Sends a request to the AUSF, `corr_id` the AMF-UE-NGAP-ID.
+    fn request_ausf<T: librecn_scheduler::MsgBody>(&mut self, fill: impl FnOnce(&mut T)) -> bool {
+        let Some(ausf) = self.ausf.get(self.ctx) else {
+            log!(self.log, self.ctx, Error, "no AUSF {:?}", self.ausf.name());
+            return false;
+        };
+        let sent = self.ctx.alloc::<T>(ausf).and_then(|m| {
+            let mut m = m.with_corr_id(self.ids.0 as u32).with_flags(flags::REQUEST);
+            fill(&mut m);
+            self.ctx.send(m)
+        });
+        if let Err(e) = &sent {
+            self.ausf.forget();
+            log!(self.log, self.ctx, Error, "cannot reach the AUSF: {e}");
+        }
+        sent.is_ok()
+    }
+}
+
+impl Effects for Port<'_, '_, '_> {
+    fn send(&mut self, pdu: &[u8], what: &'static str) {
+        let (amf_id, ran_id, assoc, stream) = self.ids;
+        let sent = n2::downlink_nas_transport(amf_id, ran_id, pdu).and_then(|bytes| {
+            let socket = self.socket.ok_or("N2 closed")?;
+            socket.send(assoc, stream, NGAP_PPID, &bytes).map_err(|e| e.to_string())
+        });
+        match sent {
+            Ok(()) => log!(self.log, self.ctx, Info, "UE {amf_id}: downlink {what}"),
+            Err(e) => log!(self.log, self.ctx, Error, "UE {amf_id}: cannot send {what}: {e}"),
+        }
+    }
+
+    fn authenticate(&mut self, who: &SupiOrSuci, resync: Option<([u8; 16], [u8; 14])>) -> bool {
+        let info = AuthInfo::new(*who, *self.serving_network);
+        let info = match resync {
+            Some((rand, auts)) => info.with_resync(rand, auts),
+            None => info,
+        };
+        self.request_ausf::<Authenticate>(|m| m.info = info)
+    }
+
+    fn confirm(&mut self, auth_ctx: u32, res_star: &[u8; 16]) -> bool {
+        self.request_ausf::<Confirm>(|m| (m.auth_ctx, m.res_star) = (auth_ctx, *res_star))
+    }
+
+    fn release(&mut self, why: Release) {
+        self.release = Some(why);
+    }
+
+    fn tmsi(&mut self) -> u32 {
+        // Unpredictable (TS 33.501 §6.12.3); the UE id if the kernel has no randomness.
+        librecn_security::random().map_or(self.ids.0 as u32, u32::from_be_bytes)
+    }
+
+    fn log(&mut self, level: Level, args: fmt::Arguments<'_>) {
+        let amf_id = self.ids.0;
+        self.log.log(self.ctx, level, format_args!("UE {amf_id}: {args}"));
     }
 }

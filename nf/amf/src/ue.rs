@@ -4,14 +4,16 @@
 use std::collections::HashMap;
 
 use crate::config::Plmn;
+use crate::mm::Mm;
 use crate::sctp::AssocId;
 
-/// AMF-UE-NGAP-ID: 40 bits, unique in this AMF.
+/// AMF-UE-NGAP-ID: 40 bits in NGAP, unique in this AMF. Allocated within 32
+/// bits, so that it also serves as the `corr_id` of the UE's SBI requests.
 pub type AmfUeId = u64;
 /// RAN-UE-NGAP-ID: 32 bits, unique in its gNB.
 pub type RanUeId = u32;
 
-const AMF_UE_ID_MAX: AmfUeId = (1 << 40) - 1;
+const AMF_UE_ID_MAX: AmfUeId = u32::MAX as AmfUeId;
 
 /// Where a UE is, from the last User Location Information.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,7 +25,7 @@ pub struct Location {
 }
 
 /// One UE context.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct UeContext {
     pub amf_id: AmfUeId,
     pub ran_id: RanUeId,
@@ -34,6 +36,8 @@ pub struct UeContext {
     pub location: Option<Location>,
     /// A UE Context Release Command was sent; waiting for the Complete.
     pub releasing: bool,
+    /// Its 5GMM context, which lives as long as the N2 context for now.
+    pub mm: Mm,
 }
 
 /// Why an id pair does not match a context (TS 38.413 §10.6 causes).
@@ -62,6 +66,11 @@ impl UeTable {
         self.ues.len()
     }
 
+    /// UEs in state 5GMM-REGISTERED.
+    pub fn registered(&self) -> usize {
+        self.ues.values().filter(|ue| ue.mm.state() == crate::mm::State::Registered).count()
+    }
+
     /// New context for a UE arriving on `assoc` (`streams`: outbound streams
     /// of that association). `None` when the table is full.
     pub fn create(&mut self, assoc: AssocId, ran_id: RanUeId, streams: u16) -> Option<&UeContext> {
@@ -75,7 +84,7 @@ impl UeTable {
         self.next = if self.next == AMF_UE_ID_MAX { 1 } else { self.next + 1 };
         // Spread UEs over streams 1.. (stream 0 is for non-UE signalling).
         let stream = if streams > 1 { 1 + (amf_id % u64::from(streams - 1)) as u16 } else { 0 };
-        let ue = UeContext { amf_id, ran_id, assoc, stream, location: None, releasing: false };
+        let ue = UeContext { amf_id, ran_id, assoc, stream, location: None, releasing: false, mm: Mm::default() };
         Some(self.ues.entry(amf_id).or_insert(ue))
     }
 
@@ -86,11 +95,6 @@ impl UeTable {
             return Err(Mismatch::InconsistentRanId);
         }
         Ok(ue)
-    }
-
-    /// The context with this AMF-UE-NGAP-ID.
-    pub fn get(&self, amf_id: AmfUeId) -> Option<&UeContext> {
-        self.ues.get(&amf_id)
     }
 
     pub fn get_mut_by_id(&mut self, amf_id: AmfUeId) -> Option<&mut UeContext> {
@@ -143,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn allocation_wraps_within_40_bits_and_skips_live_ids() {
+    fn allocation_wraps_within_32_bits_and_skips_live_ids() {
         let mut t = UeTable::new(4);
         t.next = AMF_UE_ID_MAX;
         assert_eq!(t.create(1, 1, 2).unwrap().amf_id, AMF_UE_ID_MAX);

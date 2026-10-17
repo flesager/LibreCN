@@ -7,6 +7,9 @@
 
 /// Message-id families. `0x0000` is the scheduler's.
 pub mod family {
+    /// 5G AKA: AMF, AUSF and UDM (`librecn-sbi`).
+    pub const UE_AUTHENTICATION: u16 = 0x0001;
+
     /// Log records.
     pub const OAM_LOG: u16 = 0xFF01;
     /// Alarm raise and clear.
@@ -15,7 +18,7 @@ pub mod family {
     pub const OAM_CONTROL: u16 = 0xFF03;
 
     /// Every family, for the uniqueness test.
-    pub const ALL: [u16; 3] = [OAM_LOG, OAM_ALARM, OAM_CONTROL];
+    pub const ALL: [u16; 4] = [UE_AUTHENTICATION, OAM_LOG, OAM_ALARM, OAM_CONTROL];
 }
 
 /// Message id of `message` in `family`.

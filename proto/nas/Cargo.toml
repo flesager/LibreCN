@@ -1,0 +1,16 @@
+[package]
+name = "librecn-nas"
+description = "5GS NAS (3GPP TS 24.501): 5GMM codec without allocation, NAS security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-security = { path = "../security" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
