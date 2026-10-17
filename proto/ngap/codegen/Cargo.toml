@@ -1,0 +1,13 @@
+# Generates proto/ngap/src/generated.rs from proto/ngap/asn1/<version>/*.asn.
+# Standalone (own workspace) so rasn-compiler never enters normal builds:
+#   cargo run --release --manifest-path proto/ngap/codegen/Cargo.toml -- 15.13.0
+[package]
+name = "ngap-codegen"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+rasn-compiler = "0.16"

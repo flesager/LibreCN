@@ -64,6 +64,26 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
   - Tests check logs with a capture helper that sits next to the log EO, not inside it (`LogSink::capture()`).
 - **Alarms are required**: raise, update and clear with X.733 severities; every change is logged.
 
+## 3GPP protocols (N2 / NGAP first)
+
+- **Codecs live in `proto/`**, one crate per protocol: `proto/ngap` first; later NAS, PFCP, GTP-U.
+- **NGAP** (TS 38.413, ASN.1 APER):
+  - Rust code is generated with `rasn-compiler` for the `rasn` runtime. The `.asn` sources and the generated code are both checked in.
+  - `oxirush-ngap` serves only as a cross-check.
+  - **Release**: start with Rel-15 (v15.13.0, `38413-fd0`) to validate the process, then move to Rel-19 (the code roughly doubles).
+  - **ASN.1 source**: the 3GPP FTP archive, `https://www.3gpp.org/ftp/Specs/archive/38_series/38.413/` (needs a browser user agent). Version letters: f=15, g=16, h=17, i=18, j=19. The zip holds only the spec as `.doc`/`.docx`; the ASN.1 is between `-- ASN1START` / `-- ASN1STOP`, with smart quotes and non-breaking spaces to normalise.
+- **`rasn` 0.29 has APER bugs**, found by the deep round trip; see `proto/ngap/README.md` for the list and reproductions.
+  - We fix them in a fork of `rasn` on the owner's personal GitHub, used through `[patch.crates-io]`. The owner has done the same before for the C asn1 compiler.
+  - Reporting them upstream is deferred until the project is more mature and legitimate.
+- **hampi rejected**: it refuses a whole message on an unknown IE, and decodes an enumeration's extension value as value 0.
+- **Isolation**: ASN.1 types stay in the codec crate and the N2 code. The NF logic sees only small domain types, so the codec can be replaced.
+- **Zero allocation is the owner's preference**: the first working version may allocate (`rasn`); the owner will explain the target zero-allocation design later.
+- **Robustness**: decoding external input must never panic (one bad packet would abort the core). Fuzz the decoders and answer bad NGAP with Error Indication.
+- **N2 placement**: inside the AMF EO (modules of the AMF crate), not a separate EO.
+- **SCTP**: kernel SCTP, through `libc` (accepted). On Docker it needs the host's `sctp` module.
+- Interop and test peer: UERANSIM, plus Wireshark-checked captures.
+- NAS (TS 24.501) is not ASN.1: a separate hand-written codec, discussed later.
+
 ## Commands
 
 ```
