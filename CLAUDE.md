@@ -113,6 +113,7 @@ Later: deployment. Dependencies point down only: `scheduler` ← `common` ← `o
   - **UERANSIM is patched** (`scripts/ueransim/patches/0001-*.patch`, applied to `../UERANSIM/src` and rebuilt): v3.3.0's gNB picks an AMF only from the slice of a plain Registration Request, so no protected initial message (a UE back from idle) could reach any AMF. `user-plane.sh` refuses to run without the patch.
   - On the host, UERANSIM's UE does not come back from idle (its RRC thread misses the 100 ms UAC check); in Docker it does, so the idle cycle is checked by `user-plane.sh`.
   - Interop checks: `scripts/ueransim/ng-setup.sh` (gNB), `scripts/ueransim/registration.sh` (gNB + UE: registration, PDU session, then switch-off deregistration through `nr-cli`), `scripts/ueransim/user-plane.sh` (in Docker: a ping through the UPF, then the UE idle, back with a Service Request, a ping again).
+- **UPF modes** (`mode`): `event` (default), `poll`, `hybrid`, measured in `nf/upf/README.md` (`scripts/upf-modes.sh`): throughput is the same (about 310 kpps per core, system-call bound), polling cuts a round trip by 9 µs and sparse latency by half, for a core spent when idle; hybrid keeps poll's latency under traffic and event's idle cost.
 - **UPF**: user plane only when `n6` (a TUN device) is configured; then N3 is bound on `n3`:2152. It attaches to the device and never configures the network itself (address, link: the deployment's job, `docker/core.sh`).
 
 ## Commands
@@ -125,4 +126,5 @@ cargo run --release -p librecn -- --config app/librecn.example.toml   # GUI on h
 scripts/ueransim/ng-setup.sh                              # interop with UERANSIM's gNB
 scripts/ueransim/registration.sh                          # UERANSIM gNB + UE: registration, PDU session, deregistration
 scripts/ueransim/user-plane.sh                            # in Docker: UERANSIM's UE pings through the UPF
+scripts/upf-modes.sh                                      # the UPF's modes measured (latency, throughput, CPU)
 ```

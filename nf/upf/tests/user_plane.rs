@@ -41,13 +41,17 @@ struct Plane {
 /// A UPF on N3 `n3` (a distinct loopback address per test) with one session
 /// whose downlink goes to the test gNB.
 fn plane(n3: Ipv4Addr) -> (Plane, u32) {
+    plane_in(n3, "event")
+}
+
+fn plane_in(n3: Ipv4Addr, mode: &str) -> (Plane, u32) {
     let mut tb = TestBed::new();
     let (sink, log) = LogSink::capture();
     tb.add(LogSink::config(), sink).unwrap();
     let (dn, upf_end) = UnixDatagram::pair().unwrap();
     upf_end.set_nonblocking(true).unwrap();
     dn.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-    let upf = Upf::new("upf", &serde_json::json!({ "n3": n3.to_string() })).unwrap();
+    let upf = Upf::new("upf", &serde_json::json!({ "n3": n3.to_string(), "mode": mode })).unwrap();
     let upf = upf.with_n6(File::from(OwnedFd::from(upf_end)));
     let upf = tb.add(Upf::eo_config("upf"), upf).unwrap();
     let (probe, seen) = Probe::new();
@@ -131,4 +135,33 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     assert_eq!((teid, qfi, payload), (0x77, Some(1), &packet[..]));
     gnb.set_nonblocking(true).unwrap();
     assert!(gnb.recv(&mut buf).is_err(), "no session for 10.45.0.99: dropped");
+}
+
+#[test]
+fn poll_mode_forwards_without_epoll() {
+    let (mut p, teid) = plane_in(Ipv4Addr::new(127, 0, 0, 64), "poll");
+    let packet = ipv4(UE, SERVER, b"poll");
+    p.gnb.send_to(&g_pdu(teid, &packet), p.n3).unwrap();
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(p.tb.wait_io(Duration::ZERO), 0, "nothing registered with epoll");
+    assert_eq!(p.tb.poll(), 1, "the UPF polls");
+    p.tb.run_until_idle();
+    let mut buf = [0u8; 128];
+    let n = p.dn.recv(&mut buf).unwrap();
+    assert_eq!(buf[..n], packet[..]);
+}
+
+#[test]
+fn hybrid_mode_polls_while_traffic_flows_then_sleeps() {
+    let (mut p, teid) = plane_in(Ipv4Addr::new(127, 0, 0, 65), "hybrid");
+    assert_eq!(p.tb.poll(), 0, "asleep on epoll");
+    p.gnb.send_to(&g_pdu(teid, &ipv4(UE, SERVER, b"wake")), p.n3).unwrap();
+    p.pump();
+    let mut buf = [0u8; 128];
+    assert!(p.dn.recv(&mut buf).is_ok(), "forwarded on readiness");
+    for _ in 0..librecn_upf::EMPTY_POLLS {
+        assert_eq!(p.tb.poll(), 1, "polling after traffic");
+        p.tb.run_until_idle();
+    }
+    assert_eq!(p.tb.poll(), 0, "back to epoll after empty polls");
 }

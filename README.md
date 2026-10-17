@@ -34,4 +34,5 @@ scripts/stress.sh          # repeated and CPU-restricted runs, loom
 scripts/ueransim/ng-setup.sh       # interop with UERANSIM's gNB (UERANSIM next to this repo)
 scripts/ueransim/registration.sh   # UERANSIM gNB + UE: registration, PDU session, deregistration
 scripts/ueransim/user-plane.sh     # in Docker: UERANSIM's UE pings through the UPF
+scripts/upf-modes.sh               # the UPF's event, poll and hybrid modes measured
 ```

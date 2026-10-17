@@ -44,6 +44,7 @@ pool = "cp"
 [nf.params]                   # all optional: these are the defaults
 n3 = "127.0.0.2"              # GTP-U address for the gNBs (not UERANSIM's 127.0.0.1)
 # n6 = "upf0"                 # TUN device: forwarding on (see docker/core.sh)
+mode = "event"                # or "poll", "hybrid": see nf/upf/README.md
 max_sessions = 1024
 
 [[nf]]

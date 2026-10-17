@@ -10,7 +10,14 @@
 //!
 //! Without `n6` the UPF keeps sessions and forwards nothing (no socket is
 //! opened). Forwarding uses one preallocated buffer: no allocation per
-//! packet. The EO is event-driven; a polling mode can come later, measured.
+//! packet.
+//!
+//! `mode` (see `README.md` for the measurements):
+//! - `event` (default): epoll wakes the UPF when N3 or N6 has packets;
+//! - `poll`: no epoll; the UPF reads N3 and N6 at every turn of its worker,
+//!   which never sleeps (a core for the user plane);
+//! - `hybrid`: epoll wakes it, then it polls until [`EMPTY_POLLS`] polls in
+//!   a row find nothing, and sleeps on epoll again.
 //!
 //! - [`sessions`], the session table;
 //! - [`tun`], the N6 device.
@@ -29,7 +36,7 @@ use librecn_common::msg::flags;
 use librecn_gtpu::{G_PDU_HEADER, Message as Gtp};
 use librecn_sbi::Outcome;
 use librecn_sbi::pdu_session::{N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult};
-use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message};
+use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, system};
 use serde::Deserialize;
 
 use sessions::{Refusal, Sessions};
@@ -42,6 +49,17 @@ const BUFFER: usize = G_PDU_HEADER + 65_535;
 const QFI: u8 = 1;
 /// Alarm raised while the user plane cannot run.
 const ALARM_USER_PLANE: u32 = 0;
+/// Hybrid mode: polls in a row without a packet before the UPF sleeps.
+pub const EMPTY_POLLS: u32 = 256;
+
+/// How the UPF learns that packets wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Event,
+    Poll,
+    Hybrid,
+}
 
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -52,11 +70,12 @@ struct Params {
     /// N6 TUN device; none: no user plane.
     n6: Option<String>,
     max_sessions: usize,
+    mode: Mode,
 }
 
 impl Default for Params {
     fn default() -> Self {
-        Params { n3: Ipv4Addr::new(127, 0, 0, 2), n6: None, max_sessions: 1024 }
+        Params { n3: Ipv4Addr::new(127, 0, 0, 2), n6: None, max_sessions: 1024, mode: Mode::Event }
     }
 }
 
@@ -74,8 +93,11 @@ pub struct Upf {
     n3: Ipv4Addr,
     n6_name: Option<String>,
     sessions: Sessions,
-    /// GTP-U socket and N6 device, once open.
-    n3_socket: Option<(UdpSocket, IoToken)>,
+    mode: Mode,
+    /// Hybrid mode: polls in a row that found nothing.
+    empty_polls: u32,
+    /// GTP-U socket and N6 device, once open; their epoll tokens, unless polled.
+    n3_socket: Option<(UdpSocket, Option<IoToken>)>,
     n6: Option<(File, Option<IoToken>)>,
     buffer: Box<[u8]>,
     log: Logger,
@@ -84,7 +106,8 @@ pub struct Upf {
 
 impl Upf {
     /// From deployment `params`: `n3` (default 127.0.0.2), `n6` (a TUN
-    /// device name, default none) and `max_sessions` (1024).
+    /// device name, default none), `max_sessions` (1024) and `mode`
+    /// (`event`, `poll` or `hybrid`; default `event`).
     pub fn new(name: &str, params: &serde_json::Value) -> Result<Self, String> {
         let p: Params = if params.is_null() {
             Params::default()
@@ -96,6 +119,8 @@ impl Upf {
             n3: p.n3,
             n6_name: p.n6,
             sessions: Sessions::new(p.max_sessions),
+            mode: p.mode,
+            empty_polls: 0,
             n3_socket: None,
             n6: None,
             buffer: vec![0; BUFFER].into_boxed_slice(),
@@ -132,22 +157,30 @@ impl Upf {
         let socket = UdpSocket::bind(SocketAddrV4::new(self.n3, librecn_gtpu::PORT))
             .and_then(|s| s.set_nonblocking(true).map(|()| s))
             .map_err(|e| format!("N3 on {}:{}: {e}", self.n3, librecn_gtpu::PORT))?;
+        if self.mode == Mode::Poll {
+            self.n3_socket = Some((socket, None));
+            ctx.set_polling(true);
+            return Ok(());
+        }
         let token = ctx.register_io(&socket, Interest::READABLE).map_err(|e| format!("N3: {e}"))?;
-        self.n3_socket = Some((socket, token));
+        self.n3_socket = Some((socket, Some(token)));
         if let Some((device, token)) = &mut self.n6 {
             *token = Some(ctx.register_io(&*device, Interest::READABLE).map_err(|e| format!("N6: {e}"))?);
         }
         Ok(())
     }
 
-    /// GTP-U datagrams from the gNBs.
-    fn on_n3(&mut self, ctx: &mut Context<'_>) {
-        let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return };
-        for _ in 0..PACKETS_PER_TURN {
+    /// GTP-U datagrams from the gNBs; how many were read.
+    fn on_n3(&mut self, ctx: &mut Context<'_>) -> usize {
+        let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return 0 };
+        for read in 0..PACKETS_PER_TURN {
             let (n, from) = match socket.recv_from(&mut self.buffer) {
                 Ok(received) => received,
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return,
-                Err(e) => return log!(self.log, ctx, Error, "N3 receive: {e}"),
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return read,
+                Err(e) => {
+                    log!(self.log, ctx, Error, "N3 receive: {e}");
+                    return read;
+                }
             };
             match librecn_gtpu::decode(&self.buffer[..n]) {
                 Ok(Gtp::GPdu { teid, payload, .. }) => {
@@ -168,18 +201,22 @@ impl Upf {
                 Ok(Gtp::Other { .. }) | Err(_) => ctx.count(DROPPED, 1),
             }
         }
+        PACKETS_PER_TURN
     }
 
-    /// IP packets from the data network, to the UEs.
-    fn on_n6(&mut self, ctx: &mut Context<'_>) {
-        let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return };
-        for _ in 0..PACKETS_PER_TURN {
+    /// IP packets from the data network, to the UEs; how many were read.
+    fn on_n6(&mut self, ctx: &mut Context<'_>) -> usize {
+        let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return 0 };
+        for read in 0..PACKETS_PER_TURN {
             // The packet lands after the room left for its GTP-U header.
             let n = match device.read(&mut self.buffer[G_PDU_HEADER..]) {
-                Ok(0) => return,
+                Ok(0) => return read,
                 Ok(n) => n,
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return,
-                Err(e) => return log!(self.log, ctx, Error, "N6 read: {e}"),
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return read,
+                Err(e) => {
+                    log!(self.log, ctx, Error, "N6 read: {e}");
+                    return read;
+                }
             };
             let packet = &self.buffer[G_PDU_HEADER..G_PDU_HEADER + n];
             let Some((gnb, teid)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue(dst)).and_then(|s| s.dl) else {
@@ -196,6 +233,7 @@ impl Upf {
                 Err(_) => ctx.count(DROPPED, 1),
             }
         }
+        PACKETS_PER_TURN
     }
 
     fn on_establish(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &N4Establish) {
@@ -270,7 +308,8 @@ impl ExecutionObject for Upf {
         match self.open_user_plane(ctx) {
             Ok(()) if self.n6.is_some() => {
                 let n6 = self.n6_name.as_deref().unwrap_or("given device");
-                log!(self.log, ctx, Vip, "UPF {} ready, N3 {}:{}, N6 {n6}", self.name, self.n3, librecn_gtpu::PORT);
+                let (name, n3, mode) = (&self.name, self.n3, self.mode);
+                log!(self.log, ctx, Vip, "UPF {name} ready, N3 {n3}:{}, N6 {n6}, {mode:?} mode", librecn_gtpu::PORT);
             }
             Ok(()) => log!(self.log, ctx, Vip, "UPF {} ready, N3 {}, no N6: sessions only", self.name, self.n3),
             Err(e) => {
@@ -282,10 +321,23 @@ impl ExecutionObject for Upf {
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if let Some(ready) = msg.io() {
-            if self.n3_socket.as_ref().is_some_and(|(_, t)| *t == ready.token) {
+            if self.n3_socket.as_ref().is_some_and(|(_, t)| *t == Some(ready.token)) {
                 self.on_n3(ctx);
             } else {
                 self.on_n6(ctx);
+            }
+            // Hybrid: traffic is here, poll until it stops.
+            if self.mode == Mode::Hybrid {
+                self.empty_polls = 0;
+                ctx.set_polling(true);
+            }
+        } else if msg.id() == system::EO_POLL {
+            let moved = self.on_n3(ctx) + self.on_n6(ctx);
+            if self.mode == Mode::Hybrid {
+                self.empty_polls = if moved == 0 { self.empty_polls + 1 } else { 0 };
+                if self.empty_polls >= EMPTY_POLLS {
+                    ctx.set_polling(false);
+                }
             }
         } else if let Some(request) = msg.body::<N4Establish>() {
             self.on_establish(ctx, msg, request);
