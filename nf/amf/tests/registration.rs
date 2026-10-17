@@ -418,6 +418,40 @@ fn an_idle_ue_comes_back_and_its_session_is_reactivated() {
 }
 
 #[test]
+fn the_ue_releases_its_pdu_session() {
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    ue.register(&mut s, &gnb);
+    let transport = |n1: &[u8], request_type: &str| {
+        [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), n1, &hex("1201"), &hex(request_type)].concat()
+    };
+    ue.uplink_protected(&gnb, 2, &transport(&hex("2e 01 01 c1 ffff 91 a1"), "81"));
+    ue.downlink(&mut s, &gnb);
+    gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, 1, 0x77)).unwrap();
+    s.pump();
+
+    // PDU Session Release Request (no request type: an existing session).
+    ue.uplink_protected(&gnb, 2, &transport(&hex("2e 01 02 d1 5924"), ""));
+    let (stream, pdu) = s.receive(&gnb);
+    let command: PDUSessionResourceReleaseCommand = initiating(&pdu, ID_PDUSESSION_RESOURCE_RELEASE);
+    let ie = |id: ProtocolIEID| &command.protocol_ies.0.iter().find(|ie| ie.id == id.0).unwrap().value;
+    let list =
+        open::<PDUSessionResourceToReleaseListRelCmd>(ie(ID_PDUSESSION_RESOURCE_TO_RELEASE_LIST_REL_CMD)).unwrap();
+    assert_eq!(list.0[0].p_dusession_id.0, 1);
+    let nas = open::<NASPDU>(ie(ID_NAS_PDU)).unwrap().0.to_vec();
+    assert_eq!(nas[1], 2, "protected and ciphered");
+    assert!(s.logged("upf", "deleted, 0 left"), "{:#?}", s.log.lines());
+    let _ = stream;
+
+    // The UE completes: the session is over everywhere.
+    ue.dl += 1;
+    ue.uplink_protected(&gnb, 2, &transport(&hex("2e 01 02 d4"), ""));
+    s.pump();
+    assert!(s.logged("smf", "imsi-208930000000001: PDU session 1 released, 0 left"), "{:#?}", s.log.lines());
+    assert!(s.logged("amf-1", &format!("UE {}: PDU session 1 released", ue.amf_id)));
+}
+
+#[test]
 fn an_unanswered_challenge_is_sent_again_after_t3560() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();

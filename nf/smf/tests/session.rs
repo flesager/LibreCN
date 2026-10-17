@@ -1,10 +1,12 @@
 //! PDU session establishment through the SMF and UPF EOs, an AMF probe
 //! carrying the N1 and N2 containers.
 
+use librecn_common::manage::{Manage, Method};
 use librecn_ngap::*;
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_sbi::pdu_session::{
-    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, UpdateSmContext, UpdateSmContextResult, update,
+    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, SmNotify, SmNotifyResult, UpdateSmContext,
+    UpdateSmContextResult, n2, update,
 };
 use librecn_sbi::{DnnText, Outcome, Supi};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
@@ -36,7 +38,7 @@ fn core() -> Core {
     let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
     let smf = tb.add(cfg, smf).unwrap();
     let (probe, seen) = Probe::new();
-    let amf = tb.add(EoConfig::new("amf").buffers(&[(256, 8), (2048, 8)]), probe).unwrap();
+    let amf = tb.add(EoConfig::new("amf").buffers(&[(256, 8), (2048, 8), (16 * 1024, 2)]), probe).unwrap();
     tb.run_until_idle();
     Core { tb, log, amf, smf, seen }
 }
@@ -93,7 +95,7 @@ fn a_session_is_established_set_up_on_the_gnb_and_released() {
 
     let mut request = UpdateSmContext::new_zeroed();
     (request.sm_ctx, request.kind) = (result.sm_ctx, update::SETUP_RESPONSE);
-    request.n2.set(&response_transfer());
+    request.container.set(&response_transfer());
     c.tb.inject_from(c.amf, c.smf, 43, &request).unwrap();
     c.tb.run_until_idle();
     let answer: UpdateSmContextResult = c.seen.take()[0].body().unwrap();
@@ -119,6 +121,66 @@ fn a_session_is_established_set_up_on_the_gnb_and_released() {
     assert!(c.logged("upf", "deleted, 0 left"));
     let again = c.create("internet", &hex("2e 01 02 c1 ffff 91"));
     assert!(again.n1.get().windows(5).any(|w| w == [0x01, 10, 45, 0, 3]), "the next address");
+}
+
+impl Core {
+    /// A 5GSM message of the UE for session `sm_ctx`.
+    fn n1(&mut self, sm_ctx: u32, n1: &[u8]) -> UpdateSmContextResult {
+        let mut request = UpdateSmContext::new_zeroed();
+        (request.sm_ctx, request.kind) = (sm_ctx, update::N1);
+        request.container.set(n1);
+        self.tb.inject_from(self.amf, self.smf, 46, &request).unwrap();
+        self.tb.run_until_idle();
+        self.seen.take()[0].body().unwrap()
+    }
+}
+
+#[test]
+fn the_ue_releases_its_session_and_cannot_modify_it() {
+    let mut c = core();
+    let sm_ctx = c.create("internet", &hex("2e 01 01 c1 ffff 91 a1")).sm_ctx;
+    let modify = c.n1(sm_ctx, &hex("2e0103c9"));
+    assert_eq!((modify.n1.get(), modify.released), (&hex("2e0103ca1f")[..], 0), "Modification Reject #31");
+
+    let release = c.n1(sm_ctx, &hex("2e0102d1 5924"));
+    assert_eq!(release.n1.get(), hex("2e0102d324"), "Release Command, the UE's PTI, #36");
+    assert_eq!(release.n2_kind, n2::RELEASE);
+    let transfer: PDUSessionResourceReleaseCommandTransfer = open(&Any::new(release.n2.get().to_vec())).unwrap();
+    assert_eq!(transfer.cause, Cause::nas(CauseNas::normal_release));
+    assert!(c.logged("upf", "deleted, 0 left"), "the user plane goes at once");
+    assert_eq!(release.released, 0, "until the UE completes");
+
+    let complete = c.n1(sm_ctx, &hex("2e0102d4"));
+    assert_eq!(complete.released, 1);
+    assert!(c.logged("smf", "PDU session 1 released, 0 left"));
+    assert_eq!(c.n1(sm_ctx, &hex("2e0102d4")).outcome(), Outcome::ContextNotFound);
+}
+
+#[test]
+fn the_network_releases_a_session_through_the_amf() {
+    let mut c = core();
+    let sm_ctx = c.create("internet", &hex("2e 01 01 c1 ffff 91 a1")).sm_ctx;
+    let mut manage = Manage::new_zeroed();
+    manage.fill(Method::Get, "sessions", "");
+    c.tb.inject_from(c.amf, c.smf, 50, &manage).unwrap();
+    c.tb.run_until_idle();
+    let listed = c.seen.take();
+    assert_eq!(listed.len(), 1);
+
+    manage.fill(Method::Delete, &format!("sessions/{sm_ctx}"), "");
+    c.tb.inject_from(c.amf, c.smf, 51, &manage).unwrap();
+    c.tb.run_until_idle();
+    let got = c.seen.take();
+    let notify = got.iter().find_map(|m| m.body::<SmNotify>()).expect("the AMF is told");
+    assert_eq!(got.iter().find(|m| m.body::<SmNotify>().is_some()).unwrap().header.corr_id, 42, "the AMF's UE id");
+    assert_eq!((notify.n1.get(), notify.n2_kind), (&hex("2e0100d324")[..], n2::RELEASE), "PTI 0: the network's");
+
+    // The UE is idle: the AMF cannot deliver, the SMF ends the session alone.
+    let mut result = SmNotifyResult::new_zeroed();
+    (result.sm_ctx, _) = (sm_ctx, result.set_outcome(Outcome::ContextNotFound));
+    c.tb.inject_from(c.amf, c.smf, 0, &result).unwrap();
+    c.tb.run_until_idle();
+    assert!(c.logged("smf", "PDU session 1 released, 0 left"));
 }
 
 #[test]

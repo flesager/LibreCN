@@ -70,6 +70,12 @@ pub fn setup_request_transfer(s: &Setup) -> Result<Vec<u8>, String> {
     wrap(&transfer).map(|a| a.as_bytes().to_vec()).map_err(|e| format!("encoding: {e}"))
 }
 
+/// PDU Session Resource Release Command Transfer: a normal release.
+pub fn release_command_transfer() -> Result<Vec<u8>, String> {
+    let transfer = PDUSessionResourceReleaseCommandTransfer::new(Cause::nas(CauseNas::normal_release), None);
+    wrap(&transfer).map(|a| a.as_bytes().to_vec()).map_err(|e| format!("encoding: {e}"))
+}
+
 /// The gNB's downlink tunnel endpoint, from a PDU Session Resource Setup
 /// Response Transfer.
 pub fn setup_response_transfer(bytes: &[u8]) -> Result<(Ipv4Addr, u32), String> {

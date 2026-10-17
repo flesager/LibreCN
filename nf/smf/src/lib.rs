@@ -7,6 +7,10 @@
 //! (N2). The gNB's answer, through the AMF, gives the UPF its downlink
 //! tunnel.
 //!
+//! Sessions are released by the UE (PDU Session Release Request) or by the
+//! network (`DELETE /api/nfs/{smf}/sessions/{id}`, the AMF telling the UE);
+//! a UE's modification request is rejected (no QoS change is offered).
+//!
 //! - [`session`], the decision and the N1 answers, on domain values;
 //! - [`n2sm`], the NGAP transfers (the only module seeing ASN.1);
 //! - [`pool`], UE addresses;
@@ -23,19 +27,37 @@ use std::net::Ipv4Addr;
 use librecn_common::Service;
 use librecn_common::log;
 use librecn_common::log::Logger;
+use librecn_common::manage::{Manage, Method, send_reply};
 use librecn_common::msg::flags;
 use librecn_nas::Snssai;
-use librecn_nas::sm::cause;
+use librecn_nas::sm::{SmUplink, cause};
 use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult,
-    ReleaseSmContext, UpdateSmContext, UpdateSmContextResult, update,
+    ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult, n2, update,
 };
 use librecn_sbi::{Outcome, Supi};
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Message};
+use serde_json::json;
 
 use config::SmfConfig;
 use pool::Pool;
 use session::Refused;
+
+/// What an UpdateSmContextResult carries.
+#[derive(Default)]
+struct Answer<'a> {
+    outcome: Outcome,
+    released: bool,
+    n1: &'a [u8],
+    n2_kind: u8,
+    n2: &'a [u8],
+}
+
+impl Answer<'_> {
+    fn outcome(outcome: Outcome) -> Self {
+        Answer { outcome, ..Answer::default() }
+    }
+}
 
 /// One PDU session.
 struct SmContext {
@@ -45,6 +67,10 @@ struct SmContext {
     slice: Snssai,
     ue_ip: Ipv4Addr,
     amf: EoId,
+    /// The AMF's id of the UE, the `corr_id` of its last request.
+    amf_ue: u32,
+    /// A Release Command was sent: waiting for the UE's Release Complete.
+    releasing: bool,
     /// The AMF's request waiting for the UPF (its `corr_id`).
     waiting: Option<u32>,
     /// The UPF's uplink tunnel endpoint, once it answered N4Establish.
@@ -80,9 +106,10 @@ impl Smf {
         Ok((Self::eo_config(name), Self::new(name, SmfConfig::from_params(params)?)))
     }
 
-    /// The AMF's requests carry N1/N2 containers (1 KiB); the UPF's answers are small.
+    /// The AMF's requests carry N1/N2 containers (1 KiB); the UPF's answers
+    /// are small; management requests 8 KiB.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 64), (1024, 32)])
+        EoConfig::new(name).max_timers(0).buffers(&[(256, 64), (1024, 32), (8 * 1024, 2)])
     }
 
     fn next_ctx(&mut self) -> u32 {
@@ -146,6 +173,8 @@ impl Smf {
             slice,
             ue_ip,
             amf: to.0,
+            amf_ue: to.1,
+            releasing: false,
             waiting: Some(to.1),
             n3: None,
         };
@@ -216,75 +245,177 @@ impl Smf {
         let id = request.sm_ctx;
         let Some(c) = self.contexts.get_mut(&id) else {
             if request.kind != update::DEACTIVATE {
-                self.update_result(ctx, to, 0, Outcome::ContextNotFound, &[]);
+                self.update_result(ctx, to, 0, Answer::outcome(Outcome::ContextNotFound));
             }
             return;
         };
+        (c.amf, c.amf_ue) = to;
         let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3);
+        let container = request.container.get();
         match (request.kind, n3) {
             (update::DEACTIVATE, _) => {
                 log!(self.log, ctx, Info, "{supi}: PDU session {psi} deactivated (the UE is idle)");
-                c.amf = to.0;
                 let _ = self.n4_modify(ctx, id, Ipv4Addr::UNSPECIFIED, 0);
-                return;
             }
-            (update::ACTIVATE, Some(n3)) => {
-                c.amf = to.0;
-                return match self.setup_transfer(n3) {
-                    Ok(n2) => {
-                        log!(self.log, ctx, Info, "{supi}: PDU session {psi} activated");
-                        self.update_result(ctx, to, psi, Outcome::Ok, &n2)
-                    }
-                    Err(e) => {
-                        log!(self.log, ctx, Error, "{supi}: {e}");
-                        self.update_result(ctx, to, psi, Outcome::Unavailable, &[])
-                    }
-                };
+            (update::ACTIVATE, Some(n3)) => match self.setup_transfer(n3) {
+                Ok(n2) => {
+                    log!(self.log, ctx, Info, "{supi}: PDU session {psi} activated");
+                    self.update_result(ctx, to, psi, Answer { n2_kind: n2::SETUP, n2: &n2, ..Answer::default() });
+                }
+                Err(e) => {
+                    log!(self.log, ctx, Error, "{supi}: {e}");
+                    self.update_result(ctx, to, psi, Answer::outcome(Outcome::Unavailable));
+                }
+            },
+            (update::ACTIVATE, None) => self.update_result(ctx, to, psi, Answer::outcome(Outcome::ContextNotFound)),
+            (update::N1, _) => self.on_n1(ctx, to, id, container),
+            (update::SETUP_FAILED, _) => {
+                let why = n2sm::unsuccessful_transfer(container);
+                log!(self.log, ctx, Info, "{supi}: the gNB could not set PDU session {psi} up: {why}");
+                self.remove(ctx, id);
+                self.update_result(ctx, to, psi, Answer { released: true, ..Answer::default() });
             }
-            (update::ACTIVATE, None) => return self.update_result(ctx, to, psi, Outcome::ContextNotFound, &[]),
-            _ => {}
+            _ => self.on_setup_response(ctx, to, id, container),
         }
-        if request.kind == update::SETUP_FAILED {
-            let why = n2sm::unsuccessful_transfer(request.n2.get());
-            log!(self.log, ctx, Info, "{supi}: the gNB could not set PDU session {psi} up: {why}");
-            self.remove(ctx, id);
-            return self.update_result(ctx, to, psi, Outcome::Ok, &[]);
-        }
-        let (gnb, teid) = match n2sm::setup_response_transfer(request.n2.get()) {
+    }
+
+    /// The gNB's tunnel, to the UPF; answered once the UPF is.
+    fn on_setup_response(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), id: u32, transfer: &[u8]) {
+        let Some(c) = self.contexts.get_mut(&id) else { return };
+        let (psi, supi) = (c.pdu_session_id, c.supi);
+        let (gnb, teid) = match n2sm::setup_response_transfer(transfer) {
             Ok(tunnel) => tunnel,
             Err(e) => {
                 log!(self.log, ctx, Error, "{supi}: PDU session {psi}: {e}");
-                return self.update_result(ctx, to, psi, Outcome::InvalidRequest, &[]);
+                return self.update_result(ctx, to, psi, Answer::outcome(Outcome::InvalidRequest));
             }
         };
-        (c.waiting, c.amf) = (Some(to.1), to.0);
+        c.waiting = Some(to.1);
         if let Err(e) = self.n4_modify(ctx, id, gnb, teid) {
             log!(self.log, ctx, Error, "cannot reach the UPF: {e}");
             if let Some(c) = self.contexts.get_mut(&id) {
                 c.waiting = None;
             }
-            return self.update_result(ctx, to, psi, Outcome::Unavailable, &[]);
+            return self.update_result(ctx, to, psi, Answer::outcome(Outcome::Unavailable));
         }
         log!(self.log, ctx, Info, "{supi}: PDU session {psi} downlink to {gnb} TEID {teid:#x}");
+    }
+
+    /// A 5GSM message of the UE for an existing session (TS 24.501 §6.3, §6.4).
+    fn on_n1(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), id: u32, n1: &[u8]) {
+        let Some(c) = self.contexts.get(&id) else { return };
+        let (psi, supi) = (c.pdu_session_id, c.supi);
+        let Ok((header, message)) = SmUplink::decode(n1) else {
+            let status = session::status(psi, 0, cause::INVALID_MANDATORY_INFORMATION);
+            return self.update_result(ctx, to, psi, Answer { n1: &status, ..Answer::default() });
+        };
+        log!(self.log, ctx, Info, "{supi}: PDU session {psi}: {}", librecn_nas::sm::name(header.kind));
+        match message {
+            SmUplink::ReleaseRequest => {
+                let (command, transfer) = self.release(ctx, id, header.pti);
+                let answer = Answer { n1: &command, n2_kind: n2::RELEASE, n2: &transfer, ..Answer::default() };
+                self.update_result(ctx, to, psi, answer);
+            }
+            SmUplink::ReleaseComplete => {
+                self.remove(ctx, id);
+                self.update_result(ctx, to, psi, Answer { released: true, ..Answer::default() });
+            }
+            // QoS changes are not offered: the session stays as it is.
+            SmUplink::ModificationRequest => {
+                let reject = session::modification_reject(psi, header.pti);
+                self.update_result(ctx, to, psi, Answer { n1: &reject, ..Answer::default() });
+            }
+            SmUplink::Status { cause } => {
+                log!(self.log, ctx, Info, "{supi}: PDU session {psi}: 5GSM Status #{cause}");
+                self.update_result(ctx, to, psi, Answer::default());
+            }
+            SmUplink::EstablishmentRequest { .. } | SmUplink::Other(_) => {
+                let status = session::status(psi, header.pti, cause::MESSAGE_TYPE_NOT_IMPLEMENTED);
+                self.update_result(ctx, to, psi, Answer { n1: &status, ..Answer::default() });
+            }
+        }
+    }
+
+    /// Ends a session on the UPF; the Release Command (N1, answering `pti`,
+    /// 0 for the network's own) and the gNB's release (N2). The context stays
+    /// until the UE's Release Complete, or the UE's departure.
+    fn release(&mut self, ctx: &mut Context<'_>, id: u32, pti: u8) -> (Vec<u8>, Vec<u8>) {
+        let Some(c) = self.contexts.get_mut(&id) else { return (vec![], vec![]) };
+        let psi = c.pdu_session_id;
+        c.releasing = true;
+        if c.n3.take().is_some()
+            && let Some(upf) = self.upf.get(ctx)
+        {
+            let _ = ctx.send_value(upf, &N4Delete { seid: u64::from(id) });
+        }
+        let transfer = n2sm::release_command_transfer().unwrap_or_default();
+        (session::release_command(psi, pti), transfer)
     }
 
     fn on_modified(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, result: &N4ModifyResult) {
         let Some(c) = self.contexts.get_mut(&msg.corr_id()) else { return };
         let Some(corr) = c.waiting.take() else { return };
         let (to, psi) = ((c.amf, corr), c.pdu_session_id);
-        self.update_result(ctx, to, psi, result.outcome(), &[]);
+        self.update_result(ctx, to, psi, Answer::outcome(result.outcome()));
     }
 
-    fn update_result(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), psi: u8, outcome: Outcome, n2: &[u8]) {
+    fn update_result(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), psi: u8, answer: Answer<'_>) {
         let sent = ctx.alloc::<UpdateSmContextResult>(to.0).and_then(|r| {
             let mut r = r.with_corr_id(to.1).with_flags(flags::RESPONSE);
-            r.pdu_session_id = psi;
-            r.set_outcome(outcome);
-            r.n2.set(n2);
+            (r.pdu_session_id, r.released, r.n2_kind) = (psi, u8::from(answer.released), answer.n2_kind);
+            r.set_outcome(answer.outcome);
+            r.n1.set(answer.n1);
+            r.n2.set(answer.n2);
             ctx.send(r)
         });
         if let Err(e) = sent {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", to.0);
+        }
+    }
+
+    /// The network releases session `id` (TS 23.502 §4.3.4.2): the UE told
+    /// through its AMF.
+    fn release_by_network(&mut self, ctx: &mut Context<'_>, id: u32) -> bool {
+        let Some(c) = self.contexts.get(&id).filter(|c| !c.releasing) else { return false };
+        let (amf, amf_ue, psi, supi) = (c.amf, c.amf_ue, c.pdu_session_id, c.supi);
+        let (command, transfer) = self.release(ctx, id, 0);
+        log!(self.log, ctx, Info, "{supi}: PDU session {psi} released by the network");
+        let sent = ctx.alloc::<SmNotify>(amf).and_then(|m| {
+            let mut m = m.with_corr_id(amf_ue).with_flags(flags::REQUEST);
+            (m.sm_ctx, m.pdu_session_id, m.n2_kind) = (id, psi, n2::RELEASE);
+            m.n1.set(&command);
+            m.n2.set(&transfer);
+            ctx.send(m)
+        });
+        if sent.is_err() {
+            self.remove(ctx, id);
+        }
+        true
+    }
+
+    fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
+        let (status, json) = match (request.method(), request.path().split_once('/').unwrap_or((request.path(), ""))) {
+            (Some(Method::Get), ("sessions", "")) => {
+                let mut list: Vec<_> = self.contexts.iter().collect();
+                list.sort_by_key(|(id, _)| **id);
+                let list: Vec<_> = list
+                    .into_iter()
+                    .map(|(id, c)| {
+                        json!({ "id": id, "supi": c.supi.as_str(), "pdu_session_id": c.pdu_session_id,
+                                "ue_ip": c.ue_ip.to_string(), "dnn": self.config.dnn,
+                                "state": if c.releasing { "releasing" } else { "active" } })
+                    })
+                    .collect();
+                (200, json!(list))
+            }
+            (Some(Method::Delete), ("sessions", id)) => match id.parse() {
+                Ok(id) if self.release_by_network(ctx, id) => (200, json!({ "releasing": id })),
+                _ => (404, json!({ "error": format!("no session {id:?}") })),
+            },
+            _ => (404, json!({ "error": format!("no resource {:?}", request.path()) })),
+        };
+        if let Err(e) = send_reply(ctx, msg, status, &json.to_string()) {
+            log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
         }
     }
 
@@ -332,6 +463,13 @@ impl ExecutionObject for Smf {
             self.on_update(ctx, msg, request);
         } else if let Some(result) = msg.body::<N4ModifyResult>() {
             self.on_modified(ctx, msg, result);
+        } else if let Some(result) = msg.body::<SmNotifyResult>() {
+            // The UE could not be reached: the session ends here.
+            if result.outcome() != Outcome::Ok {
+                self.remove(ctx, result.sm_ctx);
+            }
+        } else if let Some(request) = msg.body::<Manage>() {
+            self.on_manage(ctx, msg, request);
         } else if let Some(request) = msg.body::<ReleaseSmContext>() {
             self.remove(ctx, request.sm_ctx);
         }

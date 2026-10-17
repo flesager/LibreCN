@@ -8,6 +8,10 @@
 //! AMF ── UpdateSmContext (deactivate: the UE is idle) ─▶ SMF ── N4Modify ─────▶ UPF (no downlink)
 //! AMF ── UpdateSmContext (activate: the UE is back) ───▶ SMF
 //! AMF ◀─ UpdateSmContextResult (N2 setup again) ──────── SMF
+//! AMF ── UpdateSmContext (N1: release request...) ─────▶ SMF ── N4Delete ─────▶ UPF
+//! AMF ◀─ UpdateSmContextResult (N1 command, N2 release) SMF
+//! AMF ◀─ SmNotify (network-requested: N1, N2) ────────── SMF
+//! AMF ── SmNotifyResult (delivered, or the UE is idle) ▶ SMF
 //! AMF ── ReleaseSmContext ─────────────────────────────▶ SMF ── N4Delete ─────▶ UPF
 //! ```
 //!
@@ -102,6 +106,17 @@ pub mod update {
     pub const DEACTIVATE: u8 = 3;
     /// The UE is back: N2 to set the session up again (upCnxState ACTIVATING).
     pub const ACTIVATE: u8 = 4;
+    /// N1: a 5GSM message of the UE for this session.
+    pub const N1: u8 = 5;
+}
+
+/// What the N2 container of an answer is, for the NGAP procedure to run.
+pub mod n2 {
+    pub const NONE: u8 = 0;
+    /// PDU Session Resource Setup Request Transfer.
+    pub const SETUP: u8 = 1;
+    /// PDU Session Resource Release Command Transfer.
+    pub const RELEASE: u8 = 2;
 }
 
 /// AMF → SMF: Nsmf_PDUSession_UpdateSMContext.
@@ -112,20 +127,24 @@ pub struct UpdateSmContext {
     /// [`update`] kind.
     pub kind: u8,
     _pad: u8,
-    /// The gNB's N2 answer, for the setup kinds.
-    pub n2: Container,
+    /// N2 (the gNB's answer) or N1 (the UE's message), per `kind`.
+    pub container: Container,
 }
 
 impl MsgBody for UpdateSmContext {
     const MSG_ID: u32 = id(family::PDU_SESSION, 3);
 }
 
-/// SMF → AMF; with N2 (PDU Session Resource Setup Request Transfer) when activating.
+/// SMF → AMF: N1 for the UE, N2 for the gNB ([`n2`] kind), either may be
+/// empty; `released` when the session is over.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct UpdateSmContextResult {
     outcome: u8,
     pub pdu_session_id: u8,
+    pub released: u8,
+    pub n2_kind: u8,
+    pub n1: Container,
     pub n2: Container,
 }
 
@@ -217,6 +236,38 @@ impl MsgBody for N4Delete {
     const MSG_ID: u32 = id(family::PDU_SESSION, 10);
 }
 
+/// SMF → AMF, unsolicited (Namf_Communication_N1N2MessageTransfer): the
+/// network releases a session. `corr_id` is the AMF's id of the UE when it
+/// last spoke to the SMF.
+#[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct SmNotify {
+    pub sm_ctx: u32,
+    pub pdu_session_id: u8,
+    pub n2_kind: u8,
+    pub n1: Container,
+    pub n2: Container,
+    _pad: [u8; 2],
+}
+
+impl MsgBody for SmNotify {
+    const MSG_ID: u32 = id(family::PDU_SESSION, 11);
+}
+
+/// AMF → SMF: delivered, or `ContextNotFound` if the UE cannot be reached
+/// (idle or gone): the SMF then ends the session alone.
+#[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct SmNotifyResult {
+    outcome: u8,
+    _pad: [u8; 3],
+    pub sm_ctx: u32,
+}
+
+impl MsgBody for SmNotifyResult {
+    const MSG_ID: u32 = id(family::PDU_SESSION, 12);
+}
+
 macro_rules! outcome {
     ($($ty:ident),*) => {$(
         impl $ty {
@@ -231,7 +282,7 @@ macro_rules! outcome {
     )*};
 }
 
-outcome!(CreateSmContextResult, UpdateSmContextResult, N4EstablishResult, N4ModifyResult);
+outcome!(CreateSmContextResult, UpdateSmContextResult, SmNotifyResult, N4EstablishResult, N4ModifyResult);
 
 #[cfg(test)]
 mod tests {

@@ -27,6 +27,17 @@ pub(crate) struct Idle {
     since: Time,
 }
 
+impl Idle {
+    /// The session with SMF context `sm_ctx`, if this UE has it, is gone.
+    pub(crate) fn forget_session(&mut self, sm_ctx: u32) {
+        for slot in &mut self.sessions {
+            if slot.is_some_and(|s| s.sm_ctx == Some(sm_ctx)) {
+                *slot = None;
+            }
+        }
+    }
+}
+
 impl Amf {
     /// A UE context leaves N2: a registered UE goes idle, its sessions'
     /// user plane deactivated; any other is forgotten, its sessions released.

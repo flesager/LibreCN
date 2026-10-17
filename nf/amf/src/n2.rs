@@ -52,6 +52,12 @@ pub(crate) enum Incoming {
         setup: Vec<(u8, Vec<u8>)>,
         failed: Vec<(u8, Vec<u8>)>,
     },
+    /// PDU Session Resource Release Response: the PDU session IDs released.
+    SessionRelease {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        released: Vec<u8>,
+    },
     /// A procedure this AMF does not handle, with the criticality the
     /// sender gave it (TS 38.413 §10.3: decides whether to answer).
     Unsupported {
@@ -126,6 +132,24 @@ pub(crate) fn decode(bytes: &[u8]) -> Incoming {
                 })
                 .unwrap_or_else(Incoming::Malformed);
         }
+        NGAPPDU::successfulOutcome(outcome) if outcome.procedure_code == ID_PDUSESSION_RESOURCE_RELEASE => {
+            return open::<PDUSessionResourceReleaseResponse>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    let released = match find(ies, ID_PDUSESSION_RESOURCE_RELEASED_LIST_REL_RES) {
+                        Some(v) => open::<PDUSessionResourceReleasedListRelRes>(v)
+                            .map_err(|e| format!("released list: {e}"))?
+                            .0
+                            .into_iter()
+                            .map(|i| i.p_dusession_id.0)
+                            .collect(),
+                        None => vec![],
+                    };
+                    Ok(Incoming::SessionRelease { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, released })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
         other => {
             let procedure = procedure_code(&other).unwrap_or(0);
             return Incoming::Unsupported { procedure, criticality: Criticality::ignore };
@@ -195,6 +219,7 @@ ie! {
     AnonymousInitialContextSetupResponseProtocolIEs: |e: &Self| e.id;
     AnonymousInitialContextSetupFailureProtocolIEs: |e: &Self| e.id;
     AnonymousPDUSessionResourceSetupResponseProtocolIEs: |e: &Self| e.id;
+    AnonymousPDUSessionResourceReleaseResponseProtocolIEs: |e: &Self| e.id;
 }
 
 fn find<E: Ie>(ies: &[E], id: ProtocolIEID) -> Option<&Any> {
@@ -459,6 +484,43 @@ pub(crate) fn pdu_session_resource_setup_request(
     let message = wrap(&PDUSessionResourceSetupRequest::new(PDUSessionResourceSetupRequestProtocolIEs(ies)))
         .map_err(encoding_error)?;
     pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_PDUSESSION_RESOURCE_SETUP, Criticality::reject, message)))
+}
+
+/// PDU SESSION RESOURCE RELEASE COMMAND for one session: the UE's NAS (the
+/// SMF's Release Command in DL NAS Transport) and the SMF's transfer.
+pub(crate) fn pdu_session_resource_release_command(
+    amf_id: AmfUeId,
+    ran_id: RanUeId,
+    pdu_session_id: u8,
+    nas: Option<&[u8]>,
+    transfer: &[u8],
+) -> Result<Vec<u8>, String> {
+    use AnonymousPDUSessionResourceReleaseCommandProtocolIEsCriticality::{ignore, reject};
+    let item = PDUSessionResourceToReleaseItemRelCmd::new(PDUSessionID(pdu_session_id), transfer.to_vec().into(), None);
+    let ie = |id: ProtocolIEID, criticality, value: Result<Any, EncodeError>| {
+        value
+            .map(|v| AnonymousPDUSessionResourceReleaseCommandProtocolIEs::new(id.0, criticality, v))
+            .map_err(encoding_error)
+    };
+    let mut ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, reject, wrap(&AMFUENGAPID(amf_id)))?,
+        ie(ID_RAN_UE_NGAP_ID, reject, wrap(&RANUENGAPID(ran_id)))?,
+    ];
+    if let Some(nas) = nas {
+        ies.push(ie(ID_NAS_PDU, ignore, wrap(&NASPDU(nas.into())))?);
+    }
+    ies.push(ie(
+        ID_PDUSESSION_RESOURCE_TO_RELEASE_LIST_REL_CMD,
+        reject,
+        wrap(&PDUSessionResourceToReleaseListRelCmd(vec![item])),
+    )?);
+    let message = wrap(&PDUSessionResourceReleaseCommand::new(PDUSessionResourceReleaseCommandProtocolIEs(ies)))
+        .map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(
+        ID_PDUSESSION_RESOURCE_RELEASE,
+        Criticality::reject,
+        message,
+    )))
 }
 
 /// UE CONTEXT RELEASE COMMAND for a UE.

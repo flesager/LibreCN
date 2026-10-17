@@ -1,4 +1,5 @@
-//! 5GSM messages (TS 24.501 §8.3) of PDU session establishment, for the SMF.
+//! 5GSM messages (TS 24.501 §8.3) of PDU session establishment and release,
+//! for the SMF.
 //!
 //! A 5GSM message is the extended protocol discriminator, the PDU session
 //! ID, the procedure transaction identity (PTI), the message type, then the
@@ -12,7 +13,11 @@ pub mod kind {
     pub const ESTABLISHMENT_REQUEST: u8 = 0xc1;
     pub const ESTABLISHMENT_ACCEPT: u8 = 0xc2;
     pub const ESTABLISHMENT_REJECT: u8 = 0xc3;
+    pub const MODIFICATION_REQUEST: u8 = 0xc9;
+    pub const MODIFICATION_REJECT: u8 = 0xca;
     pub const RELEASE_REQUEST: u8 = 0xd1;
+    pub const RELEASE_COMMAND: u8 = 0xd3;
+    pub const RELEASE_COMPLETE: u8 = 0xd4;
     pub const STATUS: u8 = 0xd6;
 }
 
@@ -22,7 +27,11 @@ pub fn name(kind: u8) -> &'static str {
         kind::ESTABLISHMENT_REQUEST => "PDU Session Establishment Request",
         kind::ESTABLISHMENT_ACCEPT => "PDU Session Establishment Accept",
         kind::ESTABLISHMENT_REJECT => "PDU Session Establishment Reject",
+        kind::MODIFICATION_REQUEST => "PDU Session Modification Request",
+        kind::MODIFICATION_REJECT => "PDU Session Modification Reject",
         kind::RELEASE_REQUEST => "PDU Session Release Request",
+        kind::RELEASE_COMMAND => "PDU Session Release Command",
+        kind::RELEASE_COMPLETE => "PDU Session Release Complete",
         kind::STATUS => "5GSM Status",
         _ => "5GSM message",
     }
@@ -34,6 +43,7 @@ pub mod cause {
     pub const MISSING_OR_UNKNOWN_DNN: u8 = 27;
     pub const UNKNOWN_PDU_SESSION_TYPE: u8 = 28;
     pub const REQUEST_REJECTED: u8 = 31;
+    pub const REGULAR_DEACTIVATION: u8 = 36;
     pub const SERVICE_OPTION_NOT_SUPPORTED: u8 = 32;
     pub const IPV4_ONLY_ALLOWED: u8 = 50;
     pub const INVALID_PDU_SESSION_IDENTITY: u8 = 43;
@@ -64,10 +74,13 @@ pub enum SmUplink {
         session_type: Option<u8>,
         ssc_mode: Option<u8>,
     },
+    ReleaseRequest,
+    ReleaseComplete,
+    ModificationRequest,
     Status {
         cause: u8,
     },
-    /// Understood but not decoded: release, modification...
+    /// Not a message the SMF handles.
     Other(u8),
 }
 
@@ -93,6 +106,9 @@ impl SmUplink {
                 }
                 SmUplink::EstablishmentRequest { session_type, ssc_mode }
             }
+            kind::RELEASE_REQUEST => SmUplink::ReleaseRequest,
+            kind::RELEASE_COMPLETE => SmUplink::ReleaseComplete,
+            kind::MODIFICATION_REQUEST => SmUplink::ModificationRequest,
             kind::STATUS => SmUplink::Status { cause: r.u8()? },
             other => SmUplink::Other(other),
         };
@@ -123,6 +139,13 @@ pub enum SmDownlink<'a> {
     EstablishmentReject {
         cause: u8,
     },
+    /// PTI 0 when the network releases on its own.
+    ReleaseCommand {
+        cause: u8,
+    },
+    ModificationReject {
+        cause: u8,
+    },
     Status {
         cause: u8,
     },
@@ -136,6 +159,8 @@ impl SmDownlink<'_> {
         match self {
             SmDownlink::EstablishmentAccept { .. } => kind::ESTABLISHMENT_ACCEPT,
             SmDownlink::EstablishmentReject { .. } => kind::ESTABLISHMENT_REJECT,
+            SmDownlink::ReleaseCommand { .. } => kind::RELEASE_COMMAND,
+            SmDownlink::ModificationReject { .. } => kind::MODIFICATION_REJECT,
             SmDownlink::Status { .. } => kind::STATUS,
         }
     }
@@ -171,7 +196,10 @@ impl SmDownlink<'_> {
                 w.tlve(0x79, |w| w.bytes(&[flow.qfi & 0x3f, 0x20, 0x41, 0x01, 0x01, flow.five_qi]));
                 w.tlv(0x25, |w| Dnn::encode(dnn, w));
             }
-            SmDownlink::EstablishmentReject { cause } | SmDownlink::Status { cause } => w.u8(cause),
+            SmDownlink::EstablishmentReject { cause }
+            | SmDownlink::ReleaseCommand { cause }
+            | SmDownlink::ModificationReject { cause }
+            | SmDownlink::Status { cause } => w.u8(cause),
         }
         w.finish()
     }
@@ -189,7 +217,11 @@ mod tests {
         let (header, message) = SmUplink::decode(&pdu).unwrap();
         assert_eq!(header, Header { pdu_session_id: 1, pti: 1, kind: kind::ESTABLISHMENT_REQUEST });
         assert_eq!(message, SmUplink::EstablishmentRequest { session_type: Some(1), ssc_mode: Some(1) });
-        assert_eq!(SmUplink::decode(&hex("2e0101d1")).unwrap().1, SmUplink::Other(kind::RELEASE_REQUEST));
+        // UERANSIM's release request carries a 5GSM cause (#36): ignored.
+        assert_eq!(SmUplink::decode(&hex("2e0102d1 5924")).unwrap().1, SmUplink::ReleaseRequest);
+        assert_eq!(SmUplink::decode(&hex("2e0100d4")).unwrap().1, SmUplink::ReleaseComplete);
+        assert_eq!(SmUplink::decode(&hex("2e0103c9")).unwrap().1, SmUplink::ModificationRequest);
+        assert_eq!(SmUplink::decode(&hex("2e0101c5")).unwrap().1, SmUplink::Other(0xc5));
         assert_eq!(SmUplink::decode(&hex("2e01")), Err(Error::Truncated));
         assert!(SmUplink::decode(&hex("7e0001c1")).is_err());
     }
@@ -213,5 +245,7 @@ mod tests {
         let reject = SmDownlink::EstablishmentReject { cause: cause::MISSING_OR_UNKNOWN_DNN };
         let n = reject.encode(5, 3, &mut buf).unwrap();
         assert_eq!(buf[..n], hex("2e0503c31b")[..]);
+        let n = SmDownlink::ReleaseCommand { cause: cause::REGULAR_DEACTIVATION }.encode(1, 0, &mut buf).unwrap();
+        assert_eq!(buf[..n], hex("2e0100d324")[..], "network-requested: PTI 0");
     }
 }

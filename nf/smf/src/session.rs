@@ -78,13 +78,30 @@ pub fn accept(config: &SmfConfig, pdu_session_id: u8, pti: u8, slice: Snssai, ad
     out[..n].to_vec()
 }
 
+/// PDU Session Release Command, cause #36 (regular deactivation).
+pub fn release_command(pdu_session_id: u8, pti: u8) -> Vec<u8> {
+    encode(SmDownlink::ReleaseCommand { cause: cause::REGULAR_DEACTIVATION }, pdu_session_id, pti)
+}
+
+/// PDU Session Modification Reject: no QoS change is offered (#31).
+pub fn modification_reject(pdu_session_id: u8, pti: u8) -> Vec<u8> {
+    encode(SmDownlink::ModificationReject { cause: cause::REQUEST_REJECTED }, pdu_session_id, pti)
+}
+
+/// 5GSM Status.
+pub fn status(pdu_session_id: u8, pti: u8, cause: u8) -> Vec<u8> {
+    encode(SmDownlink::Status { cause }, pdu_session_id, pti)
+}
+
+fn encode(message: SmDownlink<'_>, pdu_session_id: u8, pti: u8) -> Vec<u8> {
+    let mut out = [0u8; 8];
+    let n = message.encode(pdu_session_id, pti, &mut out).expect("5 bytes");
+    out[..n].to_vec()
+}
+
 /// PDU Session Establishment Reject.
 pub fn reject(pdu_session_id: u8, refused: Refused) -> Vec<u8> {
-    let mut out = [0u8; 8];
-    let n = SmDownlink::EstablishmentReject { cause: refused.cause }
-        .encode(pdu_session_id, refused.pti, &mut out)
-        .expect("5 bytes");
-    out[..n].to_vec()
+    encode(SmDownlink::EstablishmentReject { cause: refused.cause }, pdu_session_id, refused.pti)
 }
 
 #[cfg(test)]
@@ -114,6 +131,8 @@ mod tests {
         assert_eq!(decide(&c, 1, SST1, "", &hex("2e 01 07 d1")), refused(cause::MESSAGE_TYPE_NOT_IMPLEMENTED));
         assert_eq!(decide(&c, 1, SST1, "", &hex("2e 01")).unwrap_err().cause, cause::INVALID_MANDATORY_INFORMATION);
         assert_eq!(reject(1, Refused { pti: 7, cause: 27 }), hex("2e0107c31b"));
+        assert_eq!(release_command(1, 0), hex("2e0100d324"));
+        assert_eq!(modification_reject(1, 3), hex("2e0103ca1f"));
         assert_eq!(accept(&c, 1, 7, SST1, Ipv4Addr::new(10, 45, 0, 2))[..5], hex("2e0107c211")[..]);
     }
 }

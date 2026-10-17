@@ -1,13 +1,17 @@
 //! PDU sessions as the AMF carries them (TS 23.502 §4.3.2.2.1): the UE's
 //! 5GSM message goes to the SMF (5GMM, `mm`); the SMF's answer goes to the
 //! UE alone (a reject) or with the gNB's setup (PDU Session Resource Setup);
-//! the gNB's answer goes back to the SMF. The AMF reads neither N1 nor N2.
+//! the gNB's answer goes back to the SMF. Later, the SMF's N1 and N2 for an
+//! existing session (release, reactivation) go the same ways, as do the
+//! network's own releases (`SmNotify`). The AMF reads neither N1 nor N2.
 
 use librecn_common::log;
+use librecn_sbi::Outcome;
 use librecn_sbi::pdu_session::{
-    CreateSmContextResult, ReleaseSmContext, UpdateSmContext, UpdateSmContextResult, update,
+    CreateSmContextResult, ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult,
+    n2 as n2_kind, update,
 };
-use librecn_scheduler::Context;
+use librecn_scheduler::{Context, Message};
 
 use crate::ue::{AmfUeId, UeContext};
 use crate::{Amf, n2, request};
@@ -48,21 +52,94 @@ impl Amf {
         });
     }
 
-    /// The SMF's answer to an update: for an activation, the gNB's setup again.
+    /// The SMF's answer to an update: what it carries goes to the UE (N1)
+    /// and the gNB (N2: setup again, release).
     pub(crate) fn on_sm_updated(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, result: &UpdateSmContextResult) {
-        let (psi, outcome, transfer) = (result.pdu_session_id, result.outcome(), result.n2.get());
-        if outcome != librecn_sbi::Outcome::Ok {
-            return log!(self.log, ctx, Error, "UE {amf_id}: PDU session {psi} not updated: {outcome:?}");
+        let psi = result.pdu_session_id;
+        if result.outcome() != Outcome::Ok {
+            return log!(self.log, ctx, Error, "UE {amf_id}: PDU session {psi} not updated: {:?}", result.outcome());
         }
-        if transfer.is_empty() {
-            return log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} set up");
+        if result.released != 0 {
+            if let Some(slot) = self.ues.get_mut_by_id(amf_id).and_then(|ue| ue.sessions.get_mut(usize::from(psi))) {
+                *slot = None;
+            }
+            return log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} released");
         }
-        let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
-        let Some(Some(session)) = ue.sessions.get(usize::from(psi)) else { return };
-        let (ran_id, assoc, stream, slice) = (ue.ran_id, ue.assoc, ue.stream, session.snssai);
-        let request = n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, None, slice, transfer);
-        self.send(ctx, assoc, stream, request, "PDU Session Resource Setup Request");
-        log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} reactivated");
+        match (result.n2_kind, result.n1.get()) {
+            (n2_kind::NONE, []) => log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} set up"),
+            (n2_kind::NONE, n1) => self.with_mm(ctx, amf_id, |mm, _, _, port| mm.send_session(psi, n1, port)),
+            (kind, n1) => {
+                self.deliver(ctx, amf_id, psi, kind, n1, result.n2.get());
+            }
+        }
+    }
+
+    /// The network releases a session (the SMF's N1N2 message transfer): to
+    /// the UE if it is connected; else the SMF ends it alone.
+    pub(crate) fn on_sm_notify(
+        &mut self,
+        ctx: &mut Context<'_>,
+        msg: &Message<'_>,
+        amf_id: AmfUeId,
+        notify: &SmNotify,
+    ) {
+        let (psi, sm_ctx) = (notify.pdu_session_id, notify.sm_ctx);
+        let connected = self
+            .ues
+            .get_mut_by_id(amf_id)
+            .and_then(|ue| ue.sessions.get(usize::from(psi)).copied().flatten())
+            .is_some_and(|s| s.sm_ctx == Some(sm_ctx));
+        let delivered = connected && self.deliver(ctx, amf_id, psi, notify.n2_kind, notify.n1.get(), notify.n2.get());
+        if !delivered {
+            for idle in self.idle.values_mut() {
+                idle.forget_session(sm_ctx);
+            }
+            log!(self.log, ctx, Info, "PDU session context {sm_ctx} released by the network, the UE not reached");
+        }
+        let outcome = if delivered { Outcome::Ok } else { Outcome::ContextNotFound };
+        let sent = ctx.alloc::<SmNotifyResult>(msg.from()).and_then(|r| {
+            let mut r = r.with_corr_id(msg.corr_id()).with_flags(librecn_common::msg::flags::RESPONSE);
+            r.sm_ctx = sm_ctx;
+            r.set_outcome(outcome);
+            ctx.send(r)
+        });
+        if let Err(e) = sent {
+            log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
+        }
+    }
+
+    /// N1 and N2 of the SMF to a connected UE and its gNB; false if the UE is gone.
+    fn deliver(
+        &mut self,
+        ctx: &mut Context<'_>,
+        amf_id: AmfUeId,
+        psi: u8,
+        kind: u8,
+        n1: &[u8],
+        transfer: &[u8],
+    ) -> bool {
+        let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return false };
+        let Some(Some(session)) = ue.sessions.get(usize::from(psi)).copied() else { return false };
+        let slice = session.snssai;
+        self.with_mm(ctx, amf_id, |mm, _, _, port| {
+            let mut sealed = [0u8; 512];
+            let nas = match n1 {
+                [] => None,
+                n1 => mm.seal_session(psi, n1, &mut sealed, port).map(|n| &sealed[..n]),
+            };
+            let ran_id = port.ids.1;
+            if kind == n2_kind::SETUP {
+                let request = n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, nas, slice, transfer);
+                port.ngap(request, "PDU Session Resource Setup Request");
+            } else {
+                let command = n2::pdu_session_resource_release_command(amf_id, ran_id, psi, nas, transfer);
+                port.ngap(command, "PDU Session Resource Release Command");
+            }
+        });
+        if kind == n2_kind::SETUP {
+            log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} reactivated");
+        }
+        true
     }
 
     /// The gNB's PDU Session Resource Setup Response: each transfer to the SMF.
@@ -87,7 +164,7 @@ impl Amf {
             }
             request::<UpdateSmContext>(ctx, &mut self.smf, &mut self.log, amf_id, |m| {
                 (m.sm_ctx, m.kind) = (sm_ctx, kind);
-                m.n2.set(&transfer);
+                m.container.set(&transfer);
             });
         }
     }

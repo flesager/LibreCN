@@ -20,9 +20,10 @@ use std::fmt;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Result of an operation: success, or the cause of its ProblemDetails.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Outcome {
+    #[default]
     Ok = 0,
     /// USER_NOT_FOUND.
     UserNotFound = 1,

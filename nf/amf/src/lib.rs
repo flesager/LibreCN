@@ -44,7 +44,8 @@ use librecn_ngap::{
     ID_UECONTEXT_RELEASE_REQUEST, ID_UPLINK_NASTRANSPORT, procedure_name,
 };
 use librecn_sbi::pdu_session::{
-    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, UpdateSmContext, UpdateSmContextResult, update,
+    CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, SmNotify, UpdateSmContext, UpdateSmContextResult,
+    update,
 };
 use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
 use librecn_sbi::{DnnText, ServingNetwork, SupiOrSuci};
@@ -251,6 +252,10 @@ impl Amf {
                 Ok(_) => self.on_session_setup(ctx, amf_id, setup, failed),
                 Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
             },
+            Incoming::SessionRelease { amf_id, ran_id, released } => match self.ues.get_mut(assoc, amf_id, ran_id) {
+                Ok(_) => log!(self.log, ctx, Info, "UE {amf_id}: the gNB released PDU session(s) {released:?}"),
+                Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
+            },
             Incoming::Malformed(e) => {
                 log!(self.log, ctx, Error, "malformed NGAP from association {assoc}: {e}");
                 self.error_indication(ctx, assoc, None, Cause::protocol(CauseProtocol::transfer_syntax_error));
@@ -368,6 +373,8 @@ impl Amf {
             self.on_sm_created(ctx, amf_id, result);
         } else if let Some(result) = msg.body::<UpdateSmContextResult>() {
             self.on_sm_updated(ctx, amf_id, result);
+        } else if let Some(notify) = msg.body::<SmNotify>() {
+            self.on_sm_notify(ctx, msg, amf_id, notify);
         }
     }
 
@@ -594,9 +601,21 @@ impl Effects for Port<'_, '_, '_> {
 
     fn session(&mut self, r: &SessionRequest<'_>) -> Result<(), u8> {
         let psi = r.pdu_session_id;
-        if !r.initial || self.sessions[usize::from(psi)].is_some() {
-            log!(self.log, self.ctx, Info, "UE {}: PDU session {psi}: only new sessions are served", self.ids.0);
-            return Err(librecn_nas::mm::cause::PAYLOAD_NOT_FORWARDED);
+        match (r.initial, self.sessions[usize::from(psi)]) {
+            // A message for an existing session (release, modification...): to its SMF context.
+            (false, Some(PduSession { sm_ctx: Some(sm_ctx), .. })) => {
+                let sent = request::<UpdateSmContext>(self.ctx, self.smf, self.log, self.ids.0, |m| {
+                    (m.sm_ctx, m.kind) = (sm_ctx, update::N1);
+                    m.container.set(r.container);
+                });
+                return if sent { Ok(()) } else { Err(librecn_nas::mm::cause::PAYLOAD_NOT_FORWARDED) };
+            }
+            (true, None) => {}
+            _ => {
+                let what = if r.initial { "already exists" } else { "is unknown" };
+                log!(self.log, self.ctx, Info, "UE {}: PDU session {psi} {what}: not forwarded", self.ids.0);
+                return Err(librecn_nas::mm::cause::PAYLOAD_NOT_FORWARDED);
+            }
         }
         let dnn = match r.dnn {
             Some(dnn) => DnnText::format(format_args!("{dnn}")),

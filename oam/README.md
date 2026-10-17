@@ -81,6 +81,8 @@ server answers 503 at once. Today:
 | UDM | `GET subscribers` | `[{"supi", "amf", "sqn"}]`: keys never leave the UDM |
 | UDM | `POST subscribers` | adds one subscriber or an array, fields of the configuration (`supi`, `k`, `opc`, optional `amf`, `sqn`): 201, 409 if one exists |
 | UDM | `DELETE subscribers/{supi}` | 200, or 404 |
+| SMF | `GET sessions` | `[{"id", "supi", "pdu_session_id", "ue_ip", "dnn", "state"}]` |
+| SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
 
 The GUI's Subscribers view uses them.
 
