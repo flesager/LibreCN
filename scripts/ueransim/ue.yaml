@@ -3,7 +3,7 @@
 supi: 'imsi-999700000000001'
 mcc: '999'
 mnc: '70'
-protectionScheme: 0
+protectionScheme: 1  # ECIES Profile A: the SUCI hides the MSIN (the core holds the private key)
 homeNetworkPublicKey: '5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650'
 homeNetworkPublicKeyId: 1
 routingIndicator: '0000'

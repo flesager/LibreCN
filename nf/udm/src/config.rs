@@ -1,4 +1,5 @@
-//! UDM configuration, from the deployment's `params`: the subscribers.
+//! UDM configuration, from the deployment's `params`: the subscribers and
+//! the home network keys (SUCI Profile A).
 //!
 //! ```toml
 //! [[nf]]
@@ -12,6 +13,9 @@
 //! sqn = "000000000000"  # optional: the last SQN used
 //! count = 1             # optional: this many subscribers from this SUPI on,
 //!                       # the same keys (test fleets)
+//! [[nf.params.home_network_keys]]   # optional: SUCI Profile A (ECIES, X25519)
+//! id = 1                # the SUCI's home network public key identifier
+//! private_key = "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d"
 //! ```
 
 use std::collections::HashMap;
@@ -58,19 +62,47 @@ fn default_amf() -> String {
     "8000".into()
 }
 
+/// A home network key pair for SUCI Profile A: its id (the SUCI's key
+/// identifier) and its private key.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeyParams {
+    id: u8,
+    private_key: String,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 struct Params {
     subscribers: Vec<SubscriberParams>,
+    home_network_keys: Vec<KeyParams>,
+}
+
+fn params(params: &serde_json::Value) -> Result<Params, String> {
+    if params.is_null() {
+        return Ok(Params::default());
+    }
+    serde_json::from_value(params.clone()).map_err(|e| format!("invalid UDM parameters: {e}"))
+}
+
+/// Home network private keys for SUCI Profile A (ECIES, X25519), by key id.
+pub type HomeNetworkKeys = HashMap<u8, [u8; 32]>;
+
+/// The home network keys of the deployment `params`.
+pub fn keys_from_params(params: &serde_json::Value) -> Result<HomeNetworkKeys, String> {
+    let mut keys = HomeNetworkKeys::new();
+    for k in self::params(params)?.home_network_keys {
+        let private = hex(&k.private_key).ok_or_else(|| format!("home network key {}: 64 hex digits", k.id))?;
+        if keys.insert(k.id, private).is_some() {
+            return Err(format!("home network key {}: listed twice", k.id));
+        }
+    }
+    Ok(keys)
 }
 
 /// Subscribers by SUPI.
 pub fn from_params(params: &serde_json::Value) -> Result<HashMap<String, Subscriber>, String> {
-    let p: Params = if params.is_null() {
-        Params::default()
-    } else {
-        serde_json::from_value(params.clone()).map_err(|e| format!("invalid UDM parameters: {e}"))?
-    };
+    let p = self::params(params)?;
     let mut subscribers = HashMap::with_capacity(p.subscribers.iter().map(|s| s.count as usize).sum());
     for s in p.subscribers {
         for (supi, subscriber) in parse(s)? {
@@ -161,6 +193,16 @@ mod tests {
         assert!(bad("supi", "nai-x@y").contains("imsi-<digits>"));
         assert!(bad("sqn", "zz0000000000").contains("sqn"));
         assert!(bad("supi", "imsi-").contains("imsi-<digits>"));
+    }
+
+    #[test]
+    fn home_network_keys_are_read_and_checked() {
+        let key = "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d";
+        let params = serde_json::json!({ "home_network_keys": [{ "id": 1, "private_key": key }] });
+        assert_eq!(keys_from_params(&params).unwrap()[&1][..2], [0xc5, 0x3c]);
+        assert!(keys_from_params(&serde_json::Value::Null).unwrap().is_empty());
+        let short = serde_json::json!({ "home_network_keys": [{ "id": 2, "private_key": "c53c" }] });
+        assert!(keys_from_params(&short).unwrap_err().contains("64 hex digits"));
     }
 
     #[test]

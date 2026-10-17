@@ -13,7 +13,7 @@ their EO names (parameters `ausf` and `smf` of the AMF, `udm` of the AUSF,
 | [`ausf`](ausf/) | AUSF | 5G AKA (Nausf_UEAuthentication): challenge with HXRES*, confirmation, K_SEAF; contexts expire after 30 s |
 | [`smf`](smf/) | SMF | IPv4 PDU session establishment: checks (DNN, slice, type, SSC mode), address pool, default QoS flow, N1 accept/reject, N2 transfers, N4 to the UPF; release by the UE or the network (`/api/nfs/smf/sessions`); user plane deactivated and reactivated with the UE's idleness, downlink data for an idle UE passed to the AMF; a UE's modification request rejected |
 | [`upf`](upf/) | UPF | N4 sessions; GTP-U on N3 and a TUN device on N6, both ways, IPv4, source address checked, no allocation per packet; downlink packets of idle UEs parked (64 in all) and reported to the SMF; packet and byte counters on `/metrics`; event, poll or hybrid mode, measured in [`upf/README.md`](upf/README.md) |
-| [`udm`](udm/) | UDM | subscribers from the deployment or the web API (`/api/nfs/udm/subscribers`, GUI view); SUCI de-concealment (null scheme); authentication vectors (Milenage), SQN resynchronisation |
+| [`udm`](udm/) | UDM | subscribers from the deployment or the web API (`/api/nfs/udm/subscribers`, GUI view); SUCI de-concealment (null scheme, ECIES Profile A with the home network keys of the deployment); authentication vectors (Milenage), SQN resynchronisation |
 
 Each NF keeps protocol decisions as pure functions on domain values (unit
 tested without I/O), codecs in one module, and the EO as thin glue.
@@ -43,5 +43,5 @@ Deliberately left out of this release, to be added when a step needs them:
 - **Subscription data** (Nudm_SDM, Nudm_UECM): the allowed NSSAI is the
   requested slices the AMF serves, else all of them; the SMF's DNN, pool
   and QoS apply to every UE.
-- **SUCI protection schemes** A and B (ECIES), EAP-AKA', NIA1/NIA3,
+- **SUCI protection scheme** B (ECIES, P-256: UERANSIM does not support it), EAP-AKA', NIA1/NIA3,
   NEA1/NEA3, the AUSF's result confirmation to the UDM.

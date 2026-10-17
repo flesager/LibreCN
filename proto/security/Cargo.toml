@@ -1,6 +1,6 @@
 [package]
 name = "librecn-security"
-description = "3GPP security: Milenage (TS 35.206), 5G key derivation (TS 33.501 Annex A), 128-NIA2 and 128-NEA2"
+description = "3GPP security: Milenage (TS 35.206), 5G key derivation (TS 33.501 Annex A), 128-NIA2 and 128-NEA2, SUCI de-concealment (ECIES Profile A)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ ctr.workspace = true
 hmac.workspace = true
 rustix.workspace = true
 sha2.workspace = true
+x25519-dalek.workspace = true
 
 [lints]
 workspace = true

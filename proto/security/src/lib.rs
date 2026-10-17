@@ -7,11 +7,13 @@
 //!   K_AMF, NAS keys;
 //! - [`nia2`] and [`nea2`]: 128-NIA2 (AES-CMAC) and 128-NEA2 (AES-CTR),
 //!   TS 33.501 Annex D, the same algorithms as 128-EIA2/EEA2 (TS 33.401);
+//! - [`ecies`]: SUCI de-concealment, ECIES Profile A (TS 33.501 Annex C);
 //! - [`random`]: random values (RAND, 5G-TMSI) from the kernel.
 //!
 //! NIA1/NEA1 (SNOW 3G) and NIA3/NEA3 (ZUC) are not implemented: every UE
 //! must support NIA2 and NEA2 (TS 33.501 §5.11.1).
 
+pub mod ecies;
 pub mod kdf;
 pub mod milenage;
 

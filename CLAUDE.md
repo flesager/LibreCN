@@ -87,7 +87,7 @@ Later: deployment. Dependencies point down only: `scheduler` ← `common` ← `o
 - **SCTP**: kernel SCTP, through `libc` (accepted). On Docker it needs the host's `sctp` module.
 - Interop and test peer: UERANSIM, plus Wireshark-checked captures.
 - **NAS** (TS 24.501) is not ASN.1: a hand-written codec in `proto/nas`, without allocation from the start (views into the PDU when decoding, the caller's buffer when encoding). Only the messages the AMF needs.
-- **Security algorithms** in `proto/security`, on RustCrypto (`aes`, `cmac`, `ctr`, `hmac`, `sha2`, accepted by the owner): Milenage, the TS 33.501 key derivations, NIA2/NEA2. Cross-checked against UERANSIM's own implementation (a small C++ program linked to UERANSIM's libraries).
+- **Security algorithms** in `proto/security`, on RustCrypto (`aes`, `cmac`, `ctr`, `hmac`, `sha2`, accepted by the owner) and `x25519-dalek` 2 (accepted for SUCI Profile A): Milenage, the TS 33.501 key derivations, NIA2/NEA2, ECIES Profile A (checked against TS 33.501 Annex C.4.3's example). Cross-checked against UERANSIM's own implementation (a small C++ program linked to UERANSIM's libraries).
 - **SBI**: no HTTP/2 yet. NFs exchange the 3GPP service operations as fixed-layout EO messages (`proto/sbi`), paired by `corr_id`; an HTTP/2 binding is a later decision.
 - **N4 is EO messages too, not PFCP** (the owner's choice: the core targets small deployments, not 20 Gbit/s; the owner knows it is not a pure 3GPP core). The messages carry the session's outcome (uplink tunnel, downlink tunnel), not PFCP's rules.
 

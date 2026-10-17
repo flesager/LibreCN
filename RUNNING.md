@@ -118,6 +118,7 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | Slices | AMF and SMF: `slices = [{ sst = 1 }]` | gNB: `slices`; UE: `sessions[].slice` |
 | AMF address | AMF: `n2` | gNB: `amfConfigs` |
 | Subscriber | UDM: `[[nf.params.subscribers]]` with `supi`, `k`, `opc` (`amf`, `sqn`, `count` optional) | UE: `supi`, `key`, `op` with `opType: OPC`, `amf` |
+| SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data network | SMF: `dnn = "internet"` | UE: `sessions[].apn` |
 
 Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. Those live in memory only and are gone at the next start.

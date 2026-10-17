@@ -1,8 +1,9 @@
 //! UDM, the unified data management, hosted in one EO.
 //!
 //! This release serves the UE authentication service to the AUSF
-//! (Nudm_UEAuthentication_Get, 5G AKA): SUCI de-concealment (null scheme)
-//! and authentication vectors from Milenage, with SQN resynchronisation.
+//! (Nudm_UEAuthentication_Get, 5G AKA): SUCI de-concealment (null scheme,
+//! ECIES Profile A with the home network keys of the deployment) and
+//! authentication vectors from Milenage, with SQN resynchronisation.
 //! Subscribers come from the deployment `params` ([`config`]) and from the
 //! web API while it runs ([`manage`]).
 //!
@@ -25,23 +26,25 @@ use librecn_sbi::Outcome;
 use librecn_sbi::ue_authentication::{AuthData, AuthInfo, GetAuthData};
 use librecn_scheduler::{Context, EoConfig, ExecutionObject, Message};
 
-use config::Subscriber;
+use config::{HomeNetworkKeys, Subscriber};
 
 /// The UDM EO.
 pub struct Udm {
     name: String,
     subscribers: HashMap<String, Subscriber>,
+    keys: HomeNetworkKeys,
     log: Logger,
 }
 
 impl Udm {
-    pub fn new(name: &str, subscribers: HashMap<String, Subscriber>) -> Self {
-        Udm { name: name.to_string(), subscribers, log: Logger::default() }
+    pub fn new(name: &str, subscribers: HashMap<String, Subscriber>, keys: HomeNetworkKeys) -> Self {
+        Udm { name: name.to_string(), subscribers, keys, log: Logger::default() }
     }
 
     /// For the control EO's factory: EO sizes and the UDM from deployment `params`.
     pub fn from_params(name: &str, params: &serde_json::Value) -> Result<(EoConfig, Self), String> {
-        Ok((Self::eo_config(name), Self::new(name, config::from_params(params)?)))
+        let udm = Self::new(name, config::from_params(params)?, config::keys_from_params(params)?);
+        Ok((Self::eo_config(name), udm))
     }
 
     /// Requests are 256 bytes; management requests 8 KiB.
@@ -61,7 +64,7 @@ impl Udm {
     }
 
     fn get_auth_data(&mut self, info: &AuthInfo) -> Result<(librecn_sbi::Supi, aka::Vector), Outcome> {
-        let supi = aka::deconceal(info.supi_or_suci.as_str())?;
+        let supi = aka::deconceal(info.supi_or_suci.as_str(), &self.keys)?;
         let sub = self.subscribers.get_mut(supi.as_str()).ok_or(Outcome::UserNotFound)?;
         if let Some((rand, auts)) = info.resync()
             && !aka::resynchronise(sub, rand, auts)
@@ -79,7 +82,12 @@ impl Udm {
             Ok((supi, _)) => {
                 let resync = if info.resync().is_some() { ", resynchronised" } else { "" };
                 let sqn = self.subscribers.get(supi.as_str()).map_or(0, |s| s.sqn);
-                log!(self.log, ctx, Info, "authentication vector for {supi} (SQN {sqn:#x}{resync})");
+                // The SUCI's protection scheme: its sixth field.
+                let concealed = match info.supi_or_suci.as_str().split('-').nth(5) {
+                    Some("1") => ", SUCI of Profile A",
+                    _ => "",
+                };
+                log!(self.log, ctx, Info, "authentication vector for {supi} (SQN {sqn:#x}{resync}{concealed})");
             }
             Err(outcome) => {
                 log!(self.log, ctx, Info, "no authentication vector for {}: {outcome:?}", info.supi_or_suci)
@@ -105,6 +113,13 @@ impl Udm {
 impl ExecutionObject for Udm {
     fn on_start(&mut self, ctx: &mut Context<'_>) {
         log!(self.log, ctx, Vip, "UDM {} ready, {} subscriber(s)", self.name, self.subscribers.len());
+        let mut ids: Vec<_> = self.keys.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            let public: String =
+                librecn_security::ecies::public_key(&self.keys[&id]).iter().map(|b| format!("{b:02x}")).collect();
+            log!(self.log, ctx, Info, "SUCI home network key {id} (Profile A), public key {public}");
+        }
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {

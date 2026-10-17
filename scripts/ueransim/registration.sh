@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # Interop check with UERANSIM: NG Setup, then UERANSIM's UE registers with
-# LibreCN (AMF, AUSF, UDM): 5G AKA, NAS security mode, Registration Accept
+# LibreCN (AMF, AUSF, UDM), its SUCI concealed with ECIES Profile A and
+# deciphered by the UDM: 5G AKA, NAS security mode, Registration Accept
 # in Initial Context Setup and Complete; it then establishes its PDU session
 # (SMF, UPF, PDU Session Resource Setup). Without root, the UE cannot create
 # its TUN interface: the user plane is not checked here. The UE releases its
@@ -45,6 +46,7 @@ wait_for "$out/core.log" "released, 0 UE(s) left" || true
 
 for f in gnb ue cli core; do echo "--- $f"; cat "$out/$f.log"; done
 grep -q "Initial Registration is successful" "$out/ue.log" \
+  && grep -q "SUCI of Profile A" "$out/core.log" \
   && grep -q "registered: imsi-999700000000001" "$out/core.log" \
   && grep -q "PDU Session establishment is successful PSI\[1\]" "$out/ue.log" \
   && [ "$(grep -c "UE 1: PDU session 1 set up" "$out/core.log")" -ge 2 ] \
