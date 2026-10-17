@@ -47,6 +47,8 @@ pub struct UeContext {
     pub location: Option<Location>,
     /// A UE Context Release Command was sent; waiting for the Complete.
     pub releasing: bool,
+    /// The gNB answered Initial Context Setup: later NAS goes in DL NAS Transport.
+    pub context_ready: bool,
     /// Its 5GMM context, which lives as long as the N2 context for now.
     pub mm: Mm,
     /// PDU sessions by PDU session ID (1 to 15).
@@ -110,6 +112,7 @@ impl UeTable {
             stream,
             location: None,
             releasing: false,
+            context_ready: false,
             mm: Mm::default(),
             sessions: [None; 16],
             timer: None,

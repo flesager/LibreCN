@@ -1,8 +1,9 @@
 # Docker
 
-One image with LibreCN and UERANSIM's binaries, for the user-plane interop
-check (`scripts/ueransim/user-plane.sh`): UERANSIM's UE needs root for its
-TUN device, which a container gives without touching the host.
+One image with LibreCN and UERANSIM's binaries, for the interop checks in
+Docker (`scripts/ueransim/user-plane.sh`, `mobility.sh`, sharing
+`docker.sh`): UERANSIM's UE needs root for its TUN device, which a
+container gives without touching the host.
 
 | File | Role |
 |---|---|

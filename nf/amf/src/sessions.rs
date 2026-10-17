@@ -16,6 +16,14 @@ use librecn_scheduler::{Context, Error, Message};
 use crate::ue::{AmfUeId, UeContext};
 use crate::{Amf, n2, request};
 
+/// Who holds an SMF context: a connected UE, or an idle one (its 5G-TMSI).
+/// The SMF's notices find their UE through it, whatever id the SMF last saw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Holder {
+    Connected(AmfUeId),
+    Idle(u32),
+}
+
 impl Amf {
     /// The SMF's answer to a UE's request.
     pub(crate) fn on_sm_created(&mut self, ctx: &mut Context<'_>, amf_id: AmfUeId, result: &CreateSmContextResult) {
@@ -41,6 +49,7 @@ impl Amf {
         }
         session.sm_ctx = Some(result.sm_ctx);
         let slice = session.snssai;
+        self.holders.insert(result.sm_ctx, Holder::Connected(amf_id));
         self.with_mm(ctx, amf_id, |mm, _, _, port| {
             let mut nas = [0u8; 512];
             if let Some(n) = mm.seal_session(psi, n1, &mut nas, port) {
@@ -60,8 +69,10 @@ impl Amf {
             return log!(self.log, ctx, Error, "UE {amf_id}: PDU session {psi} not updated: {:?}", result.outcome());
         }
         if result.released != 0 {
-            if let Some(slot) = self.ues.get_mut_by_id(amf_id).and_then(|ue| ue.sessions.get_mut(usize::from(psi))) {
-                *slot = None;
+            if let Some(slot) = self.ues.get_mut_by_id(amf_id).and_then(|ue| ue.sessions.get_mut(usize::from(psi)))
+                && let Some(sm_ctx) = slot.take().and_then(|s| s.sm_ctx)
+            {
+                self.holders.remove(&sm_ctx);
             }
             return log!(self.log, ctx, Info, "UE {amf_id}: PDU session {psi} released");
         }
@@ -86,6 +97,11 @@ impl Amf {
         notify: &SmNotify,
     ) {
         let (psi, sm_ctx) = (notify.pdu_session_id, notify.sm_ctx);
+        // The UE holding the session, which may have changed ids since the SMF heard of it.
+        let amf_id = match self.holders.get(&sm_ctx) {
+            Some(Holder::Connected(id)) => *id,
+            _ => amf_id,
+        };
         let connected = self
             .ues
             .get_mut_by_id(amf_id)
@@ -162,6 +178,7 @@ impl Amf {
             };
             if kind == update::SETUP_FAILED {
                 *slot = None;
+                self.holders.remove(&sm_ctx);
                 log!(self.log, ctx, Info, "UE {amf_id}: the gNB could not set PDU session {psi} up");
             }
             request::<UpdateSmContext>(ctx, &mut self.smf, &mut self.log, amf_id, |m| {
@@ -189,6 +206,7 @@ impl Amf {
     }
 
     pub(crate) fn release_sm_context(&mut self, ctx: &mut Context<'_>, sm_ctx: u32) {
+        self.holders.remove(&sm_ctx);
         self.notify_smf(ctx, Notice::Release { sm_ctx });
     }
 

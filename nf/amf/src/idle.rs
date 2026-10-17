@@ -14,7 +14,7 @@ use librecn_scheduler::{Context, Time};
 
 use crate::config::Plmn;
 use crate::mm::{self, Mm, State};
-use crate::sessions::Notice;
+use crate::sessions::{Holder, Notice};
 use crate::ue::{AmfUeId, PduSession, UeContext};
 use crate::{Amf, n2};
 
@@ -70,7 +70,7 @@ impl Amf {
         };
         for sm_ctx in ue.sessions.iter().flatten().filter_map(|s| s.sm_ctx) {
             self.notify_smf(ctx, Notice::Deactivate { sm_ctx });
-            self.idle_sessions.insert(sm_ctx, tmsi);
+            self.holders.insert(sm_ctx, Holder::Idle(tmsi));
         }
         let tai = ue.location.map(|l| l.tai);
         let idle = Idle { mm: ue.mm, sessions: ue.sessions, since: ctx.now(), tai, paged: SessionSet::default() };
@@ -84,7 +84,7 @@ impl Amf {
         let Some(tmsi) = mm::initial_tmsi(nas, &self.config) else { return };
         let Some(idle) = self.idle.remove(&tmsi) else { return };
         for sm_ctx in idle.sm_contexts() {
-            self.idle_sessions.remove(&sm_ctx);
+            self.holders.insert(sm_ctx, Holder::Connected(amf_id));
         }
         let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
         let secs = (ctx.now() - idle.since).as_secs();
@@ -106,7 +106,6 @@ impl Amf {
     pub(crate) fn forget_idle(&mut self, ctx: &mut Context<'_>, tmsi: u32, why: &str) {
         let Some(idle) = self.idle.remove(&tmsi) else { return };
         for sm_ctx in idle.sm_contexts() {
-            self.idle_sessions.remove(&sm_ctx);
             self.release_sm_context(ctx, sm_ctx);
         }
         let supi = idle.mm.supi().map_or_else(String::new, |s| format!(" ({s})"));
@@ -118,7 +117,8 @@ impl Amf {
     /// The idle UE holding SMF context `sm_ctx` loses that session; false
     /// if no idle UE has it.
     pub(crate) fn forget_idle_session(&mut self, sm_ctx: u32) -> bool {
-        let Some(tmsi) = self.idle_sessions.remove(&sm_ctx) else { return false };
+        let Some(&Holder::Idle(tmsi)) = self.holders.get(&sm_ctx) else { return false };
+        self.holders.remove(&sm_ctx);
         if let Some(idle) = self.idle.get_mut(&tmsi) {
             for slot in &mut idle.sessions {
                 if slot.is_some_and(|s| s.sm_ctx == Some(sm_ctx)) {
@@ -133,7 +133,7 @@ impl Amf {
     /// paged by every gNB serving its last tracking area. False if no idle
     /// UE has that session.
     pub(crate) fn page(&mut self, ctx: &mut Context<'_>, sm_ctx: u32) -> bool {
-        let Some(&tmsi) = self.idle_sessions.get(&sm_ctx) else { return false };
+        let Some(&Holder::Idle(tmsi)) = self.holders.get(&sm_ctx) else { return false };
         let Some(idle) = self.idle.get_mut(&tmsi) else { return false };
         let Some(psi) = idle.sessions.iter().position(|s| s.is_some_and(|s| s.sm_ctx == Some(sm_ctx))) else {
             return false;
@@ -144,7 +144,11 @@ impl Amf {
             return true;
         };
         let pdu = n2::paging(&self.config, tmsi, tai);
-        let gnbs: Vec<_> = self.gnbs.iter().filter(|(_, g)| g.serves(tai)).map(|(assoc, _)| *assoc).collect();
+        let mut gnbs: Vec<_> = self.gnbs.iter().filter(|(_, g)| g.serves(tai)).map(|(assoc, _)| *assoc).collect();
+        if gnbs.is_empty() {
+            // No gNB declared that tracking area: every gNB pages.
+            gnbs = self.gnbs.iter().filter(|(_, g)| g.node.is_some()).map(|(assoc, _)| *assoc).collect();
+        }
         for &assoc in &gnbs {
             self.send(ctx, assoc, 0, pdu.clone(), "Paging");
         }

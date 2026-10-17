@@ -349,7 +349,7 @@ impl Mm {
                 }
                 self.requested = SnssaiList::default();
                 request.requested().for_each(|s| self.requested.push(s));
-                self.accept(config, tai, fx);
+                self.accept(config, tai, Some((request.uplink_data, request.sessions)), fx);
             }
             (State::Registered, Uplink::ServiceRequest(request)) if verified => self.on_service_request(&request, fx),
             (_, Uplink::ServiceRequest(_)) => {
@@ -377,7 +377,7 @@ impl Mm {
                     self.requested = SnssaiList::default();
                     request.requested().for_each(|s| self.requested.push(s));
                 }
-                self.accept(config, tai, fx);
+                self.accept(config, tai, None, fx);
             }
             (State::SecurityMode, Uplink::SecurityModeReject { cause }) => {
                 fx.log(Level::Info, format_args!("Security Mode Command rejected (5GMM cause #{cause})"));
@@ -538,7 +538,16 @@ impl Mm {
         self.expect(command, fx);
     }
 
-    fn accept(&mut self, config: &AmfConfig, tai: Option<Tai>, fx: &mut impl Effects) {
+    /// Registration Accept; `from_idle`: the sessions with uplink data and
+    /// those the UE holds, for a registration from idle (§5.5.1.3.4): the
+    /// network's sessions are told back, those the UE lost released.
+    fn accept(
+        &mut self,
+        config: &AmfConfig,
+        tai: Option<Tai>,
+        from_idle: Option<(SessionSet, Option<SessionSet>)>,
+        fx: &mut impl Effects,
+    ) {
         let Some(tai) = tai else {
             fx.log(Level::Error, format_args!("no NR location for the UE: registration refused"));
             return self.reject(cause::PROTOCOL_ERROR, fx);
@@ -561,10 +570,16 @@ impl Mm {
         self.state = State::Accepting;
         // As Open5GS and free5GC: the Accept goes in Initial Context Setup.
         let Some(context) = self.as_context() else { return self.reject(cause::PROTOCOL_ERROR, fx) };
-        let accept = Downlink::RegistrationAccept { guti, tai, allowed, t3512: config.t3512 };
+        let held = from_idle.and_then(|(_, held)| held);
+        let both = held.map(|h| SessionSet(fx.sessions().0 & h.0));
+        let accept = Downlink::RegistrationAccept { guti, tai, allowed, sessions: both, t3512: config.t3512 };
         let mut pdu = [0u8; DOWNLINK_MAX + 7];
         if let Some(n) = self.seal(accept, &mut pdu, fx) {
             fx.setup_context(&pdu[..n], &context, "Registration Accept in Initial Context Setup");
+        }
+        if let Some((uplink_data, held)) = from_idle {
+            let reactivate = SessionSet(uplink_data.0 & both.unwrap_or(fx.sessions()).0);
+            fx.resume_sessions(reactivate, held);
         }
         // Sent again, if need be, in DL NAS Transport.
         self.retransmit = Some((accept, 0));
@@ -1151,6 +1166,19 @@ mod tests {
         mm.on_uplink(&config, tai(), &mut forged, &mut fx);
         assert_eq!(fx.sent.pop().unwrap(), hex("7e005b01"), "Identity Request for the SUCI, in clear");
         assert!(initial_tmsi(&hex("7e004101 000b f299f907 010041 00c0ffee"), &config).is_none(), "another AMF");
+    }
+
+    #[test]
+    fn a_registration_from_idle_tells_the_sessions_back_and_releases_the_lost_ones() {
+        let (config, mut mm, mut fx, mut ue) = registered();
+        fx.network_sessions = SessionSet(0x06);
+        // Mobility registration holding session 1 only (PDU session status).
+        let cleartext = hex("7e00410a 000b f299f907 010040 00c0ffee 2e04f0f0f0f0");
+        let whole = hex("7e00410a 000b f299f907 010040 00c0ffee 2e04f0f0f0f0 5002 0200");
+        mm.on_uplink(&config, tai(), &mut ue.initial(&cleartext, &whole), &mut fx);
+        let accept = ue.open(&fx.sent.pop().unwrap(), 2);
+        assert!(accept.windows(4).any(|w| w == hex("50020200")), "the network's sessions the UE holds: 1");
+        assert_eq!(fx.resumed, [(SessionSet(0), Some(SessionSet(0x02)))], "nothing to reactivate, session 2 released");
     }
 
     /// The NAS timer fires, as the EO delivers it: no longer running.

@@ -107,8 +107,8 @@ pub struct Amf {
     ues: UeTable,
     /// Idle UEs by 5G-TMSI.
     idle: HashMap<u32, idle::Idle>,
-    /// The idle UE (5G-TMSI) of each SMF context an idle UE holds.
-    idle_sessions: HashMap<u32, u32>,
+    /// The UE holding each SMF context.
+    holders: HashMap<u32, sessions::Holder>,
     /// Session notices waiting for room at the SMF, and their retry timer.
     notices: std::collections::VecDeque<sessions::Notice>,
     notices_in_flight: usize,
@@ -133,7 +133,7 @@ impl Amf {
             bound: Arc::default(),
             gnbs: HashMap::new(),
             idle: HashMap::new(),
-            idle_sessions: HashMap::new(),
+            holders: HashMap::new(),
             notices: std::collections::VecDeque::new(),
             notices_in_flight: 0,
             notice_timer: None,
@@ -304,7 +304,10 @@ impl Amf {
             },
             Incoming::ContextSetup { amf_id, ran_id, failure } => {
                 match (self.ues.get_mut(assoc, amf_id, ran_id), failure) {
-                    (Ok(_), None) => log!(self.log, ctx, Info, "UE {amf_id}: Initial Context Setup done"),
+                    (Ok(ue), None) => {
+                        ue.context_ready = true;
+                        log!(self.log, ctx, Info, "UE {amf_id}: Initial Context Setup done")
+                    }
                     (Ok(_), Some(cause)) => {
                         log!(self.log, ctx, Error, "UE {amf_id}: Initial Context Setup failed ({cause})");
                         self.release(ctx, amf_id, Cause::nas(CauseNas::unspecified));
@@ -412,6 +415,8 @@ impl Amf {
             serving_network: &self.serving_network,
             sessions: &mut ue.sessions,
             paged: &mut ue.paged,
+            holders: &mut self.holders,
+            context_ready: ue.context_ready,
             timer: &mut ue.timer,
             ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
             release: None,
@@ -620,6 +625,9 @@ struct Port<'a, 'c, 's> {
     serving_network: &'a ServingNetwork,
     sessions: &'a mut [Option<PduSession>; 16],
     paged: &'a mut SessionSet,
+    holders: &'a mut HashMap<u32, sessions::Holder>,
+    /// The UE's gNB context is set up already (Initial Context Setup done).
+    context_ready: bool,
     timer: &'a mut Option<TimerId>,
     /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
     ids: (AmfUeId, RanUeId, AssocId, u16),
@@ -649,6 +657,10 @@ impl Effects for Port<'_, '_, '_> {
 
     fn setup_context(&mut self, pdu: &[u8], context: &AsContext, what: &'static str) {
         let (amf_id, ran_id, ..) = self.ids;
+        if self.context_ready {
+            // Connected already (a Service Request for a deactivated session): the NAS alone.
+            return self.ngap(n2::downlink_nas_transport(amf_id, ran_id, pdu), "NAS in DL NAS Transport");
+        }
         let request = n2::initial_context_setup_request(amf_id, ran_id, self.config, context, pdu);
         self.ngap(request, what);
     }
@@ -673,6 +685,7 @@ impl Effects for Port<'_, '_, '_> {
             if held_by_ue.is_some_and(|held| !held.contains(psi)) {
                 // The UE released it locally: so does the network.
                 self.sessions[usize::from(psi)] = None;
+                self.holders.remove(&sm_ctx);
                 if let Some(smf) = self.smf.get(self.ctx) {
                     let _ = self.ctx.send_value(smf, &ReleaseSmContext { sm_ctx });
                 }

@@ -13,48 +13,11 @@
 # a last time, the UE registers periodically when T3512 expires (30 s in
 # docker/core.toml), accepted without a new authentication (UERANSIM sets
 # the follow-on request: the AMF keeps the connection).
-# UERANSIM is expected next to this repository: ../UERANSIM/build
-# (override with UERANSIM=), with patches/0001 applied. Needs docker and the
-# host's sctp module.
+# See docker.sh for what is expected of the host.
 set -eu
 cd "$(dirname "$0")/../.."
-bin=${UERANSIM:-../UERANSIM/build}
-[ -x "$bin/nr-gnb" ] && [ -x "$bin/nr-ue" ] && [ -x "$bin/nr-cli" ] || { echo "no UERANSIM in $bin"; exit 1; }
-patch=scripts/ueransim/patches/0001-gnb-select-an-AMF-for-protected-initial-messages.patch
-git -C "$bin/../src" apply --check -R "$PWD/$patch" 2>/dev/null \
-  || { echo "UERANSIM's gNB lacks $patch: git -C $bin/../src apply, then rebuild"; exit 1; }
-image=librecn-interop
-net=librecn-interop
-ctx=$(mktemp -d)
-remove() {
-  docker rm -f librecn-core librecn-ran >/dev/null 2>&1 || true
-  docker network rm "$net" >/dev/null 2>&1 || true
-}
-trap 'remove; rm -rf "$ctx"' EXIT
-remove
-
-cargo build -q --release -p librecn
-cp docker/* target/release/librecn "$bin/nr-gnb" "$bin/nr-ue" "$bin/nr-cli" "$ctx"
-docker build -q -t "$image" "$ctx" >/dev/null
-docker network create --subnet 10.210.0.0/24 "$net" >/dev/null
-# run NAME IP COMMAND...: the command is PID 1 (LibreCN must get SIGTERM).
-run() {
-  name=$1 ip=$2; shift 2
-  # No IPv6: the kernel's router solicitations on uesimtun0 would wake the idle UE.
-  docker run -d --name "$name" --network "$net" --ip "$ip" --cap-add NET_ADMIN --device /dev/net/tun \
-    --sysctl net.ipv6.conf.all.disable_ipv6=1 "$image" "$@" >/dev/null
-}
+. scripts/ueransim/docker.sh
 run librecn-core 10.210.0.10 /etc/librecn/core.sh
-wait_for() { for _ in $(seq 100); do docker logs "$1" 2>&1 | grep -q "$2" && return 0; sleep 0.1; done; return 1; }
-# wait_count CONTAINER PATTERN N: until PATTERN appears N times in its logs.
-wait_count() {
-  for _ in $(seq 100); do [ "$(docker logs "$1" 2>&1 | grep -c "$2")" -ge "$3" ] && return 0; sleep 0.1; done; return 1
-}
-# release: the gNB releases the UE (it goes idle), whatever its id at the gNB.
-release() {
-  id=$(docker exec librecn-ran nr-cli UERANSIM-gnb-999-70-1 -e ue-list | grep -o 'ue-id: [0-9]*' | head -1 | cut -d' ' -f2)
-  docker exec librecn-ran nr-cli UERANSIM-gnb-999-70-1 -e "ue-release ${id:-1}" >/dev/null || true
-}
 wait_for librecn-core "AMF amf-1 ready"
 run librecn-ran 10.210.0.20 sh -c 'nr-gnb -c /etc/librecn/gnb.yaml > /tmp/gnb.log 2>&1 & sleep 1; exec nr-ue -c /etc/librecn/ue.yaml'
 wait_for librecn-ran "TUN interface\[uesimtun0" || true

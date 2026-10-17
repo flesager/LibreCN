@@ -121,6 +121,10 @@ pub struct RegistrationRequest<'a> {
     pub identity: MobileIdentity<'a>,
     pub capability: Option<UeSecurityCapability>,
     pub requested_nssai: Option<&'a [u8]>,
+    /// Sessions with uplink data to send (from idle): their user plane to reactivate.
+    pub uplink_data: SessionSet,
+    /// Sessions the UE holds (from idle).
+    pub sessions: Option<SessionSet>,
     /// The whole request, when this one carries only the cleartext IEs (§4.4.6).
     pub container: Option<&'a [u8]>,
 }
@@ -279,6 +283,8 @@ fn registration_request(mut r: Reader<'_>) -> Result<RegistrationRequest<'_>> {
         identity: MobileIdentity::decode(r.lve()?)?,
         capability: None,
         requested_nssai: None,
+        uplink_data: SessionSet::default(),
+        sessions: None,
         container: None,
     };
     // Last visited registered TAI (0x52) is the only TV IE of the message.
@@ -286,6 +292,8 @@ fn registration_request(mut r: Reader<'_>) -> Result<RegistrationRequest<'_>> {
         match iei {
             0x2e => request.capability = Some(UeSecurityCapability::decode(v)?),
             0x2f => request.requested_nssai = Some(v),
+            0x40 => request.uplink_data = SessionSet::decode(v)?,
+            0x50 => request.sessions = Some(SessionSet::decode(v)?),
             0x71 => request.container = Some(v),
             _ => {}
         }
@@ -359,6 +367,8 @@ pub enum Downlink<'a> {
         guti: Guti,
         tai: Tai,
         allowed: SnssaiList,
+        /// The sessions the network holds, when the UE said which it holds.
+        sessions: Option<SessionSet>,
         /// T3512, a GPRS timer 3 value ([`crate::ie::gprs_timer_3`]).
         t3512: u8,
     },
@@ -431,12 +441,15 @@ impl Downlink<'_> {
                 w.u8(0xe1); // IMEISV requested
                 w.tlv(0x36, |w| w.u8(u8::from(retransmit_initial) << 1));
             }
-            Downlink::RegistrationAccept { guti, tai, allowed, t3512 } => {
+            Downlink::RegistrationAccept { guti, tai, allowed, sessions, t3512 } => {
                 w.lv(|w| w.u8(0x01)); // registered over 3GPP access, no SMS
                 w.tlve(0x77, |w| guti.encode(w));
                 w.tlv(0x54, |w| tai.encode_list(w));
                 if !allowed.is_empty() {
                     w.tlv(0x15, |w| allowed.encode(w));
+                }
+                if let Some(sessions) = sessions {
+                    w.tlv(0x50, |w| w.bytes(&sessions.octets()));
                 }
                 w.tlv(0x5e, |w| w.u8(t3512));
             }
@@ -471,7 +484,8 @@ mod tests {
     /// Security Mode Complete.
     #[test]
     fn registration_request_is_decoded() {
-        let pdu = hex("7e004179 000d 0199f907 0000 0000 0000000010 2e02f0f0 2f020101 52 99f907000001 7100037e0043");
+        let pdu =
+            hex("7e004179 000d 0199f907 0000 0000 0000000010 2e02f0f0 2f020101 52 99f907000001 5002 0600 7100037e0043");
         let Uplink::RegistrationRequest(r) = Uplink::decode(&pdu).unwrap() else { panic!() };
         assert_eq!(
             (r.kind, r.follow_on, r.ngksi),
@@ -480,6 +494,7 @@ mod tests {
         assert_eq!(r.identity.to_string(), "suci-0-999-70-0000-0-0-0000000001");
         assert!(r.capability.unwrap().integrity(2));
         assert_eq!(r.requested().collect::<Vec<_>>(), [Snssai { sst: 1, sd: None }]);
+        assert_eq!((r.sessions, r.uplink_data), (Some(SessionSet(0x06)), SessionSet::default()));
         assert_eq!(r.container, Some(&hex("7e0043")[..]));
     }
 
@@ -541,9 +556,13 @@ mod tests {
         let mut allowed = SnssaiList::default();
         allowed.push(Snssai { sst: 1, sd: None });
         allowed.push(Snssai { sst: 1, sd: None });
-        let accept = Downlink::RegistrationAccept { guti, tai: Tai { plmn, tac: [0, 0, 1] }, allowed, t3512: 6 };
+        let tai = Tai { plmn, tac: [0, 0, 1] };
+        let accept = Downlink::RegistrationAccept { guti, tai, allowed, sessions: None, t3512: 6 };
         let expected = "7e0042 0101 77000b f299f907 01 0040 01020304 5407 00 99f907 000001 1502 0101 5e0106";
         assert_eq!(encode(accept, &mut buf), h(expected), "one slice: duplicates dropped");
+        let sessions = Some(SessionSet(0x02));
+        let from_idle = Downlink::RegistrationAccept { guti, tai, allowed, sessions, t3512: 6 };
+        assert!(encode(from_idle, &mut buf).ends_with(&h("1502 0101 50020200 5e0106")), "PDU session status");
         assert_eq!(encode(Downlink::RegistrationReject { cause: 111 }, &mut buf), "7e00446f");
         assert_eq!(encode(Downlink::IdentityRequest(IdentityType::Suci), &mut buf), "7e005b01");
         assert_eq!(encode(Downlink::DeregistrationAccept, &mut buf), "7e0046");

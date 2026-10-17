@@ -75,19 +75,28 @@ fn core_and_ids(smf_capacity: usize) -> (Setup, SctpSocket, Ids) {
 const REGISTRATION_REQUEST: &str = "7e004179 000d 0102f839 0000 0000 0000000010 2e04f0f0f0f0";
 
 fn location() -> Any {
+    location_in(1)
+}
+
+/// The UE's location, in tracking area `tac` of the PLMN.
+fn location_in(tac: u8) -> Any {
     let plmn = PLMNIdentity(FixedOctetString::new(PLMN));
-    let tai = TAI::new(plmn.clone(), TAC(FixedOctetString::new([0, 0, 1])), None);
+    let tai = TAI::new(plmn.clone(), TAC(FixedOctetString::new([0, 0, tac])), None);
     let cgi = NRCGI::new(plmn, NRCellIdentity(FixedBitString::ZERO), None);
     wrap(&UserLocationInformation::userLocationInformationNR(UserLocationInformationNR::new(cgi, tai, None, None)))
         .unwrap()
 }
 
 fn initial_ue_message(ran_id: u32, nas: &[u8]) -> Vec<u8> {
+    initial_ue_message_in(ran_id, nas, 1)
+}
+
+fn initial_ue_message_in(ran_id: u32, nas: &[u8], tac: u8) -> Vec<u8> {
     use AnonymousInitialUEMessageProtocolIEsCriticality::{ignore, reject};
     let ies = vec![
         AnonymousInitialUEMessageProtocolIEs::new(ID_RAN_UE_NGAP_ID.0, reject, wrap(&RANUENGAPID(ran_id)).unwrap()),
         AnonymousInitialUEMessageProtocolIEs::new(ID_NAS_PDU.0, reject, wrap(&NASPDU(nas.to_vec().into())).unwrap()),
-        AnonymousInitialUEMessageProtocolIEs::new(ID_USER_LOCATION_INFORMATION.0, reject, location()),
+        AnonymousInitialUEMessageProtocolIEs::new(ID_USER_LOCATION_INFORMATION.0, reject, location_in(tac)),
         AnonymousInitialUEMessageProtocolIEs::new(
             ID_RRCESTABLISHMENT_CAUSE.0,
             ignore,
@@ -755,4 +764,75 @@ fn a_ue_holds_two_sessions_and_gets_both_back_from_idle() {
     reactivated.sort();
     assert_eq!(reactivated, [1, 2]);
     assert!(s.logged("upf", "TEID 0x81") && s.logged("upf", "TEID 0x82"), "{:#?}", s.log.lines());
+}
+
+#[test]
+fn an_idle_ue_moves_to_another_gnb_and_area_registers_there_and_gets_its_session_back() {
+    let (mut s, gnb_a) = core();
+    let mut ue = Ue::default();
+    let old_tmsi = registered_with_a_session_then_idle(&mut s, &gnb_a, &mut ue);
+    let gnb_b = s.connect();
+    assert!(matches!(s.exchange(&gnb_b, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
+
+    // Under gNB B, in tracking area 2: a mobility registration, holding session 1.
+    let cleartext = [&hex("7e00410a 000b f2 02f839 01 0040")[..], &old_tmsi, &hex("2e04f0f0f0f0")].concat();
+    let whole = [&cleartext[..], &hex("5002 0200 2f020101")].concat();
+    let request = ue.initial(&cleartext, &whole);
+    gnb_b.send(0, 1, NGAP_PPID, &initial_ue_message_in(7, &request, 2)).unwrap();
+    let (carrier, accept) = ue.downlink(&mut s, &gnb_b);
+    assert!(matches!(carrier, Carrier::ContextSetup), "{carrier:?}");
+    assert_eq!(accept[..3], hex("7e0042")[..], "Registration Accept, through gNB B");
+    assert!(accept.windows(9).any(|w| w == hex("5407 00 02f839 000002")), "the new tracking area");
+    assert!(accept.windows(4).any(|w| w == hex("50020200")), "session 1 kept");
+    assert!(s.logged("amf-1", "registration from idle (Mobility)"), "{:#?}", s.log.lines());
+    let new_tmsi = accept[15..19].to_vec();
+    assert_ne!(new_tmsi, old_tmsi, "a new 5G-GUTI");
+    gnb_b.send(0, ue.stream, NGAP_PPID, &context_setup_response(ue.amf_id, 7)).unwrap();
+    let complete = ue.protect(2, &hex("7e0043"));
+    gnb_b.send(0, ue.stream, NGAP_PPID, &uplink_nas(ue.amf_id, 7, &complete)).unwrap();
+    s.pump();
+
+    // Connected, data for session 1: a Service Request; the Accept in DL NAS Transport.
+    let service = [&hex("7e004c 10 0007 f4 0040")[..], &new_tmsi, &hex("4002 0200 5002 0200")].concat();
+    let protected = ue.protect(2, &service);
+    gnb_b.send(0, ue.stream, NGAP_PPID, &uplink_nas(ue.amf_id, 7, &protected)).unwrap();
+    let (carrier, service_accept) = ue.downlink(&mut s, &gnb_b);
+    assert!(matches!(carrier, Carrier::DownlinkNas), "the gNB context is set up already: {carrier:?}");
+    assert_eq!(service_accept, hex("7e004e 50020200"));
+    let (stream, pdu) = s.receive(&gnb_b);
+    let _: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
+    gnb_b.send(0, stream, NGAP_PPID, &session_setup_response(ue.amf_id, 7, 1, 0x99)).unwrap();
+    s.pump();
+    assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x99"), "{:#?}", s.log.lines());
+
+    // gNB A goes: nothing of this UE goes with it.
+    drop(gnb_a);
+    s.pump();
+    assert!(s.logged("amf-1", "0 UE(s) released"), "{:#?}", s.log.lines());
+}
+
+#[test]
+fn downlink_data_for_a_connected_ue_whose_session_is_down_sets_it_up_without_paging() {
+    let (mut s, gnb, ids) = core_and_ids(1024);
+    let mut ue = Ue::default();
+    let tmsi = registered_with_a_session_then_idle(&mut s, &gnb, &mut ue);
+    // Back for signalling only: the session stays down; the SMF last heard of the UE as idle.
+    let cleartext = [&hex("7e004c 00 0007 f4 0040")[..], &tmsi].concat();
+    let whole = [&cleartext[..], &hex("5002 0200")].concat();
+    let request = ue.initial(&cleartext, &whole);
+    gnb.send(0, 2, NGAP_PPID, &initial_ue_message(2, &request)).unwrap();
+    let (carrier, _) = ue.downlink(&mut s, &gnb);
+    assert!(matches!(carrier, Carrier::ContextSetup));
+    gnb.send(0, ue.stream, NGAP_PPID, &context_setup_response(ue.amf_id, 2)).unwrap();
+    s.pump();
+
+    s.tb.inject_from(ids.upf, ids.smf, 0, &N4Report { seid: 1 }).unwrap();
+    let (stream, pdu) = s.receive(&gnb);
+    let _: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
+    assert!(!s.logged("amf-1", "paged"), "connected: no paging");
+    assert!(s.logged("amf-1", &format!("UE {}: PDU session 1 reactivated", ue.amf_id)), "{:#?}", s.log.lines());
+    gnb.send(0, stream, NGAP_PPID, &session_setup_response(ue.amf_id, 2, 1, 0x9a)).unwrap();
+    s.pump();
+    assert!(s.logged("upf", "downlink to 127.0.0.1 TEID 0x9a"), "{:#?}", s.log.lines());
+    assert!(!s.logged("smf", "released"), "the session lives");
 }
