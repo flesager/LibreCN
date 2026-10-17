@@ -1,57 +1,91 @@
 //! UPF, the user plane function, hosted in one EO.
 //!
-//! This release keeps the sessions the SMF sets over N4: for each, the UE's
-//! address, the uplink tunnel endpoint it allocates on N3 (its address and
-//! a TEID) and the downlink one, the gNB's. Forwarding (GTP-U on N3, the
-//! TUN device on N6) comes next.
+//! - N4 (from the SMF, EO messages): sessions, each with the UE's address,
+//!   the uplink tunnel the UPF allocates (its N3 address and a TEID) and the
+//!   downlink one, the gNB's.
+//! - N3: GTP-U on UDP port 2152 of the `n3` address. An uplink G-PDU goes
+//!   to N6 if its TEID and inner source address match a session.
+//! - N6: a TUN device (`n6`). A packet to a UE's address goes to its gNB in
+//!   a G-PDU with the PDU Session Container (QFI 1, the default flow).
+//!
+//! Without `n6` the UPF keeps sessions and forwards nothing (no socket is
+//! opened). Forwarding uses one preallocated buffer: no allocation per
+//! packet. The EO is event-driven; a polling mode can come later, measured.
+//!
+//! - [`sessions`], the session table;
+//! - [`tun`], the N6 device.
 
-use std::collections::HashMap;
-use std::net::Ipv4Addr;
+pub mod sessions;
+pub mod tun;
 
+use std::fs::File;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+
+use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
 use librecn_common::log::Logger;
 use librecn_common::msg::flags;
+use librecn_gtpu::{G_PDU_HEADER, Message as Gtp};
 use librecn_sbi::Outcome;
 use librecn_sbi::pdu_session::{N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult};
-use librecn_scheduler::{Context, EoConfig, ExecutionObject, Message};
+use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message};
 use serde::Deserialize;
+
+use sessions::{Refusal, Sessions};
+
+/// Packets moved per readiness, so one busy side cannot hold the worker.
+const PACKETS_PER_TURN: usize = 64;
+/// Largest packet: an IPv4 datagram, with room for the GTP-U header.
+const BUFFER: usize = G_PDU_HEADER + 65_535;
+/// The default QoS flow (the SMF's).
+const QFI: u8 = 1;
+/// Alarm raised while the user plane cannot run.
+const ALARM_USER_PLANE: u32 = 0;
 
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Params {
-    /// N3 address announced to the gNBs. Not 127.0.0.1: a gNB on the same
-    /// host (UERANSIM) binds the GTP-U port there.
+    /// N3 address, announced to the gNBs and bound for GTP-U. Not
+    /// 127.0.0.1 on a host with UERANSIM: its gNB binds that address.
     n3: Ipv4Addr,
+    /// N6 TUN device; none: no user plane.
+    n6: Option<String>,
     max_sessions: usize,
 }
 
 impl Default for Params {
     fn default() -> Self {
-        Params { n3: Ipv4Addr::new(127, 0, 0, 2), max_sessions: 1024 }
+        Params { n3: Ipv4Addr::new(127, 0, 0, 2), n6: None, max_sessions: 1024 }
     }
 }
 
-/// One PDU session's forwarding state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Session {
-    ue_ip: Ipv4Addr,
-    ul_teid: u32,
-    /// gNB address and TEID, once known.
-    dl: Option<(Ipv4Addr, u32)>,
+/// Packets and drops, for the log.
+#[derive(Default, Debug)]
+struct Counters {
+    uplink: u64,
+    downlink: u64,
+    dropped: u64,
 }
 
 /// The UPF EO.
 pub struct Upf {
     name: String,
     n3: Ipv4Addr,
-    max_sessions: usize,
-    sessions: HashMap<u64, Session>,
-    next_teid: u32,
+    n6_name: Option<String>,
+    sessions: Sessions,
+    /// GTP-U socket and N6 device, once open.
+    n3_socket: Option<(UdpSocket, IoToken)>,
+    n6: Option<(File, Option<IoToken>)>,
+    buffer: Box<[u8]>,
+    counters: Counters,
     log: Logger,
+    alarms: Alarms,
 }
 
 impl Upf {
-    /// From deployment `params`: `n3` (default 127.0.0.2) and `max_sessions` (1024).
+    /// From deployment `params`: `n3` (default 127.0.0.2), `n6` (a TUN
+    /// device name, default none) and `max_sessions` (1024).
     pub fn new(name: &str, params: &serde_json::Value) -> Result<Self, String> {
         let p: Params = if params.is_null() {
             Params::default()
@@ -61,10 +95,14 @@ impl Upf {
         Ok(Upf {
             name: name.to_string(),
             n3: p.n3,
-            max_sessions: p.max_sessions,
-            sessions: HashMap::with_capacity(p.max_sessions),
-            next_teid: 1,
+            n6_name: p.n6,
+            sessions: Sessions::new(p.max_sessions),
+            n3_socket: None,
+            n6: None,
+            buffer: vec![0; BUFFER].into_boxed_slice(),
+            counters: Counters::default(),
             log: Logger::default(),
+            alarms: Alarms::new(),
         })
     }
 
@@ -73,35 +111,92 @@ impl Upf {
         Ok((Self::eo_config(name), Self::new(name, params)?))
     }
 
+    /// N4 messages are small; N3 and N6 are two I/O registrations.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 64)])
+        EoConfig::new(name).max_io(2).max_timers(0).buffers(&[(256, 64)])
     }
 
-    /// A TEID no session uses (0 is reserved).
-    fn teid(&mut self) -> u32 {
-        loop {
-            let teid = self.next_teid;
-            self.next_teid = self.next_teid.wrapping_add(1).max(1);
-            if !self.sessions.values().any(|s| s.ul_teid == teid) {
-                return teid;
+    /// N6 on an already open, non-blocking packet device instead of the
+    /// `n6` TUN (tests: one end of a datagram socket pair).
+    pub fn with_n6(mut self, device: File) -> Self {
+        self.n6 = Some((device, None));
+        self
+    }
+
+    /// Opens N3 and N6, if a device is configured.
+    fn open_user_plane(&mut self, ctx: &mut Context<'_>) -> Result<(), String> {
+        if self.n6.is_none() {
+            let Some(name) = &self.n6_name else { return Ok(()) };
+            let device = tun::open(name).map_err(|e| format!("N6 device {name}: {e}"))?;
+            self.n6 = Some((device, None));
+        }
+        let socket = UdpSocket::bind(SocketAddrV4::new(self.n3, librecn_gtpu::PORT))
+            .and_then(|s| s.set_nonblocking(true).map(|()| s))
+            .map_err(|e| format!("N3 on {}:{}: {e}", self.n3, librecn_gtpu::PORT))?;
+        let token = ctx.register_io(&socket, Interest::READABLE).map_err(|e| format!("N3: {e}"))?;
+        self.n3_socket = Some((socket, token));
+        if let Some((device, token)) = &mut self.n6 {
+            *token = Some(ctx.register_io(&*device, Interest::READABLE).map_err(|e| format!("N6: {e}"))?);
+        }
+        Ok(())
+    }
+
+    /// GTP-U datagrams from the gNBs.
+    fn on_n3(&mut self, ctx: &mut Context<'_>) {
+        let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return };
+        for _ in 0..PACKETS_PER_TURN {
+            let (n, from) = match socket.recv_from(&mut self.buffer) {
+                Ok(received) => received,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return,
+                Err(e) => return log!(self.log, ctx, Error, "N3 receive: {e}"),
+            };
+            match librecn_gtpu::decode(&self.buffer[..n]) {
+                Ok(Gtp::GPdu { teid, payload, .. }) => {
+                    // The inner source must be the session's UE (no spoofing).
+                    let session = self.sessions.by_teid(teid);
+                    if session.is_some_and(|s| ipv4_src(payload) == Some(s.ue_ip)) && device.write(payload).is_ok() {
+                        self.counters.uplink += 1;
+                    } else {
+                        self.counters.dropped += 1;
+                    }
+                }
+                Ok(Gtp::EchoRequest { seq }) => {
+                    let mut response = [0u8; 14];
+                    let len = librecn_gtpu::echo_response(seq, &mut response);
+                    let _ = socket.send_to(&response[..len], from);
+                }
+                Ok(Gtp::Other { .. }) | Err(_) => self.counters.dropped += 1,
             }
         }
     }
 
-    fn establish(&mut self, request: &N4Establish) -> Result<Session, Outcome> {
-        if let Some(existing) = self.sessions.get(&request.seid) {
-            return Ok(*existing); // a retransmission
+    /// IP packets from the data network, to the UEs.
+    fn on_n6(&mut self, ctx: &mut Context<'_>) {
+        let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return };
+        for _ in 0..PACKETS_PER_TURN {
+            // The packet lands after the room left for its GTP-U header.
+            let n = match device.read(&mut self.buffer[G_PDU_HEADER..]) {
+                Ok(0) => return,
+                Ok(n) => n,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return,
+                Err(e) => return log!(self.log, ctx, Error, "N6 read: {e}"),
+            };
+            let packet = &self.buffer[G_PDU_HEADER..G_PDU_HEADER + n];
+            let Some((gnb, teid)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue(dst)).and_then(|s| s.dl) else {
+                self.counters.dropped += 1;
+                continue;
+            };
+            let header: &mut [u8; G_PDU_HEADER] = (&mut self.buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
+            librecn_gtpu::write_g_pdu_header(header, teid, QFI, n);
+            match socket.send_to(&self.buffer[..G_PDU_HEADER + n], SocketAddr::V4(gnb)) {
+                Ok(_) => self.counters.downlink += 1,
+                Err(_) => self.counters.dropped += 1,
+            }
         }
-        if self.sessions.len() >= self.max_sessions {
-            return Err(Outcome::Unavailable);
-        }
-        let session = Session { ue_ip: Ipv4Addr::from(request.ue_ip), ul_teid: self.teid(), dl: None };
-        self.sessions.insert(request.seid, session);
-        Ok(session)
     }
 
     fn on_establish(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &N4Establish) {
-        let result = self.establish(request);
+        let result = self.sessions.establish(request.seid, Ipv4Addr::from(request.ue_ip));
         match result {
             Ok(s) => {
                 log!(self.log, ctx, Info, "session {:#x}: UE {}, uplink TEID {:#x}", request.seid, s.ue_ip, s.ul_teid)
@@ -114,7 +209,7 @@ impl Upf {
             r.seid = seid;
             match result {
                 Ok(s) => (r.n3_addr, r.ul_teid) = (n3.octets(), s.ul_teid),
-                Err(outcome) => r.set_outcome(outcome),
+                Err(Refusal::Full | Refusal::AddressInUse) => r.set_outcome(Outcome::Unavailable),
             }
             ctx.send(r)
         });
@@ -124,21 +219,20 @@ impl Upf {
     }
 
     fn on_modify(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &N4Modify) {
-        let outcome = match self.sessions.get_mut(&request.seid) {
-            Some(s) => {
-                s.dl = Some((Ipv4Addr::from(request.gnb_addr), request.dl_teid));
-                log!(
-                    self.log,
-                    ctx,
-                    Info,
-                    "session {:#x}: downlink to {} TEID {:#x}",
-                    request.seid,
-                    Ipv4Addr::from(request.gnb_addr),
-                    request.dl_teid
-                );
-                Outcome::Ok
-            }
-            None => Outcome::ContextNotFound,
+        let gnb = SocketAddrV4::new(Ipv4Addr::from(request.gnb_addr), librecn_gtpu::PORT);
+        let outcome = if self.sessions.modify(request.seid, gnb, request.dl_teid) {
+            log!(
+                self.log,
+                ctx,
+                Info,
+                "session {:#x}: downlink to {} TEID {:#x}",
+                request.seid,
+                gnb.ip(),
+                request.dl_teid
+            );
+            Outcome::Ok
+        } else {
+            Outcome::ContextNotFound
         };
         let seid = request.seid;
         let sent = ctx.alloc::<N4ModifyResult>(msg.from()).and_then(|r| {
@@ -153,58 +247,69 @@ impl Upf {
     }
 }
 
+/// Source address of an IPv4 packet.
+fn ipv4_src(packet: &[u8]) -> Option<Ipv4Addr> {
+    match packet {
+        [v, _, _, _, _, _, _, _, _, _, _, _, a, b, c, d, ..] if v >> 4 == 4 => Some(Ipv4Addr::new(*a, *b, *c, *d)),
+        _ => None,
+    }
+}
+
+/// Destination address of an IPv4 packet.
+fn ipv4_dst(packet: &[u8]) -> Option<Ipv4Addr> {
+    match packet {
+        [v, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, a, b, c, d, ..] if v >> 4 == 4 => {
+            Some(Ipv4Addr::new(*a, *b, *c, *d))
+        }
+        _ => None,
+    }
+}
+
 impl ExecutionObject for Upf {
     fn on_start(&mut self, ctx: &mut Context<'_>) {
-        log!(self.log, ctx, Vip, "UPF {} ready, N3 {}", self.name, self.n3);
+        match self.open_user_plane(ctx) {
+            Ok(()) if self.n6.is_some() => {
+                let n6 = self.n6_name.as_deref().unwrap_or("given device");
+                log!(self.log, ctx, Vip, "UPF {} ready, N3 {}:{}, N6 {n6}", self.name, self.n3, librecn_gtpu::PORT);
+            }
+            Ok(()) => log!(self.log, ctx, Vip, "UPF {} ready, N3 {}, no N6: sessions only", self.name, self.n3),
+            Err(e) => {
+                log!(self.log, ctx, Fatal, "UPF {}: no user plane: {e}", self.name);
+                self.alarms.raise(ctx, ALARM_USER_PLANE, Severity::Critical, &format!("no user plane: {e}"));
+            }
+        }
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
-        if let Some(request) = msg.body::<N4Establish>() {
+        if let Some(ready) = msg.io() {
+            if self.n3_socket.as_ref().is_some_and(|(_, t)| *t == ready.token) {
+                self.on_n3(ctx);
+            } else {
+                self.on_n6(ctx);
+            }
+        } else if let Some(request) = msg.body::<N4Establish>() {
             self.on_establish(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Modify>() {
             self.on_modify(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Delete>()
-            && self.sessions.remove(&request.seid).is_some()
+            && self.sessions.delete(request.seid).is_some()
         {
             log!(self.log, ctx, Info, "session {:#x} deleted, {} left", request.seid, self.sessions.len());
         }
     }
 
     fn on_stop(&mut self, ctx: &mut Context<'_>) {
-        log!(self.log, ctx, Info, "UPF {} stopping, {} session(s)", self.name, self.sessions.len());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use librecn_scheduler::testbed::{Probe, TestBed};
-
-    #[test]
-    fn sessions_get_tunnels_and_are_bounded() {
-        let mut tb = TestBed::new();
-        let (cfg, upf) = Upf::from_params("upf", &serde_json::json!({ "max_sessions": 2 })).unwrap();
-        let upf = tb.add(cfg, upf).unwrap();
-        let (probe, seen) = Probe::new();
-        let smf = tb.add(EoConfig::new("smf").buffers(&[(256, 8)]), probe).unwrap();
-        let establish = |tb: &mut TestBed, seid: u64| {
-            tb.inject_from(smf, upf, 7, &N4Establish::new(seid, [10, 45, 0, 2])).unwrap();
-            tb.run_until_idle();
-            seen.take()[0].body::<N4EstablishResult>().unwrap()
-        };
-        let a = establish(&mut tb, 1);
-        assert_eq!((a.outcome(), a.n3_addr, a.seid), (Outcome::Ok, [127, 0, 0, 2], 1));
-        let b = establish(&mut tb, 2);
-        assert_ne!(a.ul_teid, b.ul_teid);
-        assert_eq!(establish(&mut tb, 1).ul_teid, a.ul_teid, "a retransmission gets the same tunnel");
-        assert_eq!(establish(&mut tb, 3).outcome(), Outcome::Unavailable, "full");
-
-        tb.inject_from(smf, upf, 8, &N4Modify { seid: 9, gnb_addr: [127, 0, 0, 1], dl_teid: 5 }).unwrap();
-        tb.run_until_idle();
-        assert_eq!(seen.take()[0].body::<N4ModifyResult>().unwrap().outcome(), Outcome::ContextNotFound);
-        tb.inject_from(smf, upf, 0, &N4Delete { seid: 2 }).unwrap();
-        tb.run_until_idle();
-        assert_eq!(establish(&mut tb, 3).outcome(), Outcome::Ok, "room again");
-        assert!(Upf::new("upf", &serde_json::json!({ "n3": "nowhere" })).is_err());
+        let c = &self.counters;
+        log!(
+            self.log,
+            ctx,
+            Info,
+            "UPF {} stopping, {} session(s), {} packet(s) up, {} down, {} dropped",
+            self.name,
+            self.sessions.len(),
+            c.uplink,
+            c.downlink,
+            c.dropped
+        );
     }
 }

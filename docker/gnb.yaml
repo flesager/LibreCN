@@ -1,0 +1,15 @@
+# UERANSIM's gNB in its container (10.210.0.20), the UE beside it.
+mcc: '999'
+mnc: '70'
+nci: '0x000000010'
+idLength: 32
+tac: 1
+linkIp: 127.0.0.1
+ngapIp: 10.210.0.20
+gtpIp: 10.210.0.20
+amfConfigs:
+  - address: 10.210.0.10
+    port: 38412
+slices:
+  - sst: 1
+ignoreStreamIds: true

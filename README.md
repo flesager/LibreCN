@@ -11,7 +11,8 @@ Open implementation of a 5GCore in Rust based on a pattern reactor scheduler and
 | [`proto/`](proto/) | 3GPP protocols: NGAP (ASN.1 APER), NAS, security algorithms, SBI messages; see [`proto/README.md`](proto/README.md) |
 | [`nf/`](nf/) | 3GPP network functions, one crate each: AMF, AUSF, UDM, SMF, UPF; see [`nf/README.md`](nf/README.md) |
 | [`app/`](app/) | the `librecn` binary: configuration, runtime, OAM, NFs |
-| [`scripts/`](scripts/) | slow checks (`stress.sh`) |
+| [`docker/`](docker/) | an image with LibreCN and UERANSIM, for the user-plane check |
+| [`scripts/`](scripts/) | slow checks (`stress.sh`), interop checks with UERANSIM (`ueransim/`) |
 
 Dependencies point down only: `scheduler` ← `common` ← `oam`, `nf/*` ← `app`.
 
@@ -32,4 +33,5 @@ cargo test --workspace     # about 5 s: run before every commit
 scripts/stress.sh          # repeated and CPU-restricted runs, loom
 scripts/ueransim/ng-setup.sh       # interop with UERANSIM's gNB (UERANSIM next to this repo)
 scripts/ueransim/registration.sh   # UERANSIM gNB + UE: registration, PDU session, deregistration
+scripts/ueransim/user-plane.sh     # in Docker: UERANSIM's UE pings through the UPF
 ```

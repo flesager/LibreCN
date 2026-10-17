@@ -1,6 +1,6 @@
 [package]
 name = "librecn-upf"
-description = "UPF: user plane function (N4 sessions; GTP-U next)"
+description = "UPF: user plane function (N4 sessions, GTP-U on N3, TUN on N6)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,9 +9,14 @@ license.workspace = true
 [dependencies]
 librecn-scheduler = { path = "../../scheduler" }
 librecn-common = { path = "../../common" }
+librecn-gtpu = { path = "../../proto/gtpu" }
 librecn-sbi = { path = "../../proto/sbi" }
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+librecn-oam = { path = "../../oam" }
 
 [lints]
 workspace = true

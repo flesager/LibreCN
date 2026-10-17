@@ -1,0 +1,42 @@
+# LibreCN in its container (10.210.0.10): every NF, N2 and N3 on the
+# container's address, N6 on upf0 (core.sh), UERANSIM's sample UE.
+[[runtime.pools]]
+name = "cp"
+workers = 1
+
+[[runtime.pools]]
+name = "up"
+workers = 1
+
+[oam]
+listen = "0.0.0.0:8080"
+
+[[nf]]
+kind = "udm"
+name = "udm"
+[[nf.params.subscribers]]
+supi = "imsi-999700000000001"
+k = "465B5CE8B199B49FAA5F0A2EE238A6BC"
+opc = "E8ED289DEBA952E4283B54E88E6183CA"
+
+[[nf]]
+kind = "ausf"
+name = "ausf"
+
+[[nf]]
+kind = "upf"
+name = "upf"
+pool = "up"
+[nf.params]
+n3 = "10.210.0.10"
+n6 = "upf0"
+
+[[nf]]
+kind = "smf"
+name = "smf"
+
+[[nf]]
+kind = "amf"
+name = "amf-1"
+[nf.params]
+n2 = "10.210.0.10:38412"

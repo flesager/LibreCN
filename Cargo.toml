@@ -6,6 +6,7 @@ members = [
     "oam",
     "app",
     "proto/ngap",
+    "proto/gtpu",
     "proto/nas",
     "proto/security",
     "proto/sbi",

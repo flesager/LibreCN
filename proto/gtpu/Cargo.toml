@@ -1,0 +1,13 @@
+[package]
+name = "librecn-gtpu"
+description = "GTP-U (3GPP TS 29.281) for N3: G-PDU with the PDU Session Container (TS 38.415), echo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

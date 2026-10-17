@@ -520,6 +520,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "librecn-gtpu"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "librecn-nas"
 version = "0.1.0"
 dependencies = [
@@ -615,7 +622,10 @@ dependencies = [
 name = "librecn-upf"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "librecn-common",
+ "librecn-gtpu",
+ "librecn-oam",
  "librecn-sbi",
  "librecn-scheduler",
  "serde",

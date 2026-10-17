@@ -114,7 +114,7 @@ fn a_refused_request_gets_a_reject_without_n2() {
     let result = c.create("ims", &hex("2e 01 05 c1 ffff 91"));
     assert_eq!(result.n1.get(), hex("2e0105c31b"), "Reject, #27 missing or unknown DNN");
     assert!(result.n2.get().is_empty());
-    assert!(!c.logged("upf", "session"), "the UPF is not asked");
+    assert!(!c.logged("upf", "session 0x"), "the UPF is not asked");
 }
 
 #[test]

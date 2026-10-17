@@ -28,13 +28,14 @@ The detailed design is in `scheduler/DESIGN.md` and `oam/README.md`. This file r
 scheduler/  reactor, EOs, test bed (librecn-scheduler)
 common/     shared conventions: msg-id families, flags, Logger, Alarms (librecn-common)
 oam/        non-3GPP EOs: log, alarm, control, web server + GUI (librecn-oam)
-proto/      3GPP protocols: ngap, nas, security (algorithms), sbi (NF-to-NF messages)
+proto/      3GPP protocols: ngap, nas, gtpu, security (algorithms), sbi (NF-to-NF messages)
 nf/         3GPP NFs, one crate each: amf, ausf, udm, smf, upf
 app/        the `librecn` binary: config, runtime, OAM, NF factories
-scripts/    stress.sh
+docker/     one image with LibreCN and UERANSIM, for the user-plane interop check
+scripts/    stress.sh, ueransim/ (interop checks)
 ```
 
-Later: deployment and Docker directories. Dependencies point down only: `scheduler` ← `common` ← `oam`, `proto/*` ← `nf/*` ← `app`.
+Later: deployment. Dependencies point down only: `scheduler` ← `common` ← `oam`, `proto/*` ← `nf/*` ← `app`.
 
 ## Scheduler decisions
 
@@ -68,7 +69,7 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
 
 ## 3GPP protocols (N2 / NGAP first)
 
-- **Codecs live in `proto/`**, one crate per protocol: `ngap`, `nas`, `security`, `sbi`; later PFCP, GTP-U.
+- **Codecs live in `proto/`**, one crate per protocol: `ngap`, `nas`, `gtpu`, `security`, `sbi`. No PFCP: N4 is EO messages.
 - **NGAP** (TS 38.413, ASN.1 APER):
   - Rust code is generated with `rasn-compiler` for the `rasn` runtime. The `.asn` sources and the generated code are both checked in.
   - `oxirush-ngap` serves only as a cross-check.
@@ -98,7 +99,7 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
   3. Registration (done): 5G AKA with separate **AUSF and UDM EOs** (the owner's choice), NAS security mode (NIA2, NEA2 or NEA0), Registration Accept/Complete, identification, UE-originating deregistration.
   4. PDU sessions, in two steps:
      - 4a (done): control plane. **Initial Context Setup at registration**, carrying the Registration Accept, as Open5GS and free5GC do; UL NAS Transport to the **SMF**, PDU Session Resource Setup, the **UPF** keeping the tunnels. UERANSIM logs "PDU Session establishment is successful".
-     - 4b: user plane, GTP-U on N3 and a TUN device on N6, event-driven first (poll mode later, measured). Proof: a ping through `uesimtun0`. UERANSIM's UE needs root for its TUN (it checks `IsRoot`, not a capability), so 4b's interop runs in Docker (`--cap-add NET_ADMIN`), which also starts the Docker directory.
+     - 4b (done): user plane, GTP-U on N3 and a TUN device on N6 (`upf0`, 10.45.0.1/16), event-driven (poll mode later, measured), no allocation per packet. Proof: `scripts/ueransim/user-plane.sh`, a ping through `uesimtun0`. UERANSIM's UE needs root for its TUN (it checks `IsRoot`, not a capability), so this check runs in **Docker** (the owner's choice): the core in one container, UERANSIM's gNB and UE in another.
 - **5GMM** (`mm.rs`): pure, one context per UE, acting through an `Effects` trait the EO implements. The 5GMM context lives as long as the N2 context (no idle-UE contexts yet); retransmission timers are not run yet. The list of what is left out is in `nf/README.md`.
 - **AMF-UE-NGAP-IDs** are allocated within 32 bits, so that they are also the `corr_id` of the UE's requests to the AUSF and the SMF.
 - **PDU sessions in the AMF** (`sessions.rs`): the AMF carries N1 and N2 without reading them; the SMF encodes and decodes both. The SMF's answer to CreateSMContext also carries what N1N2MessageTransfer would. A UE's sessions are released at the SMF when its context goes.
@@ -107,7 +108,8 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
 - **Test values** (the owner let me choose; they match UERANSIM's samples): PLMN 999/70, TAC 1, SST 1, AMF Region 1 / Set 1 / Pointer 0, capacity 255, N2 on 127.0.0.1:38412; subscriber imsi-999700000000001 with UERANSIM's K and OPc, AMF field 8000. The UDM's SQN is SEQ || IND (5 bits, IND 0), as UERANSIM checks it.
 - **Session values** (agreed with the owner, in the SMF's params until subscription data exists): DNN `internet`, SST 1, IPv4 pool 10.45.0.0/16 (10.45.0.1 is the UPF's N6 side), default 5QI 9, session AMBR 1000 Mbit/s each way. The UPF's N3 is 127.0.0.2: UERANSIM's gNB binds GTP-U on 127.0.0.1.
 - **UERANSIM** v3.3.0 lives in `/mnt/part_1TB_disck/prg/UERANSIM`, next to this repository, built by its `build.sh` without system packages: cmake and libsctp come from its `tools/`.
-  - Interop checks: `scripts/ueransim/ng-setup.sh` (gNB), `scripts/ueransim/registration.sh` (gNB + UE: registration, PDU session, then switch-off deregistration through `nr-cli`).
+  - Interop checks: `scripts/ueransim/ng-setup.sh` (gNB), `scripts/ueransim/registration.sh` (gNB + UE: registration, PDU session, then switch-off deregistration through `nr-cli`), `scripts/ueransim/user-plane.sh` (in Docker: a ping through the UPF).
+- **UPF**: user plane only when `n6` (a TUN device) is configured; then N3 is bound on `n3`:2152. It attaches to the device and never configures the network itself (address, link: the deployment's job, `docker/core.sh`).
 
 ## Commands
 
@@ -118,4 +120,5 @@ cargo bench -p librecn-scheduler
 cargo run --release -p librecn -- --config app/librecn.example.toml   # GUI on http://127.0.0.1:8080
 scripts/ueransim/ng-setup.sh                              # interop with UERANSIM's gNB
 scripts/ueransim/registration.sh                          # UERANSIM gNB + UE: registration, PDU session, deregistration
+scripts/ueransim/user-plane.sh                            # in Docker: UERANSIM's UE pings through the UPF
 ```

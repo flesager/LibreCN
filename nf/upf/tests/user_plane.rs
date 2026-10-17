@@ -1,0 +1,131 @@
+//! The UPF forwarding: a test gNB on a real UDP socket (N3), a datagram
+//! socket pair standing for the TUN device (N6).
+
+use std::fs::File;
+use std::net::{Ipv4Addr, UdpSocket};
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixDatagram;
+use std::time::Duration;
+
+use librecn_oam::{CapturedLog, LogSink};
+use librecn_sbi::pdu_session::{N4Establish, N4EstablishResult, N4Modify};
+use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
+use librecn_scheduler::{EoConfig, EoId};
+use librecn_upf::Upf;
+
+/// A minimal IPv4 header (20 bytes) from `src` to `dst`, then `data`.
+fn ipv4(src: [u8; 4], dst: [u8; 4], data: &[u8]) -> Vec<u8> {
+    let len = (20 + data.len()) as u16;
+    let mut p = vec![0x45, 0, (len >> 8) as u8, len as u8, 0, 0, 0, 0, 64, 1, 0, 0];
+    p.extend_from_slice(&src);
+    p.extend_from_slice(&dst);
+    p.extend_from_slice(data);
+    p
+}
+
+const UE: [u8; 4] = [10, 45, 0, 2];
+const SERVER: [u8; 4] = [10, 45, 0, 1];
+
+struct Plane {
+    tb: TestBed,
+    log: CapturedLog,
+    upf: EoId,
+    smf: EoId,
+    seen: ProbeLog,
+    /// The data network's end of N6.
+    dn: UnixDatagram,
+    gnb: UdpSocket,
+    n3: std::net::SocketAddr,
+}
+
+/// A UPF on N3 `n3` (a distinct loopback address per test) with one session
+/// whose downlink goes to the test gNB.
+fn plane(n3: Ipv4Addr) -> (Plane, u32) {
+    let mut tb = TestBed::new();
+    let (sink, log) = LogSink::capture();
+    tb.add(LogSink::config(), sink).unwrap();
+    let (dn, upf_end) = UnixDatagram::pair().unwrap();
+    upf_end.set_nonblocking(true).unwrap();
+    dn.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    let upf = Upf::new("upf", &serde_json::json!({ "n3": n3.to_string() })).unwrap();
+    let upf = upf.with_n6(File::from(OwnedFd::from(upf_end)));
+    let upf = tb.add(Upf::eo_config("upf"), upf).unwrap();
+    let (probe, seen) = Probe::new();
+    let smf = tb.add(EoConfig::new("smf").buffers(&[(256, 8)]), probe).unwrap();
+    tb.run_until_idle();
+    let gnb = UdpSocket::bind("127.0.0.1:0").unwrap();
+    gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    let mut p = Plane { tb, log, upf, smf, seen, dn, gnb, n3: (n3, librecn_gtpu::PORT).into() };
+
+    p.tb.inject_from(p.smf, p.upf, 1, &N4Establish::new(1, UE)).unwrap();
+    p.tb.run_until_idle();
+    let ul_teid = p.seen.take()[0].body::<N4EstablishResult>().unwrap().ul_teid;
+    (p, ul_teid)
+}
+
+impl Plane {
+    fn pump(&mut self) {
+        for _ in 0..10 {
+            self.tb.wait_io(Duration::from_millis(5));
+            self.tb.run_until_idle();
+        }
+    }
+}
+
+/// An uplink G-PDU as UERANSIM sends it.
+fn g_pdu(teid: u32, payload: &[u8]) -> Vec<u8> {
+    let len = (8 + payload.len()) as u16;
+    let mut d = vec![0x34, 0xff, (len >> 8) as u8, len as u8];
+    d.extend_from_slice(&teid.to_be_bytes());
+    d.extend_from_slice(&[0, 0, 0, 0x85, 1, 0x10, 1, 0]);
+    d.extend_from_slice(payload);
+    d
+}
+
+#[test]
+fn uplink_packets_reach_n6_only_from_their_ue() {
+    let (mut p, teid) = plane(Ipv4Addr::new(127, 0, 0, 61));
+    let packet = ipv4(UE, SERVER, b"ping");
+    p.gnb.send_to(&g_pdu(teid, &packet), p.n3).unwrap();
+    p.pump();
+    let mut buf = [0u8; 128];
+    let n = p.dn.recv(&mut buf).unwrap();
+    assert_eq!(buf[..n], packet[..], "the inner packet, as sent");
+
+    // Another source address, an unknown TEID: dropped.
+    p.gnb.send_to(&g_pdu(teid, &ipv4([10, 45, 0, 9], SERVER, b"spoof")), p.n3).unwrap();
+    p.gnb.send_to(&g_pdu(teid + 1, &packet), p.n3).unwrap();
+    p.pump();
+    p.dn.set_nonblocking(true).unwrap();
+    assert!(p.dn.recv(&mut buf).is_err(), "nothing more on N6");
+
+    // Echo is answered.
+    p.gnb.send_to(&[0x32, 1, 0, 4, 0, 0, 0, 0, 0x12, 0x34, 0, 0], p.n3).unwrap();
+    p.pump();
+    let n = p.gnb.recv(&mut buf).unwrap();
+    assert_eq!(buf[..n], [0x32, 2, 0, 6, 0, 0, 0, 0, 0x12, 0x34, 0, 0, 14, 0]);
+    p.tb.stop(p.upf).unwrap();
+    p.tb.run_until_idle();
+    assert!(p.log.lines().iter().any(|l| l.msg.contains("1 packet(s) up, 0 down, 2 dropped")), "{:#?}", p.log.lines());
+}
+
+#[test]
+fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
+    let (mut p, _) = plane(Ipv4Addr::new(127, 0, 0, 62));
+    // The gNB's GTP-U endpoint: port 2152 of an address of its own.
+    let gnb = UdpSocket::bind("127.0.0.63:2152").unwrap();
+    gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 63], dl_teid: 0x77 }).unwrap();
+    p.pump();
+
+    let packet = ipv4(SERVER, UE, b"pong");
+    p.dn.send(&packet).unwrap();
+    p.dn.send(&ipv4(SERVER, [10, 45, 0, 99], b"nobody")).unwrap();
+    p.pump();
+    let mut buf = [0u8; 128];
+    let n = gnb.recv(&mut buf).unwrap();
+    let librecn_gtpu::Message::GPdu { teid, qfi, payload } = librecn_gtpu::decode(&buf[..n]).unwrap() else { panic!() };
+    assert_eq!((teid, qfi, payload), (0x77, Some(1), &packet[..]));
+    gnb.set_nonblocking(true).unwrap();
+    assert!(gnb.recv(&mut buf).is_err(), "no session for 10.45.0.99: dropped");
+}
