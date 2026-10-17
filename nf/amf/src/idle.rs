@@ -32,6 +32,9 @@ impl Amf {
     /// user plane deactivated; any other is forgotten, its sessions released.
     /// True if it went idle.
     pub(crate) fn retire(&mut self, ctx: &mut Context<'_>, ue: UeContext) -> bool {
+        if let Some(timer) = ue.timer {
+            ctx.cancel_timer(timer);
+        }
         let tmsi = ue.mm.tmsi().filter(|_| ue.mm.state() == State::Registered);
         let Some(tmsi) = tmsi.filter(|_| self.idle.len() < self.config.max_ues) else {
             self.forget_sessions(ctx, &ue);

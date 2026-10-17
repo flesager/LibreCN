@@ -9,7 +9,7 @@ their EO names (parameters `ausf` and `smf` of the AMF, `udm` of the AUSF,
 
 | Crate | NF | Status |
 |---|---|---|
-| [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept in Initial Context Setup, identification, UE-originating deregistration; idle UEs kept (Service Request, registration from idle, implicit deregistration); PDU sessions carried between UE, SMF and gNB (PDU Session Resource Setup, reactivation) |
+| [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept in Initial Context Setup, retransmission timers (T3550, T3560, T3570), identification, UE-originating deregistration; idle UEs kept (Service Request, registration from idle, implicit deregistration); PDU sessions carried between UE, SMF and gNB (PDU Session Resource Setup, reactivation) |
 | [`ausf`](ausf/) | AUSF | 5G AKA (Nausf_UEAuthentication): challenge with HXRES*, confirmation, K_SEAF; contexts expire after 30 s |
 | [`smf`](smf/) | SMF | IPv4 PDU session establishment: checks (DNN, slice, type, SSC mode), address pool, default QoS flow, N1 accept/reject, N2 transfers, N4 to the UPF; release |
 | [`upf`](upf/) | UPF | N4 sessions; GTP-U on N3 and a TUN device on N6, both ways, IPv4, source address checked, no allocation per packet |
@@ -32,8 +32,6 @@ Deliberately left out of this release, to be added when a step needs them:
   does not page it (no Downlink Data Notification). The UE comes back by
   itself, with uplink data or signalling.
 - **T3512 in Registration Accept**: the UE keeps its default (54 min).
-- **NAS retransmission timers** (T3550, T3560, T3570): a UE that stops
-  answering keeps its context until the gNB releases it.
 - **User plane extras**: IPv6, Error Indication for unknown TEIDs, AMBR
   enforcement, the UPF's counters on `/metrics` (they are logged at stop),
   the polling mode.

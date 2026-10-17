@@ -18,10 +18,15 @@
 //! message container (§4.4.6): a Service Request (Service Accept in Initial
 //! Context Setup, sessions reactivated) or a Registration Request (accepted
 //! without a new authentication). A 5G-GUTI the AMF does not know is
-//! answered by an Identity Request for the SUCI. Retransmission timers
-//! (T3550, T3560, T3570) are not run yet.
+//! answered by an Identity Request for the SUCI.
+//!
+//! A message waiting for an answer is sent again when its timer expires
+//! (§10.2): T3570 (Identity Request), T3560 (Authentication Request,
+//! Security Mode Command), T3550 (Registration Accept), 6 s, four times;
+//! the fifth expiry aborts the procedure.
 
 use std::fmt;
+use std::time::Duration;
 
 use librecn_common::log::Level;
 use librecn_nas::Snssai;
@@ -40,6 +45,10 @@ use crate::config::AmfConfig;
 
 /// Largest plain NAS message the AMF sends.
 const DOWNLINK_MAX: usize = 256;
+/// T3550, T3560, T3570 (§10.2).
+pub const T_NAS: Duration = Duration::from_secs(6);
+/// Retransmissions before a procedure is aborted (§5.4, §5.5).
+const RETRANSMISSIONS: u8 = 4;
 
 /// Why the AMF releases the UE's N2 context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +103,10 @@ pub trait Effects {
     fn release(&mut self, why: Release);
     /// A fresh, unpredictable 5G-TMSI.
     fn tmsi(&mut self) -> u32;
+    /// (Re)starts the UE's NAS timer: [`Mm::on_timer`] after `after`.
+    fn arm(&mut self, after: Duration);
+    /// Stops it.
+    fn disarm(&mut self);
     fn log(&mut self, level: Level, args: fmt::Arguments<'_>);
 }
 
@@ -125,6 +138,15 @@ struct Challenge {
     hxres_star: [u8; 16],
 }
 
+/// The timer guarding a message (§10.2), for logs.
+fn timer_name(message: &Downlink<'_>) -> &'static str {
+    match message {
+        Downlink::IdentityRequest(_) => "T3570",
+        Downlink::RegistrationAccept { .. } => "T3550",
+        _ => "T3560",
+    }
+}
+
 /// One UE's 5GMM context.
 #[derive(Clone, Debug, Default)]
 pub struct Mm {
@@ -143,6 +165,8 @@ pub struct Mm {
     supi: Option<Supi>,
     guti: Option<Guti>,
     allowed: SnssaiList,
+    /// The message waiting for its answer, and how often it was sent again.
+    retransmit: Option<(Downlink<'static>, u8)>,
 }
 
 /// The type of an initial message (plain or integrity protected), if it is one.
@@ -292,6 +316,18 @@ impl Mm {
         verified: bool,
         fx: &mut impl Effects,
     ) {
+        // An answer, or a new procedure: the guarded message is done with.
+        let answers = matches!(
+            (self.state, &message),
+            (State::Identifying, Uplink::IdentityResponse { .. })
+                | (State::Challenged, Uplink::AuthenticationResponse { .. } | Uplink::AuthenticationFailure { .. })
+                | (State::SecurityMode, Uplink::SecurityModeComplete { .. } | Uplink::SecurityModeReject { .. })
+                | (State::Accepting, Uplink::RegistrationComplete)
+                | (_, Uplink::RegistrationRequest(_) | Uplink::DeregistrationRequest { .. })
+        );
+        if answers && self.retransmit.take().is_some() {
+            fx.disarm();
+        }
         match (self.state, message) {
             // Back from idle: the kept context vouches for the UE (§5.5.1.3).
             (State::Registered, Uplink::RegistrationRequest(request)) if verified => {
@@ -383,7 +419,7 @@ impl Mm {
             MobileIdentity::Guti(guti) => {
                 fx.log(Level::Info, format_args!("{guti} unknown: identification"));
                 self.state = State::Identifying;
-                self.send(Downlink::IdentityRequest(IdentityType::Suci), fx);
+                self.expect(Downlink::IdentityRequest(IdentityType::Suci), fx);
             }
             other => {
                 fx.log(Level::Info, format_args!("{other} not acceptable"));
@@ -420,7 +456,7 @@ impl Mm {
         let (rand, autn) = (result.rand, result.autn);
         self.challenge = Some(Challenge { auth_ctx: result.auth_ctx, rand, hxres_star: result.hxres_star });
         self.state = State::Challenged;
-        self.send(Downlink::AuthenticationRequest { ngksi: self.ngksi, rand, autn }, fx);
+        self.expect(Downlink::AuthenticationRequest { ngksi: self.ngksi, rand, autn }, fx);
     }
 
     fn on_response(&mut self, res_star: Option<&[u8]>, fx: &mut impl Effects) {
@@ -478,7 +514,7 @@ impl Mm {
             // The initial message was not checked: ask for all of it (§4.4.6).
             retransmit_initial: true,
         };
-        self.send(command, fx);
+        self.expect(command, fx);
     }
 
     fn accept(&mut self, config: &AmfConfig, tai: Option<Tai>, fx: &mut impl Effects) {
@@ -504,9 +540,42 @@ impl Mm {
         self.state = State::Accepting;
         // As Open5GS and free5GC: the Accept goes in Initial Context Setup.
         let Some(context) = self.as_context() else { return self.reject(cause::PROTOCOL_ERROR, fx) };
+        let accept = Downlink::RegistrationAccept { guti, tai, allowed };
         let mut pdu = [0u8; DOWNLINK_MAX + 7];
-        if let Some(n) = self.seal(Downlink::RegistrationAccept { guti, tai, allowed }, &mut pdu, fx) {
+        if let Some(n) = self.seal(accept, &mut pdu, fx) {
             fx.setup_context(&pdu[..n], &context, "Registration Accept in Initial Context Setup");
+        }
+        // Sent again, if need be, in DL NAS Transport.
+        self.retransmit = Some((accept, 0));
+        fx.arm(T_NAS);
+    }
+
+    /// Sends `message`, which expects an answer: its timer runs.
+    fn expect(&mut self, message: Downlink<'static>, fx: &mut impl Effects) {
+        self.send(message, fx);
+        self.retransmit = Some((message, 0));
+        fx.arm(T_NAS);
+    }
+
+    /// The UE's NAS timer expired: the message again, or the procedure aborted.
+    pub fn on_timer(&mut self, fx: &mut impl Effects) {
+        let Some((message, sent)) = self.retransmit else { return };
+        let (timer, what) = (timer_name(&message), name(message.kind()));
+        if sent < RETRANSMISSIONS {
+            fx.log(Level::Info, format_args!("{timer} expired: {what} again ({}/{RETRANSMISSIONS})", sent + 1));
+            self.retransmit = Some((message, sent + 1));
+            self.send(message, fx);
+            return fx.arm(T_NAS);
+        }
+        self.retransmit = None;
+        if let Downlink::RegistrationAccept { .. } = message {
+            // The UE most likely has its 5G-GUTI (§5.5.1.2.8).
+            fx.log(Level::Info, format_args!("{timer} expired 5 times: registered without Registration Complete"));
+            self.state = State::Registered;
+        } else {
+            fx.log(Level::Info, format_args!("{timer} expired 5 times: {what} unanswered, the UE is released"));
+            self.state = State::Deregistered;
+            fx.release(Release::Normal);
         }
     }
 
@@ -665,6 +734,8 @@ mod tests {
         /// What `sessions` answers, and what `resume_sessions` got.
         network_sessions: SessionSet,
         resumed: Vec<(SessionSet, Option<SessionSet>)>,
+        /// Whether the NAS timer runs.
+        timer: bool,
         released: Option<Release>,
         logs: Vec<String>,
     }
@@ -701,6 +772,13 @@ mod tests {
         }
         fn tmsi(&mut self) -> u32 {
             0xc0ffee
+        }
+        fn arm(&mut self, after: Duration) {
+            assert_eq!(after, T_NAS);
+            self.timer = true;
+        }
+        fn disarm(&mut self) {
+            self.timer = false;
         }
         fn log(&mut self, _level: Level, args: fmt::Arguments<'_>) {
             self.logs.push(args.to_string());
@@ -1006,6 +1084,55 @@ mod tests {
         mm.on_uplink(&config, tai(), &mut forged, &mut fx);
         assert_eq!(fx.sent.pop().unwrap(), hex("7e005b01"), "Identity Request for the SUCI, in clear");
         assert!(initial_tmsi(&hex("7e004101 000b f299f907 010041 00c0ffee"), &config).is_none(), "another AMF");
+    }
+
+    /// The NAS timer fires, as the EO delivers it: no longer running.
+    fn expire(mm: &mut Mm, fx: &mut Recorder) {
+        assert!(fx.timer, "the timer runs");
+        fx.timer = false;
+        mm.on_timer(fx);
+    }
+
+    #[test]
+    fn an_unanswered_authentication_request_is_sent_four_times_more_then_given_up() {
+        let (config, mut mm, mut fx) = (config(), Mm::default(), Recorder::default());
+        mm.on_uplink(&config, tai(), &mut registration_request(), &mut fx);
+        mm.on_authenticate_result(&challenge([1; 16]).0, &mut fx);
+        let first = fx.sent.pop().unwrap();
+        assert!(fx.timer, "T3560 runs");
+        for _ in 0..4 {
+            expire(&mut mm, &mut fx);
+            assert_eq!(fx.sent.pop().unwrap(), first, "the same challenge: the UE answers the same RES*");
+            assert!(fx.timer);
+        }
+        expire(&mut mm, &mut fx);
+        assert!(fx.sent.is_empty() && !fx.timer);
+        assert_eq!((mm.state(), fx.released), (State::Deregistered, Some(Release::Normal)));
+        assert!(fx.logs.iter().any(|l| l.contains("T3560 expired 5 times")));
+    }
+
+    #[test]
+    fn an_answer_stops_the_timer_and_a_lost_registration_complete_still_registers() {
+        let (config, mut mm, mut fx) = (config(), Mm::default(), Recorder::default());
+        mm.on_uplink(&config, tai(), &mut hex("7e004101 000b f299f907010040 01020304 2e02f0f0"), &mut fx);
+        assert!(fx.timer, "T3570 for the Identity Request");
+        expire(&mut mm, &mut fx);
+        assert_eq!(fx.sent.pop().unwrap(), hex("7e005b01"), "sent again");
+        mm.on_uplink(&config, tai(), &mut hex("7e005c 000d 0199f907000000000000000010"), &mut fx);
+        assert!(!fx.timer, "answered");
+
+        let (config, mut mm, _, mut ue) = registered();
+        let mut fx = Recorder::default();
+        let cleartext = hex("7e004102 000b f299f907 010040 00c0ffee 2e04f0f0f0f0");
+        mm.on_uplink(&config, tai(), &mut ue.initial(&cleartext, &cleartext), &mut fx);
+        assert_eq!(mm.state(), State::Accepting);
+        fx.sent.clear();
+        for n in 0..4 {
+            expire(&mut mm, &mut fx);
+            assert_eq!(ue.open(&fx.sent.pop().unwrap(), 3 + n)[..3], hex("7e0042")[..], "T3550: the Accept again");
+        }
+        expire(&mut mm, &mut fx);
+        assert_eq!((mm.state(), fx.released, fx.timer), (State::Registered, None, false));
     }
 
     /// The selected algorithms octet of the Security Mode Command, for a UE

@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 
+use librecn_scheduler::TimerId;
+
 use crate::config::{Plmn, Snssai};
 use crate::mm::Mm;
 use crate::sctp::AssocId;
@@ -48,6 +50,8 @@ pub struct UeContext {
     pub mm: Mm,
     /// PDU sessions by PDU session ID (1 to 15).
     pub sessions: [Option<PduSession>; 16],
+    /// Its NAS timer, while running.
+    pub timer: Option<TimerId>,
 }
 
 /// Why an id pair does not match a context (TS 38.413 §10.6 causes).
@@ -103,6 +107,7 @@ impl UeTable {
             releasing: false,
             mm: Mm::default(),
             sessions: [None; 16],
+            timer: None,
         };
         Some(self.ues.entry(amf_id).or_insert(ue))
     }

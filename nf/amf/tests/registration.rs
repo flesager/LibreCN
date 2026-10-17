@@ -418,6 +418,22 @@ fn an_idle_ue_comes_back_and_its_session_is_reactivated() {
 }
 
 #[test]
+fn an_unanswered_challenge_is_sent_again_after_t3560() {
+    let (mut s, gnb) = core();
+    let mut ue = Ue::default();
+    gnb.send(0, 1, NGAP_PPID, &initial_ue_message(1, &hex(REGISTRATION_REQUEST))).unwrap();
+    let (_, first) = ue.downlink(&mut s, &gnb);
+    s.tb.advance(std::time::Duration::from_secs(6));
+    let (_, again) = ue.downlink(&mut s, &gnb);
+    assert_eq!(again, first, "the same Authentication Request");
+    assert!(s.logged("amf-1", "T3560 expired: Authentication Request again (1/4)"));
+    let res_star = ue.authenticate(&again);
+    ue.uplink(&gnb, &[&hex("7e0057 2d10")[..], &res_star].concat());
+    let (_, command) = ue.downlink(&mut s, &gnb);
+    assert_eq!(command[..3], hex("7e005d")[..], "the registration goes on");
+}
+
+#[test]
 fn an_unknown_subscriber_is_rejected() {
     let (mut s, gnb) = core();
     let mut ue = Ue::default();

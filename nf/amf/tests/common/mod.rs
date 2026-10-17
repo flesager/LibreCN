@@ -36,7 +36,7 @@ pub fn amf_with(mcc: &str, mnc: &str, more: impl FnOnce(&mut TestBed)) -> Setup 
     let params = serde_json::json!({ "n2": "127.0.0.1:0", "plmn": { "mcc": mcc, "mnc": mnc } });
     let amf = Amf::new(AmfConfig::from_params("amf-1", &params).unwrap());
     let bound = amf.bound_addr();
-    tb.add(Amf::eo_config("amf-1"), amf).unwrap();
+    tb.add(amf.eo_config(), amf).unwrap();
     tb.run_until_idle();
     let addr = bound.lock().unwrap().expect("N2 open");
     Setup { tb, log, addr }

@@ -48,7 +48,7 @@ use librecn_sbi::pdu_session::{
 };
 use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
 use librecn_sbi::{DnnText, ServingNetwork, SupiOrSuci};
-use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, MsgBody};
+use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, MsgBody, TimerId};
 
 use config::AmfConfig;
 use mm::{AsContext, Effects, Release, SessionRequest};
@@ -111,14 +111,21 @@ impl Amf {
 
     /// For the control EO's factory: EO sizes and the AMF from deployment `params`.
     pub fn from_params(name: &str, params: &serde_json::Value) -> Result<(EoConfig, Self), String> {
-        let config = AmfConfig::from_params(name, params)?;
-        Ok((Self::eo_config(name), Self::new(config)))
+        let amf = Self::new(AmfConfig::from_params(name, params)?);
+        Ok((amf.eo_config(), amf))
     }
 
     /// N2 traffic arrives through the SCTP socket, not the mailbox: small
-    /// lanes, and buffers for the AUSF's and the SMF's answers.
-    pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_io(1).max_timers(4).system_capacity(16).buffers(&[(256, 64), (2048, 16)])
+    /// lanes, and buffers for the AUSF's and the SMF's answers. A NAS timer
+    /// per UE, and the idle sweep.
+    pub fn eo_config(&self) -> EoConfig {
+        let timers = u32::try_from(self.config.max_ues).unwrap_or(u32::MAX).saturating_add(1);
+        // The system lane holds every expiry at once (the scheduler checks it).
+        EoConfig::new(&self.config.name)
+            .max_io(1)
+            .max_timers(timers)
+            .system_capacity(timers as usize + 1 + 3)
+            .buffers(&[(256, 64), (2048, 16)])
     }
 
     /// The N2 address actually bound, once the EO started (port 0: chosen by the kernel).
@@ -330,6 +337,7 @@ impl Amf {
             config: &self.config,
             serving_network: &self.serving_network,
             sessions: &mut ue.sessions,
+            timer: &mut ue.timer,
             ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
             release: None,
         };
@@ -443,9 +451,18 @@ impl ExecutionObject for Amf {
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
-        if msg.timer().is_some() {
-            self.sweep_idle(ctx);
-            let _ = ctx.arm_timer(idle::SWEEP, 0);
+        if let Some(fired) = msg.timer() {
+            if fired.tag == 0 {
+                self.sweep_idle(ctx);
+                let _ = ctx.arm_timer(idle::SWEEP, 0);
+            } else {
+                // A UE's NAS timer: the tag is its AMF-UE-NGAP-ID.
+                let amf_id = AmfUeId::from(fired.tag);
+                if let Some(ue) = self.ues.get_mut_by_id(amf_id).filter(|ue| ue.timer == Some(fired.id)) {
+                    ue.timer = None;
+                    self.with_mm(ctx, amf_id, |mm, _, _, port| mm.on_timer(port));
+                }
+            }
             return;
         }
         if msg.io().is_none() {
@@ -515,6 +532,7 @@ struct Port<'a, 'c, 's> {
     config: &'a AmfConfig,
     serving_network: &'a ServingNetwork,
     sessions: &'a mut [Option<PduSession>; 16],
+    timer: &'a mut Option<TimerId>,
     /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
     ids: (AmfUeId, RanUeId, AssocId, u16),
     release: Option<Release>,
@@ -620,6 +638,21 @@ impl Effects for Port<'_, '_, '_> {
     fn tmsi(&mut self) -> u32 {
         // Unpredictable (TS 33.501 §6.12.3); the UE id if the kernel has no randomness.
         librecn_security::random().map_or(self.ids.0 as u32, u32::from_be_bytes)
+    }
+
+    fn arm(&mut self, after: std::time::Duration) {
+        self.disarm();
+        // Tag 0 is the idle sweep's; AMF-UE-NGAP-IDs start at 1.
+        match self.ctx.arm_timer(after, self.ids.0 as u32) {
+            Ok(id) => *self.timer = Some(id),
+            Err(e) => log!(self.log, self.ctx, Error, "UE {}: no NAS timer: {e}", self.ids.0),
+        }
+    }
+
+    fn disarm(&mut self) {
+        if let Some(id) = self.timer.take() {
+            self.ctx.cancel_timer(id);
+        }
     }
 
     fn log(&mut self, level: Level, args: fmt::Arguments<'_>) {
