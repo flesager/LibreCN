@@ -94,7 +94,7 @@ impl ExecutionObject for AlarmManager {
             self.clear(ctx, msg.from(), clear.alarm_id);
         } else if msg.id() == proto::ALARMS {
             let json = serde_json::to_string(&self.active).unwrap_or_default();
-            if let Err(e) = proto::send_reply(ctx, msg, true, &json) {
+            if let Err(e) = proto::send_reply(ctx, msg, 200, &json) {
                 log!(self.log, ctx, Error, "cannot reply to {}: {e}", msg.from());
             }
         }

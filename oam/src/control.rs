@@ -181,7 +181,7 @@ impl Control {
         if msg.from() == EoId::SYSTEM {
             return;
         }
-        if let Err(e) = crate::proto::send_reply(ctx, msg, ok, &json) {
+        if let Err(e) = crate::proto::send_reply(ctx, msg, if ok { 200 } else { 400 }, &json) {
             log!(self.log, ctx, Error, "cannot reply to {}: {e}", msg.from());
         }
     }

@@ -3,19 +3,23 @@
 //! This release serves the UE authentication service to the AUSF
 //! (Nudm_UEAuthentication_Get, 5G AKA): SUCI de-concealment (null scheme)
 //! and authentication vectors from Milenage, with SQN resynchronisation.
-//! Subscribers come from the deployment `params` ([`config`]).
+//! Subscribers come from the deployment `params` ([`config`]) and from the
+//! web API while it runs ([`manage`]).
 //!
 //! - [`aka`], the service on domain values;
 //! - [`config`], the subscribers;
+//! - [`manage`], subscribers on the web API;
 //! - the EO, thin glue.
 
 pub mod aka;
 pub mod config;
+pub mod manage;
 
 use std::collections::HashMap;
 
 use librecn_common::log;
 use librecn_common::log::Logger;
+use librecn_common::manage::{Manage, send_reply};
 use librecn_common::msg::flags;
 use librecn_sbi::Outcome;
 use librecn_sbi::ue_authentication::{AuthData, AuthInfo, GetAuthData};
@@ -40,9 +44,20 @@ impl Udm {
         Ok((Self::eo_config(name), Self::new(name, config::from_params(params)?)))
     }
 
-    /// Requests are 256 bytes.
+    /// Requests are 256 bytes; management requests 8 KiB.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 64)])
+        EoConfig::new(name).max_timers(0).buffers(&[(256, 64), (8 * 1024, 4)])
+    }
+
+    fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
+        let Some(method) = request.method() else { return };
+        let answer = manage::handle(&mut self.subscribers, method, request.path(), request.body());
+        if let Some(change) = &answer.change {
+            log!(self.log, ctx, Info, "{change}, {} subscriber(s)", self.subscribers.len());
+        }
+        if let Err(e) = send_reply(ctx, msg, answer.status, &answer.json) {
+            log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
+        }
     }
 
     fn get_auth_data(&mut self, info: &AuthInfo) -> Result<(librecn_sbi::Supi, aka::Vector), Outcome> {
@@ -95,6 +110,8 @@ impl ExecutionObject for Udm {
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if let Some(request) = msg.body::<GetAuthData>() {
             self.on_get_auth_data(ctx, msg, request);
+        } else if let Some(request) = msg.body::<Manage>() {
+            self.on_manage(ctx, msg, request);
         }
     }
 }

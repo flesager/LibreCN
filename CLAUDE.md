@@ -64,6 +64,7 @@ Later: deployment and Docker directories. Dependencies point down only: `schedul
   - EOs log through a convenient call (`log!(self.log, ctx, Info, ...)`): a message to the log EO if it runs, otherwise a plain print.
   - Tests check logs with a capture helper that sits next to the log EO, not inside it (`LogSink::capture()`).
 - **Alarms are required**: raise, update and clear with X.733 severities; every change is logged.
+- **NF resources on the web API**: `/api/nfs/{name}/{path}` is forwarded to the NF as a generic `Manage` request (`common::manage`), so the server never knows an NF. The UDM serves `subscribers` (list without keys, add, remove), with a Subscribers view in the GUI. Subscribers added this way live in memory only, like their SQNs.
 
 ## 3GPP protocols (N2 / NGAP first)
 

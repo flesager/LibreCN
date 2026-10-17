@@ -10,7 +10,7 @@ their EO names (parameters `ausf` of the AMF, `udm` of the AUSF).
 |---|---|---|
 | [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept/Complete, identification, UE-originating deregistration |
 | [`ausf`](ausf/) | AUSF | 5G AKA (Nausf_UEAuthentication): challenge with HXRES*, confirmation, K_SEAF; contexts expire after 30 s |
-| [`udm`](udm/) | UDM | subscribers from the deployment; SUCI de-concealment (null scheme); authentication vectors (Milenage), SQN resynchronisation |
+| [`udm`](udm/) | UDM | subscribers from the deployment or the web API (`/api/nfs/udm/subscribers`, GUI view); SUCI de-concealment (null scheme); authentication vectors (Milenage), SQN resynchronisation |
 
 Each NF keeps protocol decisions as pure functions on domain values (unit
 tested without I/O), codecs in one module, and the EO as thin glue.

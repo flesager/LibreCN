@@ -63,12 +63,29 @@ The answer lists what started and what failed, NF by NF. OAM EOs cannot be stopp
 | `GET /api/kinds` | NF kinds |
 | `POST /api/nfs` | start NFs (deployment as body) |
 | `POST /api/eos/{id}/stop` | stop an EO |
+| `GET`, `POST`, `DELETE /api/nfs/{name}/{path}` | the resources of NF `name`, served by the NF itself |
 | `GET /metrics` | Prometheus text |
 
 It listens on `127.0.0.1:8080` by default; there is no authentication yet.
 
+### NF resources
+
+The server forwards `/api/nfs/{name}/{path}` to the EO `name` as a
+`common::manage::Manage` request (method, path, body; 8 KiB) and returns its
+`Reply` (status and JSON), without knowing the NF. An NF serves what it
+chooses; an NF without such resources has no 8 KiB buffer class, so the
+server answers 503 at once. Today:
+
+| NF | Request | Answer |
+|---|---|---|
+| UDM | `GET subscribers` | `[{"supi", "amf", "sqn"}]`: keys never leave the UDM |
+| UDM | `POST subscribers` | adds one subscriber or an array, fields of the configuration (`supi`, `k`, `opc`, optional `amf`, `sqn`): 201, 409 if one exists |
+| UDM | `DELETE subscribers/{supi}` | 200, or 404 |
+
+The GUI's Subscribers view uses them.
+
 ## Between the OAM EOs
 
 Requests are small fixed bodies or header-only messages (`proto`); each gets a
-`Reply` (16 KiB) carrying the JSON of the web answer, which the server passes
-through. A requester needs a 16 KiB buffer class to receive replies.
+`Reply` (16 KiB, `common::manage`) carrying the status and JSON of the web
+answer, which the server passes through. A requester needs a 16 KiB buffer class to receive replies.

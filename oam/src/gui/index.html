@@ -31,6 +31,11 @@
   textarea { width: 100%; min-height: 110px; font: 13px ui-monospace, monospace; padding: 8px;
              border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
   pre { margin: 8px 0 0; white-space: pre-wrap; font-size: 13px; }
+  input { font: 13px ui-monospace, monospace; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
+          background: var(--bg); color: var(--ink); min-width: 0; }
+  input:invalid:not(:placeholder-shown) { border-color: var(--bad); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .row input { flex: 1 1 150px; }
 </style>
 </head>
 <body>
@@ -52,6 +57,21 @@
 <section>
   <h2>Workers</h2>
   <div class="scroll"><table id="workers"></table></div>
+</section>
+
+<section>
+  <h2>Subscribers</h2>
+  <p class="muted">Held by the UDM <input id="udm" value="udm" size="8" aria-label="UDM name">.
+    Keys are write-only: they never leave the UDM.</p>
+  <div class="scroll"><table id="subscribers"></table></div>
+  <form id="add-subscriber" class="row">
+    <input name="supi" placeholder="imsi-999700000000001" required pattern="imsi-[0-9]{5,15}" aria-label="SUPI">
+    <input name="k" placeholder="K: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="K">
+    <input name="opc" placeholder="OPc: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="OPc">
+    <input name="amf" placeholder="AMF field: 8000" pattern="[0-9A-Fa-f]{4}" aria-label="AMF field">
+    <input name="sqn" placeholder="SQN: 000000000000" pattern="[0-9A-Fa-f]{12}" aria-label="SQN">
+    <button>Add</button>
+  </form>
 </section>
 
 <section>
@@ -121,12 +141,32 @@ async function get(path) {
   return r.json();
 }
 
+let subscribersPending = false;
+async function refreshSubscribers() {
+  if (subscribersPending) return;
+  subscribersPending = true;
+  const udm = encodeURIComponent($("udm").value.trim());
+  try {
+    const r = await fetch(`/api/nfs/${udm}/subscribers`);
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || r.status);
+    table($("subscribers"), [["SUPI"], ["AMF field"], ["SQN"], [""]], body.map((s) =>
+      `<tr><td>${esc(s.supi)}</td><td>${esc(s.amf)}</td><td>${esc(s.sqn)}</td>` +
+      `<td><button data-remove="${esc(s.supi)}">Remove</button></td></tr>`));
+  } catch (e) {
+    $("subscribers").innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
+  } finally {
+    subscribersPending = false;
+  }
+}
+
 async function refresh() {
   try {
     const [eos, workers, alarms] = await Promise.all([get("/api/eos"), get("/api/workers"), get("/api/alarms").catch(() => [])]);
     renderAlarms(alarms);
     renderEos(eos);
     renderWorkers(workers, performance.now());
+    refreshSubscribers();
     $("status").textContent = "updated " + new Date().toLocaleTimeString();
     $("status").className = "muted";
   } catch (e) {
@@ -142,6 +182,25 @@ $("eos").addEventListener("click", async (ev) => {
   const r = await fetch(`/api/eos/${id}/stop`, { method: "POST" });
   $("result").textContent = JSON.stringify(await r.json(), null, 2);
   refresh();
+});
+
+$("subscribers").addEventListener("click", async (ev) => {
+  const supi = ev.target.dataset.remove;
+  if (!supi || !confirm(`Remove ${supi}?`)) return;
+  const r = await fetch(`/api/nfs/${encodeURIComponent($("udm").value.trim())}/subscribers/${encodeURIComponent(supi)}`,
+    { method: "DELETE" });
+  $("result").textContent = JSON.stringify(await r.json(), null, 2);
+  refreshSubscribers();
+});
+
+$("add-subscriber").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const fields = Object.fromEntries([...new FormData(ev.target)].filter(([, v]) => v.trim() !== ""));
+  const r = await fetch(`/api/nfs/${encodeURIComponent($("udm").value.trim())}/subscribers`,
+    { method: "POST", body: JSON.stringify(fields) });
+  $("result").textContent = JSON.stringify(await r.json(), null, 2);
+  if (r.ok) ev.target.reset();
+  refreshSubscribers();
 });
 
 $("deploy").addEventListener("click", async () => {

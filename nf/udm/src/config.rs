@@ -65,27 +65,46 @@ pub fn from_params(params: &serde_json::Value) -> Result<HashMap<String, Subscri
     };
     let mut subscribers = HashMap::with_capacity(p.subscribers.len());
     for s in p.subscribers {
-        let what = |field: &str| format!("subscriber {}: {field}", s.supi);
-        if !s.supi.starts_with("imsi-") || !s.supi[5..].bytes().all(|b| b.is_ascii_digit()) {
-            return Err(what("the SUPI must be imsi-<digits>"));
-        }
-        let sqn = match &s.sqn {
-            Some(h) => {
-                hex::<6>(h).ok_or_else(|| what("sqn: 12 hex digits"))?.iter().fold(0, |a, &b| a << 8 | u64::from(b))
-            }
-            None => 0,
-        };
-        let subscriber = Subscriber {
-            k: hex(&s.k).ok_or_else(|| what("k: 32 hex digits"))?,
-            opc: hex(&s.opc).ok_or_else(|| what("opc: 32 hex digits"))?,
-            amf: hex(&s.amf).ok_or_else(|| what("amf: 4 hex digits"))?,
-            sqn,
-        };
-        if subscribers.insert(s.supi.clone(), subscriber).is_some() {
-            return Err(what("listed twice"));
+        let (supi, subscriber) = parse(s)?;
+        if subscribers.insert(supi.clone(), subscriber).is_some() {
+            return Err(format!("subscriber {supi}: listed twice"));
         }
     }
     Ok(subscribers)
+}
+
+/// Subscribers given as one object or an array of them, with the fields of
+/// `[[nf.params.subscribers]]` (the web API's `POST subscribers`).
+pub fn subscribers(json: &str) -> Result<Vec<(String, Subscriber)>, String> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(SubscriberParams),
+        Many(Vec<SubscriberParams>),
+    }
+    let list = match serde_json::from_str(json).map_err(|e| format!("invalid subscriber: {e}"))? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(list) => list,
+    };
+    list.into_iter().map(parse).collect()
+}
+
+fn parse(s: SubscriberParams) -> Result<(String, Subscriber), String> {
+    let what = |field: &str| format!("subscriber {}: {field}", s.supi);
+    if !s.supi.starts_with("imsi-") || s.supi.len() < 6 || !s.supi[5..].bytes().all(|b| b.is_ascii_digit()) {
+        return Err(what("the SUPI must be imsi-<digits>"));
+    }
+    let sqn = match &s.sqn {
+        Some(h) => hex::<6>(h).ok_or_else(|| what("sqn: 12 hex digits"))?.iter().fold(0, |a, &b| a << 8 | u64::from(b)),
+        None => 0,
+    };
+    let subscriber = Subscriber {
+        k: hex(&s.k).ok_or_else(|| what("k: 32 hex digits"))?,
+        opc: hex(&s.opc).ok_or_else(|| what("opc: 32 hex digits"))?,
+        amf: hex(&s.amf).ok_or_else(|| what("amf: 4 hex digits"))?,
+        sqn,
+    };
+    Ok((s.supi, subscriber))
 }
 
 fn hex<const N: usize>(s: &str) -> Option<[u8; N]> {
@@ -125,5 +144,15 @@ mod tests {
         assert!(bad("k", "00").contains("k: 32 hex digits"));
         assert!(bad("supi", "nai-x@y").contains("imsi-<digits>"));
         assert!(bad("sqn", "zz0000000000").contains("sqn"));
+        assert!(bad("supi", "imsi-").contains("imsi-<digits>"));
+    }
+
+    #[test]
+    fn subscribers_come_one_or_many() {
+        let one =
+            r#"{"supi": "imsi-1", "k": "00000000000000000000000000000001", "opc": "00000000000000000000000000000002"}"#;
+        assert_eq!(subscribers(one).unwrap()[0].0, "imsi-1");
+        assert_eq!(subscribers(&format!("[{one}, {}]", one.replace("imsi-1", "imsi-2"))).unwrap().len(), 2);
+        assert!(subscribers(r#"{"supi": "imsi-1"}"#).unwrap_err().contains("invalid subscriber"));
     }
 }

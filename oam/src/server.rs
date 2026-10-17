@@ -9,10 +9,12 @@
 //! | `GET /api/kinds` | NF kinds (from control) |
 //! | `POST /api/nfs` | start the NFs of a TOML or JSON deployment (control) |
 //! | `POST /api/eos/{id}/stop` | stop an EO (control) |
+//! | `GET`, `POST`, `DELETE /api/nfs/{name}/{path}` | the NF `name`'s own resources (`Manage`) |
 //! | `GET /metrics` | Prometheus text |
 //!
 //! One request per connection (`Connection: close`). The server reads what
-//! any EO can read; actions go to the control EO, which decides.
+//! any EO can read; actions go to the control EO, which decides, or to the
+//! NF whose resource it is.
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -20,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use librecn_common::log::Logger;
+use librecn_common::manage::{MANAGE_TEXT, Manage, Method};
 use librecn_common::{Service, log, names};
 use librecn_scheduler::{Context, EoConfig, EoId, Error, ExecutionObject, Interest, IoToken, Message, Time};
 use serde::Serialize;
@@ -57,6 +60,7 @@ struct Request {
 enum Target {
     Control,
     Alarm,
+    Nf(EoId),
 }
 
 /// Web server EO (name `server`).
@@ -195,12 +199,30 @@ impl Server {
                     ctx.send(stop)
                 });
             }
+            (method, p) if p.starts_with("/api/nfs/") => {
+                let (name, path) = p["/api/nfs/".len()..].split_once('/').unwrap_or((&p["/api/nfs/".len()..], ""));
+                let (Some(method), Some(nf)) = (Method::parse(method), ctx.find(name)) else {
+                    return self.respond_json(ctx, i, 404, &json!({ "error": format!("no NF {name:?}") }));
+                };
+                let Ok(body) = String::from_utf8(request.body) else {
+                    return self.respond_json(ctx, i, 400, &json!({ "error": "body is not UTF-8" }));
+                };
+                if path.len() + body.len() > MANAGE_TEXT {
+                    return self.respond_json(ctx, i, 413, &json!({ "error": "request too large" }));
+                }
+                let path = path.to_string();
+                self.forward(ctx, i, Target::Nf(nf), move |ctx, to, corr| {
+                    let mut manage = ctx.alloc::<Manage>(to)?.with_corr_id(corr);
+                    manage.fill(method, &path, &body);
+                    ctx.send(manage)
+                });
+            }
             _ => self.respond_json(ctx, i, 404, &json!({ "error": "not found" })),
         }
     }
 
-    /// Sends a request to the control or alarm EO; the response goes out when
-    /// its [`Reply`] arrives.
+    /// Sends a request to the control or alarm EO, or to an NF; the response
+    /// goes out when its [`Reply`] arrives.
     fn forward(
         &mut self,
         ctx: &mut Context<'_>,
@@ -208,12 +230,15 @@ impl Server {
         target: Target,
         send: impl FnOnce(&mut Context<'_>, EoId, u32) -> librecn_scheduler::Result<()>,
     ) {
-        let service = match target {
-            Target::Control => &mut self.control,
-            Target::Alarm => &mut self.alarm,
-        };
-        let Some(to) = service.get(ctx) else {
-            return self.respond_json(ctx, i, 503, &json!({ "error": "service not running" }));
+        let (to, service) = match target {
+            Target::Nf(nf) => (nf, None),
+            Target::Control | Target::Alarm => {
+                let service = if matches!(target, Target::Control) { &mut self.control } else { &mut self.alarm };
+                let Some(to) = service.get(ctx) else {
+                    return self.respond_json(ctx, i, 503, &json!({ "error": "service not running" }));
+                };
+                (to, Some(service))
+            }
         };
         let corr = self.next_corr;
         self.next_corr = self.next_corr.wrapping_add(1).max(1);
@@ -224,7 +249,7 @@ impl Server {
                 }
             }
             Err(e) => {
-                if matches!(e, Error::UnknownEo | Error::EoFaulted) {
+                if let Some(service) = service.filter(|_| matches!(e, Error::UnknownEo | Error::EoFaulted)) {
                     service.forget();
                 }
                 self.respond_json(ctx, i, 503, &json!({ "error": e.to_string() }));
@@ -235,8 +260,7 @@ impl Server {
     fn on_reply(&mut self, ctx: &mut Context<'_>, corr: u32, reply: &Reply) {
         let found = self.connections.iter().position(|c| c.as_ref().is_some_and(|c| c.waiting == Some(corr)));
         if let Some(i) = found {
-            let status = if reply.ok() { 200 } else { 400 };
-            self.respond(ctx, i, status, "application/json", reply.text().as_bytes());
+            self.respond(ctx, i, reply.status(), "application/json", reply.text().as_bytes());
         }
     }
 
@@ -350,9 +374,12 @@ fn parse(buf: &[u8]) -> Result<Option<Request>, ()> {
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        201 => "Created",
         400 => "Bad Request",
         404 => "Not Found",
+        409 => "Conflict",
         413 => "Payload Too Large",
+        500 => "Internal Server Error",
         503 => "Service Unavailable",
         504 => "Gateway Timeout",
         _ => "",
