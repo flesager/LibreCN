@@ -83,6 +83,7 @@ smf = "smf"
 ciphering = ["NEA2", "NEA0"]
 t3512_s = 3240                # periodic registration timer (54 min, sent as 1 h)
 # network_name = { full = "LibreCN", short = "LibreCN" }   # optional: sent to each UE once registered
+# ue_ambr_mbps = { uplink = 100, downlink = 500 }         # optional: the UE-AMBR given to the gNBs
 
 [[nf]]
 kind = "demo"

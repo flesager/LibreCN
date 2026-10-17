@@ -54,8 +54,15 @@ impl Amf {
             let mut nas = [0u8; 512];
             if let Some(n) = mm.seal_session(psi, n1, &mut nas, port) {
                 let ran_id = port.ids.1;
-                let request =
-                    n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, Some(&nas[..n]), slice, transfer);
+                let request = n2::pdu_session_resource_setup_request(
+                    amf_id,
+                    ran_id,
+                    psi,
+                    Some(&nas[..n]),
+                    slice,
+                    transfer,
+                    port.ambr,
+                );
                 port.ngap(request, "PDU Session Resource Setup Request");
             }
         });
@@ -147,7 +154,8 @@ impl Amf {
             };
             let ran_id = port.ids.1;
             if kind == n2_kind::SETUP {
-                let request = n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, nas, slice, transfer);
+                let request =
+                    n2::pdu_session_resource_setup_request(amf_id, ran_id, psi, nas, slice, transfer, port.ambr);
                 port.ngap(request, "PDU Session Resource Setup Request");
             } else {
                 let command = n2::pdu_session_resource_release_command(amf_id, ran_id, psi, nas, transfer);

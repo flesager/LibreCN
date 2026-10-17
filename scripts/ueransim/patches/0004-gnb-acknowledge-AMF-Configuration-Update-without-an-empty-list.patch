@@ -1,0 +1,20 @@
+diff --git a/src/gnb/ngap/interface.cpp b/src/gnb/ngap/interface.cpp
+index 313eba35..b8fd428d 100644
+--- a/src/gnb/ngap/interface.cpp
++++ b/src/gnb/ngap/interface.cpp
+@@ -293,12 +293,9 @@ void NgapTask::receiveAmfConfigurationUpdate(int amfId, ASN_NGAP_AMFConfiguratio
+     {
+         AssignDefaultAmfConfigs(amf, msg);
+ 
+-        auto *ieList = asn::New<ASN_NGAP_AMFConfigurationUpdateAcknowledgeIEs>();
+-        ieList->id = ASN_NGAP_ProtocolIE_ID_id_AMF_TNLAssociationSetupList;
+-        ieList->criticality = ASN_NGAP_Criticality_ignore;
+-        ieList->value.present = ASN_NGAP_AMFConfigurationUpdateAcknowledgeIEs__value_PR_AMF_TNLAssociationSetupList;
+-
+-        auto *pdu = asn::ngap::NewMessagePdu<ASN_NGAP_AMFConfigurationUpdateAcknowledge>({ieList});
++        // No AMF TNL Association Setup List: it is optional, and an empty one
++        // (SIZE (1..maxnoofTNLAssociations)) cannot be encoded
++        auto *pdu = asn::ngap::NewMessagePdu<ASN_NGAP_AMFConfigurationUpdateAcknowledge>({});
+         sendNgapNonUe(amfId, pdu);
+     }
+ }

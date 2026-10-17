@@ -18,6 +18,7 @@
 //! ciphering = ["NEA2", "NEA0"]  # NAS ciphering by preference
 //! t3512_s = 3240                # periodic registration (54 min: sent as 1 h)
 //! network_name = { full = "LibreCN", short = "LibreCN" }   # optional: shown by the UEs
+//! ue_ambr_mbps = { uplink = 100, downlink = 500 }         # optional: the UE-AMBR for the gNBs
 //! ```
 //!
 //! Every field is optional; the defaults are test values matching UERANSIM's
@@ -36,6 +37,13 @@ use serde::Deserialize;
 struct PlmnParams {
     mcc: String,
     mnc: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AmbrParams {
+    uplink: u32,
+    downlink: u32,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +76,7 @@ struct Params {
     ciphering: Vec<String>,
     t3512_s: u32,
     network_name: Option<NameParams>,
+    ue_ambr_mbps: Option<AmbrParams>,
 }
 
 impl Default for Params {
@@ -86,6 +95,7 @@ impl Default for Params {
             ciphering: vec!["NEA2".into(), "NEA0".into()],
             t3512_s: 3240,
             network_name: None,
+            ue_ambr_mbps: None,
         }
     }
 }
@@ -122,6 +132,9 @@ pub struct AmfConfig {
     pub t3512: u8,
     /// The network's full and short names, sent to each UE once registered.
     pub network_name: Option<(String, Option<String>)>,
+    /// UE-AMBR (uplink, downlink, bit/s) given to the gNBs, until
+    /// subscription data exists.
+    pub ue_ambr: Option<(u64, u64)>,
 }
 
 impl AmfConfig {
@@ -191,6 +204,7 @@ impl AmfConfig {
             ciphering,
             t3512: librecn_nas::ie::gprs_timer_3(p.t3512_s),
             network_name: p.network_name.map(|n| (n.full, n.short)),
+            ue_ambr: p.ue_ambr_mbps.map(|a| (u64::from(a.uplink) * 1_000_000, u64::from(a.downlink) * 1_000_000)),
         })
     }
 

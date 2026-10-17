@@ -57,6 +57,8 @@ pub struct UeContext {
     pub timer: Option<TimerId>,
     /// Sessions the UE was paged for while idle: set up again when it is back.
     pub paged: SessionSet,
+    /// Its UE-AMBR (uplink, downlink, bit/s), given to its gNB with its sessions.
+    pub ambr: Option<(u64, u64)>,
 }
 
 /// Why an id pair does not match a context (TS 38.413 §10.6 causes).
@@ -117,6 +119,7 @@ impl UeTable {
             sessions: [None; 16],
             timer: None,
             paged: SessionSet::default(),
+            ambr: None,
         };
         // A RAN id reused on the association names the new context.
         self.by_ran.insert((assoc, ran_id), amf_id);

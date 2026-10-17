@@ -6,15 +6,20 @@
 //!   deregisters the UE (TS 23.502 §4.2.2.3.3). A connected UE is told
 //!   (Deregistration Request); an idle one is deregistered locally;
 //! - `POST ues/{supi}/guti`: a new 5G-GUTI for the connected UE
-//!   (Configuration Update Command, TS 24.501 §5.4.4).
+//!   (Configuration Update Command, TS 24.501 §5.4.4);
+//! - `POST ues/{supi}/ambr`, body `{"uplink_mbps", "downlink_mbps"}`: the
+//!   UE's UE-AMBR, to its gNB now (UE Context Modification) and later with
+//!   its sessions;
+//! - `POST capacity`, body `{"relative_capacity"}`: the AMF's relative
+//!   capacity, announced to every gNB (AMF Configuration Update).
 
 use librecn_common::log;
 use librecn_common::manage::{Manage, Method, send_reply};
 use librecn_scheduler::{Context, Message};
 use serde_json::{Value, json};
 
-use crate::Amf;
 use crate::ue::UeContext;
+use crate::{Amf, n2};
 
 /// UEs listed by `GET ues`.
 const LISTED: usize = 64;
@@ -55,6 +60,21 @@ impl Amf {
             (Some(Method::Post), ("ues", rest)) if rest.ends_with("/guti") => {
                 self.reallocate_guti(ctx, &rest[..rest.len() - "/guti".len()])
             }
+            (Some(Method::Post), ("ues", rest)) if rest.ends_with("/ambr") => {
+                let body: Value = serde_json::from_str(request.body()).unwrap_or(Value::Null);
+                let mbps = |k: &str| body.get(k).and_then(Value::as_u64).filter(|v| *v > 0);
+                match (mbps("uplink_mbps"), mbps("downlink_mbps")) {
+                    (Some(ul), Some(dl)) => self.set_ambr(ctx, &rest[..rest.len() - "/ambr".len()], (ul, dl)),
+                    _ => (400, json!({ "error": "uplink_mbps and downlink_mbps, above 0" })),
+                }
+            }
+            (Some(Method::Post), ("capacity", "")) => {
+                let body: Value = serde_json::from_str(request.body()).unwrap_or(Value::Null);
+                match body.get("relative_capacity").and_then(Value::as_u64).and_then(|c| u8::try_from(c).ok()) {
+                    Some(capacity) => self.announce_capacity(ctx, capacity),
+                    None => (400, json!({ "error": "relative_capacity: 0 to 255" })),
+                }
+            }
             (Some(Method::Delete), ("ues", supi)) => {
                 let body: Value = serde_json::from_str(request.body()).unwrap_or(Value::Null);
                 let reregister = body.get("reregister").and_then(Value::as_bool).unwrap_or(false);
@@ -65,6 +85,33 @@ impl Amf {
         if let Err(e) = send_reply(ctx, msg, status, &answer.to_string()) {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
         }
+    }
+
+    /// UE-AMBR `mbps` (uplink, downlink) for connected UE `supi`, to its gNB.
+    fn set_ambr(&mut self, ctx: &mut Context<'_>, supi: &str, mbps: (u64, u64)) -> (u16, Value) {
+        let found = self.ues.iter().find(|ue| ue.mm.supi().is_some_and(|s| s.as_str() == supi)).map(|ue| ue.amf_id);
+        let Some(ue) = found.and_then(|id| self.ues.get_mut_by_id(id)) else {
+            return (404, json!({ "error": format!("{supi} is not connected") }));
+        };
+        let ambr = (mbps.0 * 1_000_000, mbps.1 * 1_000_000);
+        ue.ambr = Some(ambr);
+        let (amf_id, ran_id, assoc, stream) = (ue.amf_id, ue.ran_id, ue.assoc, ue.stream);
+        let request = n2::ue_context_modification_request(amf_id, ran_id, ambr);
+        self.send(ctx, assoc, stream, request, "UE Context Modification Request");
+        log!(self.log, ctx, Info, "UE {amf_id}: UE-AMBR {} / {} Mbit/s (up / down)", mbps.0, mbps.1);
+        (202, json!({ "modifying": supi }))
+    }
+
+    /// The AMF's new relative capacity, announced to every gNB set up.
+    fn announce_capacity(&mut self, ctx: &mut Context<'_>, capacity: u8) -> (u16, Value) {
+        self.config.relative_capacity = capacity;
+        let update = n2::amf_configuration_update(&self.config);
+        let gnbs: Vec<_> = self.gnbs.iter().filter(|(_, g)| g.node.is_some()).map(|(a, _)| *a).collect();
+        for &assoc in &gnbs {
+            self.send(ctx, assoc, 0, update.clone(), "AMF Configuration Update");
+        }
+        log!(self.log, ctx, Info, "relative capacity {capacity}: AMF Configuration Update to {} gNB(s)", gnbs.len());
+        (202, json!({ "relative_capacity": capacity, "gnbs": gnbs.len() }))
     }
 
     /// A new 5G-GUTI for connected UE `supi`: an HTTP status and answer.

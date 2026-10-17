@@ -1,7 +1,7 @@
 //! NGAP ↔ domain values. The only module that sees ASN.1 types.
 
 use librecn_ngap::*;
-use rasn::types::{FixedBitString, FixedOctetString, PrintableString};
+use rasn::types::{FixedBitString, FixedOctetString, Integer, PrintableString};
 
 use crate::config::{AmfConfig, Plmn, Snssai};
 use crate::mm::AsContext;
@@ -51,6 +51,16 @@ pub(crate) enum Incoming {
         ran_id: RanUeId,
         setup: Vec<(u8, Vec<u8>)>,
         failed: Vec<(u8, Vec<u8>)>,
+    },
+    /// AMF Configuration Update Acknowledge, or Failure with its cause.
+    ConfigurationUpdated {
+        failure: Option<String>,
+    },
+    /// UE Context Modification Response, or Failure with its cause.
+    ContextModified {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        failure: Option<String>,
     },
     /// PDU Session Resource Release Response: the PDU session IDs released.
     SessionRelease {
@@ -129,6 +139,42 @@ pub(crate) fn decode(bytes: &[u8]) -> Incoming {
                         None => vec![],
                     };
                     Ok(Incoming::SessionSetup { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, setup, failed })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
+        NGAPPDU::successfulOutcome(outcome) if outcome.procedure_code == ID_AMFCONFIGURATION_UPDATE => {
+            return open::<AMFConfigurationUpdateAcknowledge>(&outcome.value)
+                .map(|_| Incoming::ConfigurationUpdated { failure: None })
+                .unwrap_or_else(|e| Incoming::Malformed(e.to_string()));
+        }
+        NGAPPDU::unsuccessfulOutcome(outcome) if outcome.procedure_code == ID_AMFCONFIGURATION_UPDATE => {
+            return open::<AMFConfigurationUpdateFailure>(&outcome.value)
+                .map(|m| {
+                    let cause = m.protocol_ies.0.iter().find(|ie| ie.id == ID_CAUSE.0);
+                    let cause = cause.and_then(|ie| open::<Cause>(&ie.value).ok());
+                    Incoming::ConfigurationUpdated {
+                        failure: Some(cause.map_or_else(|| "no cause".into(), |c| format!("{c:?}"))),
+                    }
+                })
+                .unwrap_or_else(|e| Incoming::Malformed(e.to_string()));
+        }
+        NGAPPDU::successfulOutcome(outcome) if outcome.procedure_code == ID_UECONTEXT_MODIFICATION => {
+            return open::<UEContextModificationResponse>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    Ok(Incoming::ContextModified { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, failure: None })
+                })
+                .unwrap_or_else(Incoming::Malformed);
+        }
+        NGAPPDU::unsuccessfulOutcome(outcome) if outcome.procedure_code == ID_UECONTEXT_MODIFICATION => {
+            return open::<UEContextModificationFailure>(&outcome.value)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    let ies = &m.protocol_ies.0;
+                    let cause = find(ies, ID_CAUSE).and_then(|v| open::<Cause>(v).ok());
+                    let failure = Some(cause.map_or_else(|| "no cause".into(), |c| format!("{c:?}")));
+                    Ok(Incoming::ContextModified { amf_id: amf_id(ies)?, ran_id: ran_id(ies)?, failure })
                 })
                 .unwrap_or_else(Incoming::Malformed);
         }
@@ -220,6 +266,8 @@ ie! {
     AnonymousInitialContextSetupFailureProtocolIEs: |e: &Self| e.id;
     AnonymousPDUSessionResourceSetupResponseProtocolIEs: |e: &Self| e.id;
     AnonymousPDUSessionResourceReleaseResponseProtocolIEs: |e: &Self| e.id;
+    AnonymousUEContextModificationResponseProtocolIEs: |e: &Self| e.id.0;
+    AnonymousUEContextModificationFailureProtocolIEs: |e: &Self| e.id.0;
 }
 
 fn find<E: Ie>(ies: &[E], id: ProtocolIEID) -> Option<&Any> {
@@ -493,9 +541,46 @@ pub(crate) fn initial_context_setup_request(
     pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_INITIAL_CONTEXT_SETUP, Criticality::reject, message)))
 }
 
+/// The UE-AMBR IE: uplink, downlink in bit/s (NGAP puts downlink first).
+fn ue_ambr((uplink, downlink): (u64, u64)) -> UEAggregateMaximumBitRate {
+    UEAggregateMaximumBitRate::new(BitRate(Integer::from(downlink)), BitRate(Integer::from(uplink)), None)
+}
+
+/// AMF CONFIGURATION UPDATE: the AMF's relative capacity.
+pub(crate) fn amf_configuration_update(config: &AmfConfig) -> Result<Vec<u8>, String> {
+    let ies = vec![AnonymousAMFConfigurationUpdateProtocolIEs::new(
+        ID_RELATIVE_AMFCAPACITY.0,
+        AnonymousAMFConfigurationUpdateProtocolIEsCriticality::ignore,
+        wrap(&RelativeAMFCapacity(config.relative_capacity)).map_err(encoding_error)?,
+    )];
+    let message = wrap(&AMFConfigurationUpdate::new(AMFConfigurationUpdateProtocolIEs(ies))).map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_AMFCONFIGURATION_UPDATE, Criticality::reject, message)))
+}
+
+/// UE CONTEXT MODIFICATION REQUEST: the UE's new UE-AMBR (uplink, downlink, bit/s).
+pub(crate) fn ue_context_modification_request(
+    amf_id: AmfUeId,
+    ran_id: RanUeId,
+    ambr: (u64, u64),
+) -> Result<Vec<u8>, String> {
+    let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
+        value
+            .map(|v| AnonymousUEContextModificationRequestProtocolIEs::new(id, Criticality::reject, v))
+            .map_err(encoding_error)
+    };
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)))?,
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)))?,
+        ie(ID_UEAGGREGATE_MAXIMUM_BIT_RATE, wrap(&ue_ambr(ambr)))?,
+    ];
+    let message = wrap(&UEContextModificationRequest::new(UEContextModificationRequestProtocolIEs(ies)))
+        .map_err(encoding_error)?;
+    pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_UECONTEXT_MODIFICATION, Criticality::reject, message)))
+}
+
 /// PDU SESSION RESOURCE SETUP REQUEST for one session: the UE's NAS (the
-/// SMF's accept in DL NAS Transport; none for a reactivation) and the
-/// SMF's transfer for the gNB.
+/// SMF's accept in DL NAS Transport; none for a reactivation), the SMF's
+/// transfer for the gNB, and the UE-AMBR when one is set.
 pub(crate) fn pdu_session_resource_setup_request(
     amf_id: AmfUeId,
     ran_id: RanUeId,
@@ -503,6 +588,7 @@ pub(crate) fn pdu_session_resource_setup_request(
     nas: Option<&[u8]>,
     slice: Snssai,
     transfer: &[u8],
+    ambr: Option<(u64, u64)>,
 ) -> Result<Vec<u8>, String> {
     use AnonymousPDUSessionResourceSetupRequestProtocolIEsCriticality::reject;
     let item = PDUSessionResourceSetupItemSUReq::new(
@@ -515,11 +601,24 @@ pub(crate) fn pdu_session_resource_setup_request(
     let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
         value.map(|v| AnonymousPDUSessionResourceSetupRequestProtocolIEs::new(id.0, reject, v)).map_err(encoding_error)
     };
-    let ies = vec![
+    let mut ies = vec![
         ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)))?,
         ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)))?,
         ie(ID_PDUSESSION_RESOURCE_SETUP_LIST_SUREQ, wrap(&PDUSessionResourceSetupListSUReq(vec![item])))?,
     ];
+    if let Some(ambr) = ambr {
+        ies.push(
+            wrap(&ue_ambr(ambr))
+                .map(|v| {
+                    AnonymousPDUSessionResourceSetupRequestProtocolIEs::new(
+                        ID_UEAGGREGATE_MAXIMUM_BIT_RATE.0,
+                        AnonymousPDUSessionResourceSetupRequestProtocolIEsCriticality::ignore,
+                        v,
+                    )
+                })
+                .map_err(encoding_error)?,
+        );
+    }
     let message = wrap(&PDUSessionResourceSetupRequest::new(PDUSessionResourceSetupRequestProtocolIEs(ies)))
         .map_err(encoding_error)?;
     pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_PDUSESSION_RESOURCE_SETUP, Criticality::reject, message)))

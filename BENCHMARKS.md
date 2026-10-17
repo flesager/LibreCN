@@ -123,7 +123,7 @@ Notes on these runs:
 - **UERANSIM is patched** (`scripts/ueransim/patches/`) for two bugs of v3.3.0's gNB:
   - 0001: the gNB routed no security-protected initial message to an AMF, so no UE could come back from idle;
   - 0002: a data race on the gNB's map of simulated radio links crashed it (segfault) when hundreds of UEs attached at once;
-  - 0003: the UE could not read AT_KDF, so no EAP-AKA' authentication worked (not used by these runs).
+  - 0003: the UE could not read AT_KDF, so no EAP-AKA' authentication worked; 0004: the gNB could not acknowledge an AMF Configuration Update (neither used by these runs).
 
 ## 4. Memory (`scripts/load.sh`, the `memory` lines)
 

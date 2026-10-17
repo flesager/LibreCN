@@ -898,3 +898,53 @@ fn an_eap_aka_prime_subscriber_registers() {
     assert_eq!(command, expected, "Security Mode Command with EAP-Success, checked with the EAP-AKA' keys");
     assert!(s.logged("ausf", "imsi-208930000000101 authenticated"), "{:#?}", s.log.lines());
 }
+
+#[test]
+fn the_web_api_changes_the_capacity_at_the_gnbs_and_a_ue_ambr_at_its_gnb() {
+    let (mut s, gnb, ids) = core_and_ids(1024);
+    // AMF Configuration Update: the new relative capacity, acknowledged.
+    assert_eq!(manage(&mut s, &ids, Method::Post, "capacity", r#"{"relative_capacity": 100}"#).0, 202);
+    let (stream, pdu) = s.receive(&gnb);
+    assert_eq!(stream, 0);
+    let update: AMFConfigurationUpdate = initiating(&pdu, ID_AMFCONFIGURATION_UPDATE);
+    let capacity = update.protocol_ies.0.iter().find(|ie| ie.id == ID_RELATIVE_AMFCAPACITY.0).unwrap();
+    assert_eq!(open::<RelativeAMFCapacity>(&capacity.value).unwrap().0, 100);
+    let ack = AMFConfigurationUpdateAcknowledge::new(AMFConfigurationUpdateAcknowledgeProtocolIEs(vec![]));
+    gnb.send(0, 0, NGAP_PPID, &successful(ID_AMFCONFIGURATION_UPDATE, &ack)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", "AMF Configuration Update acknowledged"), "{:#?}", s.log.lines());
+    assert_eq!(manage(&mut s, &ids, Method::Post, "capacity", r#"{"relative_capacity": 300}"#).0, 400);
+
+    // UE Context Modification: a UE-AMBR, then given with the UE's session.
+    let mut ue = Ue::default();
+    ue.register(&mut s, &gnb);
+    let body = r#"{"uplink_mbps": 50, "downlink_mbps": 200}"#;
+    assert_eq!(manage(&mut s, &ids, Method::Post, "ues/imsi-208930000000001/ambr", body).0, 202);
+    let (_, pdu) = s.receive(&gnb);
+    let modification: UEContextModificationRequest = initiating(&pdu, ID_UECONTEXT_MODIFICATION);
+    let ambr = |ies: &[(u16, Any)]| {
+        let v = &ies.iter().find(|(id, _)| *id == ID_UEAGGREGATE_MAXIMUM_BIT_RATE.0).expect("UE-AMBR").1;
+        let a = open::<UEAggregateMaximumBitRate>(v).unwrap();
+        (a.u_eaggregate_maximum_bit_rate_ul.0, a.u_eaggregate_maximum_bit_rate_dl.0)
+    };
+    let ies: Vec<_> = modification.protocol_ies.0.iter().map(|ie| (ie.id.0, ie.value.clone())).collect();
+    assert_eq!(ambr(&ies), (Integer::from(50_000_000), Integer::from(200_000_000)));
+    let ie = |id: ProtocolIEID, value: Any| {
+        AnonymousUEContextModificationResponseProtocolIEs::new(id, Criticality::ignore, value)
+    };
+    let response = UEContextModificationResponse::new(UEContextModificationResponseProtocolIEs(vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(ue.amf_id)).unwrap()),
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(1)).unwrap()),
+    ]));
+    gnb.send(0, ue.stream, NGAP_PPID, &successful(ID_UECONTEXT_MODIFICATION, &response)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", &format!("UE {}: UE Context Modification done", ue.amf_id)), "{:#?}", s.log.lines());
+
+    let n1 = hex("2e 01 01 c1 ffff 91 a1");
+    let transport = [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81")].concat();
+    ue.uplink_protected(&gnb, 2, &transport);
+    let (_, pdu) = s.receive(&gnb);
+    let setup: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
+    let ies: Vec<_> = setup.protocol_ies.0.iter().map(|ie| (ie.id, ie.value.clone())).collect();
+    assert_eq!(ambr(&ies), (Integer::from(50_000_000), Integer::from(200_000_000)), "with the session");
+}

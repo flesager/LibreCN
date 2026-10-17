@@ -30,6 +30,7 @@ pub(crate) struct Idle {
     tai: Option<(Plmn, [u8; 3])>,
     /// Sessions it was paged for.
     paged: SessionSet,
+    ambr: Option<(u64, u64)>,
 }
 
 impl Idle {
@@ -73,7 +74,14 @@ impl Amf {
             self.holders.insert(sm_ctx, Holder::Idle(tmsi));
         }
         let tai = ue.location.map(|l| l.tai);
-        let idle = Idle { mm: ue.mm, sessions: ue.sessions, since: ctx.now(), tai, paged: SessionSet::default() };
+        let idle = Idle {
+            mm: ue.mm,
+            sessions: ue.sessions,
+            since: ctx.now(),
+            tai,
+            paged: SessionSet::default(),
+            ambr: ue.ambr,
+        };
         self.idle.insert(tmsi, idle);
         log!(self.log, ctx, Info, "UE {}: idle (5G-TMSI {tmsi:08x}), {} idle UE(s)", ue.amf_id, self.idle.len());
         true
@@ -88,7 +96,7 @@ impl Amf {
         }
         let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
         let secs = (ctx.now() - idle.since).as_secs();
-        (ue.mm, ue.sessions, ue.paged) = (idle.mm, idle.sessions, idle.paged);
+        (ue.mm, ue.sessions, ue.paged, ue.ambr) = (idle.mm, idle.sessions, idle.paged, idle.ambr);
         log!(self.log, ctx, Info, "UE {amf_id}: context of 5G-TMSI {tmsi:08x} resumed after {secs} s idle");
     }
 

@@ -319,6 +319,21 @@ impl Amf {
                 Ok(_) => self.on_session_setup(ctx, amf_id, setup, failed),
                 Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
             },
+            Incoming::ConfigurationUpdated { failure: None } => {
+                log!(self.log, ctx, Info, "AMF Configuration Update acknowledged (association {assoc})")
+            }
+            Incoming::ConfigurationUpdated { failure: Some(cause) } => {
+                log!(self.log, ctx, Error, "AMF Configuration Update refused (association {assoc}): {cause}")
+            }
+            Incoming::ContextModified { amf_id, ran_id, failure } => {
+                match (self.ues.get_mut(assoc, amf_id, ran_id), failure) {
+                    (Ok(_), None) => log!(self.log, ctx, Info, "UE {amf_id}: UE Context Modification done"),
+                    (Ok(_), Some(cause)) => {
+                        log!(self.log, ctx, Error, "UE {amf_id}: UE Context Modification failed ({cause})")
+                    }
+                    (Err(mismatch), _) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
+                }
+            }
             Incoming::SessionRelease { amf_id, ran_id, released } => match self.ues.get_mut(assoc, amf_id, ran_id) {
                 Ok(_) => log!(self.log, ctx, Info, "UE {amf_id}: the gNB released PDU session(s) {released:?}"),
                 Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
@@ -387,7 +402,8 @@ impl Amf {
             return;
         };
         let amf_id = ue.amf_id;
-        self.ues.get_mut(assoc, amf_id, ran_id).expect("just created").location = location;
+        let ue = self.ues.get_mut(assoc, amf_id, ran_id).expect("just created");
+        (ue.location, ue.ambr) = (location, self.config.ue_ambr);
         self.check_load(ctx);
         log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): Initial UE Message");
         self.resume(ctx, amf_id, nas);
@@ -417,6 +433,7 @@ impl Amf {
             paged: &mut ue.paged,
             holders: &mut self.holders,
             context_ready: ue.context_ready,
+            ambr: ue.ambr,
             timer: &mut ue.timer,
             ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
             release: None,
@@ -628,6 +645,8 @@ struct Port<'a, 'c, 's> {
     holders: &'a mut HashMap<u32, sessions::Holder>,
     /// The UE's gNB context is set up already (Initial Context Setup done).
     context_ready: bool,
+    /// The UE's UE-AMBR, for the gNB with its sessions.
+    ambr: Option<(u64, u64)>,
     timer: &'a mut Option<TimerId>,
     /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
     ids: (AmfUeId, RanUeId, AssocId, u16),

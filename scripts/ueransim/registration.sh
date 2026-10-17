@@ -9,6 +9,8 @@
 # ps-establish, its RRC thread missing the 100 ms UAC check). The UE gets the
 # network's names, then a new 5G-GUTI (POST on the AMF's web API, a
 # Configuration Update Command it acknowledges; nr-cli status shows it).
+# The AMF then announces a new capacity to the gNB (AMF Configuration
+# Update) and sets the UE's UE-AMBR there (UE Context Modification).
 # Without root, the UE cannot create
 # its TUN interface: the user plane is not checked here. The UE releases its
 # session (nr-cli ps-release) and UERANSIM sets it up again; the network then
@@ -21,9 +23,10 @@ set -eu
 cd "$(dirname "$0")/../.."
 bin=${UERANSIM:-../UERANSIM/build}
 [ -x "$bin/nr-gnb" ] && [ -x "$bin/nr-ue" ] && [ -x "$bin/nr-cli" ] || { echo "no UERANSIM in $bin"; exit 1; }
-patch=scripts/ueransim/patches/0003-ue-decode-EAP-attributes-of-one-unit-AT_KDF.patch
-git -C "$bin/../src" apply --check -R "$PWD/$patch" 2>/dev/null \
-  || { echo "UERANSIM's UE lacks $patch (EAP-AKA'): git -C $bin/../src apply, then rebuild"; exit 1; }
+for patch in scripts/ueransim/patches/0003-*.patch scripts/ueransim/patches/0004-*.patch; do
+  git -C "$bin/../src" apply --check -R "$PWD/$patch" 2>/dev/null \
+    || { echo "UERANSIM lacks $patch: git -C $bin/../src apply, then rebuild"; exit 1; }
+done
 out=$(mktemp -d)
 trap 'kill $core $gnb $ue 2>/dev/null || true; rm -rf "$out"' EXIT
 
@@ -46,6 +49,11 @@ curl -s -X POST "$web/api/nfs/amf-1/ues/imsi-999700000000001/guti" >> "$out/cli.
 wait_for "$out/core.log" "5G-GUTI reallocated" || true
 guti=$(grep -o "5G-GUTI reallocated: 5G-GUTI [0-9/]* [0-9:]* [0-9a-f]*" "$out/core.log" | head -1 | awk '{print $NF}')
 "$bin/nr-cli" imsi-999700000000001 -e status > "$out/info.log" 2>&1 || true
+# The AMF's capacity (AMF Configuration Update), the UE's UE-AMBR (UE Context Modification).
+curl -s -X POST "$web/api/nfs/amf-1/capacity" -d '{"relative_capacity": 100}' >> "$out/cli.log"
+wait_for "$out/core.log" "AMF Configuration Update acknowledged" || true
+curl -s -X POST "$web/api/nfs/amf-1/ues/imsi-999700000000001/ambr" -d '{"uplink_mbps": 50, "downlink_mbps": 200}' >> "$out/cli.log"
+wait_for "$out/core.log" "UE Context Modification done" || true
 cli "ps-release 1"
 wait_count "$out/core.log" "PDU session 1 set up" 2 || true
 id=$(curl -s "$web/api/nfs/smf/sessions" | tr '{' '\n' | grep '"pdu_session_id":1,' | grep -o '"id":[0-9]*' | cut -d: -f2)
@@ -69,6 +77,10 @@ grep -q "Initial Registration is successful" "$out/ue.log" \
   && grep -q "PDU session 2 to ims, UE 10.46.0.2" "$out/core.log" \
   && [ "$(grep -c "Configuration Update Command received" "$out/ue.log")" -ge 2 ] \
   && [ -n "$guti" ] && grep -qi "$guti" "$out/info.log" \
+  && grep -q "AMF configuration update received" "$out/gnb.log" \
+  && grep -q "AMF Configuration Update acknowledged" "$out/core.log" \
+  && grep -q "UE Context Modification Request received" "$out/gnb.log" \
+  && grep -q "UE Context Modification done" "$out/core.log" \
   && [ "$(grep -c "UE 1: PDU session 1 set up" "$out/core.log")" -ge 2 ] \
   && grep -q "PDU session 1: PDU Session Release Request" "$out/core.log" \
   && grep -q "PDU session 1 released by the network" "$out/core.log" \
