@@ -11,7 +11,7 @@
 //!
 //! A test gNB (UDP, 127.0.0.81:2152) and a data network (one end of a
 //! datagram socket pair standing for the TUN device) around a UPF in a pool
-//! pinned to core 2 (`UPF_CORES=N`: cores 2 to N+1), one PDU session per
+//! pinned to core 2, one PDU session per
 //! UE; the round trips run on core 6, the bursts' three senders on cores 8
 //! to 10.
 
@@ -108,10 +108,7 @@ struct Bench {
 
 impl Bench {
     fn new(mode: &str, ues: usize, size: usize) -> Bench {
-        // `UPF_CORES` workers in the UPF's pool (default 1): one EO uses one at a time.
-        let cores: usize = std::env::var("UPF_CORES").ok().and_then(|c| c.parse().ok()).unwrap_or(1);
-        let up: Vec<usize> = (2..2 + cores).collect();
-        let mut config = RuntimeConfig::new(vec![PoolConfig::pinned("up", &up), PoolConfig::new("cp", 1)]);
+        let mut config = RuntimeConfig::new(vec![PoolConfig::pinned("up", &[2]), PoolConfig::new("cp", 1)]);
         config.max_eos = 8;
         let runtime = Runtime::new(config).expect("runtime");
         let (dn, upf_end) = UnixDatagram::pair().unwrap();

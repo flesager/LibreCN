@@ -88,7 +88,7 @@ Reading:
 - **Downlink is slower** (about 180 kpps): the UPF's UDP send on loopback
   also runs the receiving side of the stack on its core (94 % busy, every
   packet delivered). On a real network card, the send is cheaper.
-- **More cores in the pool change nothing** (`UPF_CORES=2` to 4, the same
-  figures within 3 %; the round trip 3 µs longer, a packet sometimes waking
-  another worker): one EO runs on one core at a time. More would take
-  several UPF instances.
+- **One UPF uses one core**: it is one EO, which runs on one core at a
+  time, so more cores in its pool would stay idle. More would take several
+  UPF instances. The whole core's capacity, with both directions at once,
+  is in [`BENCHMARKS.md`](../../BENCHMARKS.md).

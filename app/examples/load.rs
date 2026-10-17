@@ -1,7 +1,7 @@
 //! Load on the whole core: every EO (AMF, AUSF, UDM, SMF, UPF, log, alarms)
 //! in one pool pinned to CORES cores (2 on).
 //!
-//! `cargo run --release -p librecn --example load -- CORES GNBS UES_PER_GNB WINDOW [up[=MBPS]]`
+//! `cargo run --release -p librecn --example load -- CORES GNBS UES_PER_GNB WINDOW [up[=MBPS]] [size=BYTES]`
 //! (`scripts/load.sh` runs the series given in `README.md`).
 //!
 //! - Control plane: test gNBs on SCTP register `UES_PER_GNB` UEs each, with
@@ -13,7 +13,7 @@
 //!   registrations in flight.
 //! - With `up`, the user plane too: the UPF gets N3 (127.0.0.2) and N6 (a
 //!   datagram socket pair standing for the TUN device). Over the sessions
-//!   just set up, 1400-byte packets go both ways, as fast as the UPF takes
+//!   just set up, packets of `BYTES` (1400) go both ways, as fast as the UPF takes
 //!   them, or `MBPS` Mbit/s each way (uplink senders on cores 12 and 13,
 //!   downlink on 14, receivers on 6 and 7): first alone, then while the
 //!   gNBs register as many UEs again.
@@ -50,7 +50,7 @@ const FIRST: u64 = 1;
 /// The UPF's N3 address; the test gNBs' GTP-U is on 127.0.0.1.
 const N3: std::net::Ipv4Addr = std::net::Ipv4Addr::new(127, 0, 0, 2);
 const GTPU_PORT: u16 = 2152;
-/// IP packet size of the user-plane load.
+/// Default IP packet size of the user-plane load.
 const PACKET: usize = 1400;
 /// How long the user plane is measured alone.
 const UP_ALONE: Duration = Duration::from_secs(2);
@@ -427,10 +427,10 @@ fn paced(stop: &AtomicBool, per_ms: usize, mut send: impl FnMut(usize)) {
 }
 
 impl Traffic {
-    /// `mbps` each way, 0 for as fast as the UPF takes them.
-    fn start(sessions: Arc<Vec<Session>>, dn: &UnixDatagram, mbps: usize) -> Traffic {
+    /// `mbps` each way, 0 for as fast as the UPF takes them, in packets of `size` bytes.
+    fn start(sessions: Arc<Vec<Session>>, dn: &UnixDatagram, mbps: usize, size: usize) -> Traffic {
         // Packets per millisecond for each sender: two uplink, one downlink.
-        let per_ms = mbps * 1000 / (PACKET * 8);
+        let per_ms = mbps * 1000 / (size * 8);
         let (up_per_ms, down_per_ms) = (per_ms.div_ceil(2), per_ms);
         let stop = Arc::new(AtomicBool::new(false));
         let (uplink, downlink) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
@@ -444,9 +444,9 @@ impl Traffic {
             threads.push(std::thread::spawn(move || {
                 pin(core);
                 let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-                let mut g_pdu = [&[0x34, 0xff][..], &((8 + PACKET) as u16).to_be_bytes(), &[0; 4]].concat();
+                let mut g_pdu = [&[0x34, 0xff][..], &((8 + size) as u16).to_be_bytes(), &[0; 4]].concat();
                 g_pdu.extend_from_slice(&[0, 0, 0, 0x85, 1, 0x10, 1, 0]);
-                g_pdu.extend_from_slice(&ipv4([10, 45, 0, 1]));
+                g_pdu.extend_from_slice(&ipv4([10, 45, 0, 1], size));
                 paced(&stop, up_per_ms, |k| {
                     let s = sessions[(2 * k + core) % sessions.len()];
                     g_pdu[4..8].copy_from_slice(&s.ul_teid.to_be_bytes());
@@ -460,7 +460,7 @@ impl Traffic {
         let (stop_down, sessions_down) = (stop.clone(), sessions.clone());
         threads.push(std::thread::spawn(move || {
             pin(14);
-            let mut packet = ipv4([10, 45, 0, 1]);
+            let mut packet = ipv4([10, 45, 0, 1], size);
             paced(&stop_down, down_per_ms, |k| {
                 packet[16..20].copy_from_slice(&sessions_down[k % sessions_down.len()].ue_ip);
                 let _ = sender.send(&packet);
@@ -504,12 +504,12 @@ impl Drop for Traffic {
     }
 }
 
-/// An IPv4 packet of [`PACKET`] bytes from `src`; its destination left zero.
-fn ipv4(src: [u8; 4]) -> Vec<u8> {
-    let len = PACKET as u16;
+/// An IPv4 packet of `size` bytes from `src`; its destination left zero.
+fn ipv4(src: [u8; 4], size: usize) -> Vec<u8> {
+    let len = size as u16;
     let mut p = vec![0x45, 0, (len >> 8) as u8, len as u8, 0, 0, 0, 0, 64, 17, 0, 0];
     p.extend_from_slice(&src);
-    p.resize(PACKET, 0);
+    p.resize(size, 0);
     p
 }
 
@@ -533,11 +533,12 @@ fn registrations(round: &mut [Duration], total: usize, elapsed: Duration) -> Str
     )
 }
 
-/// "uplink / downlink" rates between two counts `elapsed` apart.
-fn user_plane(before: (u64, u64), after: (u64, u64), elapsed: Duration) -> String {
+/// "uplink / downlink" rates between two counts `elapsed` apart, of
+/// packets of `size` bytes.
+fn user_plane(before: (u64, u64), after: (u64, u64), elapsed: Duration, size: usize) -> String {
     let rate = |n: u64| {
         let kpps = n as f64 / elapsed.as_secs_f64() / 1e3;
-        format!("{kpps:.0} kpps, {:.2} Gbit/s", kpps * (PACKET * 8) as f64 / 1e6)
+        format!("{kpps:.0} kpps, {:.2} Gbit/s", kpps * (size * 8) as f64 / 1e6)
     };
     format!("uplink {}, downlink {}", rate(after.0 - before.0), rate(after.1 - before.1))
 }
@@ -545,17 +546,18 @@ fn user_plane(before: (u64, u64), after: (u64, u64), elapsed: Duration) -> Strin
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     // `up`: user plane as fast as it goes (0); `up=MBPS`: that rate each way.
-    let up: Option<usize> = match args.last().map(String::as_str) {
-        Some("up") => Some(0),
-        Some(a) => a.strip_prefix("up=").map(|m| m.parse().expect("up=MBPS")),
-        None => None,
-    };
-    if up.is_some() {
-        args.pop();
+    let (mut up, mut size) = (None, PACKET);
+    while let Some(option) = args.pop_if(|a| a.starts_with("up") || a.starts_with("size=")) {
+        match option.split_once('=') {
+            None => up = Some(0),
+            Some(("up", mbps)) => up = Some(mbps.parse().expect("up=MBPS")),
+            Some((_, bytes)) => size = bytes.parse().expect("size=BYTES"),
+        }
     }
+    assert!((28..=1500).contains(&size), "size: 28 to 1500 bytes");
     let args: Vec<usize> = args.iter().map(|a| a.parse().expect("numbers")).collect();
     let [cores, gnbs, per_gnb, window] = args[..] else {
-        panic!("usage: load CORES GNBS UES_PER_GNB WINDOW [up[=MBPS]]");
+        panic!("usage: load CORES GNBS UES_PER_GNB WINDOW [up[=MBPS]] [size=BYTES]");
     };
     let rounds = if up.is_some() { 2 } else { 1 };
     let total = gnbs * per_gnb;
@@ -632,21 +634,21 @@ fn main() {
     let (mut latencies, sessions, elapsed, load) = round(busy(&runtime));
     println!("{head}: control plane alone: {}, pool busy {load:.0} %", registrations(&mut latencies, total, elapsed));
     if let (Some(dn), Some(mbps)) = (&dn, up) {
-        let traffic = Traffic::start(Arc::new(sessions), dn, mbps);
+        let traffic = Traffic::start(Arc::new(sessions), dn, mbps, size);
         std::thread::sleep(Duration::from_millis(500)); // warm up
         let (before, busy_before) = (traffic.counts(), busy(&runtime));
         std::thread::sleep(UP_ALONE);
         let load = (busy(&runtime) - busy_before).as_secs_f64() / UP_ALONE.as_secs_f64() / cores as f64 * 100.0;
         println!(
-            "{head}: user plane alone ({total} sessions, {PACKET} B): {}, pool busy {load:.0} %",
-            user_plane(before, traffic.counts(), UP_ALONE)
+            "{head}: user plane alone ({total} sessions, {size} B): {}, pool busy {load:.0} %",
+            user_plane(before, traffic.counts(), UP_ALONE, size)
         );
         let before = traffic.counts();
         let (mut latencies, _, elapsed, load) = round(busy(&runtime));
         println!(
             "{head}: both: {}; {}; pool busy {load:.0} %",
             registrations(&mut latencies, total, elapsed),
-            user_plane(before, traffic.counts(), elapsed)
+            user_plane(before, traffic.counts(), elapsed, size)
         );
     }
     for t in threads {
