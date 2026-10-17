@@ -57,6 +57,20 @@ What LibreCN carries for the number of cores given to it. Every network function
 - **1 core** suits a lab or a light load: the two planes share it. With 500 Mbit/s each way of user traffic, 5 000 registrations per second remain.
 - **3 or 4 cores add no capacity**, only headroom. Each function is one instance, and an instance uses one core at a time.
 
+**Memory (RAM)**: plan **20 MiB, plus 5 KiB per UE** (each UE registered with its PDU session).
+
+| UEs | Memory measured, at its peak | Memory to plan |
+|---|---|---|
+| 1 000 | 19 MiB | 25 MiB |
+| 10 000 | 46 MiB | 70 MiB |
+| 20 000 | 57 to 95 MiB | 120 MiB |
+| 40 000 | 99 to 136 MiB | 220 MiB |
+
+- The tables for the UEs are reserved at start for the configured capacity (the AMF's `max_ues`, the UPF's `max_sessions`, the UDM's subscribers). Their memory is used as the UEs register: plan for the capacity you configure.
+- With nothing configured beyond the example file (1024 UEs), LibreCN uses 14 MiB at rest.
+- Each core adds about 1 MiB. User-plane traffic adds nothing: its buffers are fixed.
+- Beyond 40 000 UEs, the rule is extrapolated: for example, 100 000 UEs would need about 510 MiB.
+
 **What the figures mean**:
 - **A registration** is a UE's whole Initial Registration with its PDU session: 5G AKA, NAS security (NIA2, NEA2), Initial Context Setup, PDU Session Establishment.
 - **The user plane** is 1400-byte packets, uplink and downlink at the same time.

@@ -1,6 +1,6 @@
 # LibreCN benchmarks
 
-The figures behind the capacity table of the [README](README.md#capacity), and how to measure them again. Measured on 2026-10-17.
+The figures behind the capacity and memory tables of the [README](README.md#capacity), and how to measure them again. Measured on 2026-10-17.
 
 ## Conditions
 
@@ -124,7 +124,42 @@ Notes on these runs:
   - 0001: the gNB routed no security-protected initial message to an AMF, so no UE could come back from idle;
   - 0002: a data race on the gNB's map of simulated radio links crashed it (segfault) when hundreds of UEs attached at once.
 
-## 4. Found by these benchmarks
+## 4. Memory (`scripts/load.sh`, the `memory` lines)
+
+The load generator of part 1 reads the process's memory at each stage:
+- `VmRSS`: the resident memory, the RAM really used;
+- `VmHWM`: its peak;
+- glibc's `mallinfo2`: the heap bytes allocated and not freed.
+
+The AMF's `max_ues`, the UPF's `max_sessions` and the UDM's subscribers are set to the number of UEs. Every UE is registered with its PDU session.
+
+| UEs | Ready, before any UE: resident (heap) | After the registrations: resident (heap) | Peak |
+|---|---|---|---|
+| 1 000 | 12.3 MiB (13.0) | 19.0 MiB (14.1) | 19.0 MiB |
+| 10 000 | 14.3 MiB (28.0) | 44.1 MiB (36.5) | 45.5 MiB |
+| 20 000 | 16.4 MiB (45.1) | 56.1 to 85.3 MiB (50.7 to 60.1) | 56.6 to 94.9 MiB |
+| 40 000 | 20.8 MiB (79.2) | 95.6 to 127.1 MiB (91.0 to 113.2) | 98.9 to 136.3 MiB |
+
+The 20 000 row is eleven runs on 1 to 4 cores, some with one malloc arena (`MALLOC_ARENA_MAX=1`). The 40 000 row is five runs, two of them with user-plane traffic.
+
+**What each EO preallocates** at creation (mailbox, buffer pools, timers, I/O, flight recorder), with 1024 UEs configured: 6.2 MiB in all.
+
+| EO | AMF | SMF | log | UDM | AUSF | UPF | alarms |
+|---|---|---|---|---|---|---|---|
+| MiB | 2.41 | 1.36 | 1.32 | 0.36 | 0.33 | 0.33 | 0.10 |
+
+The AMF's share grows with `max_ues` (one NAS timer per UE): 5.09 MiB for 40 000.
+
+**Reading the tables**:
+- **2 to 4 KiB per UE**, all functions together, measured from the resident memory at its peak. The plan in the README, 20 MiB plus 5 KiB per UE, covers every run.
+- **The capacity is reserved at start, but used as the UEs come.** With 40 000 UEs configured, 79 MiB of heap is reserved at start but only 21 MiB is resident. Its pages count once UEs fill them.
+- **The spread between runs comes from the allocator.** The NGAP codec's temporary allocations, for up to 256 registrations in flight, interleave with each UE's long-lived context. Freed space is then kept in the allocator, more or less, depending on the timing.
+- **Each core adds about 1 MiB** (15.4 MiB ready on 1 core, 18.2 MiB on 4, for 20 000 UEs): a worker's stack and its timer wheel.
+- **User-plane traffic adds nothing** but its sessions: its buffers are fixed.
+- **The `librecn` binary at rest**, with `app/librecn.example.toml` (1024 UEs, the default pools): 14 MiB resident.
+- The load generator runs in the same process; its own share is under 1 % (a few bytes per UE).
+
+## 5. Found by these benchmarks
 
 - **The AMF looked up UE contexts with a scan**: now an index, about 40 % more registrations.
 - **A lost gNB flooded the SMF**: its thousands of UEs going idle at once filled the SMF's mailbox. The AMF now sends these notices 64 at most unacknowledged.

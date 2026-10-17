@@ -17,6 +17,9 @@
 //!   them, or `MBPS` Mbit/s each way (uplink senders on cores 12 and 13,
 //!   downlink on 14, receivers on 6 and 7): first alone, then while the
 //!   gNBs register as many UEs again.
+//! - Memory: the process's resident memory (and its peak) and heap in use,
+//!   empty, once LibreCN is ready, then after each batch of registrations;
+//!   and what each EO preallocated.
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -543,7 +546,26 @@ fn user_plane(before: (u64, u64), after: (u64, u64), elapsed: Duration, size: us
     format!("uplink {}, downlink {}", rate(after.0 - before.0), rate(after.1 - before.1))
 }
 
+/// Heap bytes in use (allocated and not freed), in MiB: what the
+/// allocator keeps besides is not counted.
+fn heap() -> f64 {
+    // SAFETY: mallinfo2 only reads the allocator's statistics.
+    let info = unsafe { libc::mallinfo2() };
+    (info.uordblks + info.hblkhd) as f64 / 1048576.0
+}
+
+/// The process's resident memory and its peak so far, in MiB.
+fn memory() -> (f64, f64) {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kib = |key: &str| {
+        let line = status.lines().find(|l| l.starts_with(key)).unwrap_or_default();
+        line.split_whitespace().nth(1).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0)
+    };
+    (kib("VmRSS:") / 1024.0, kib("VmHWM:") / 1024.0)
+}
+
 fn main() {
+    let empty = (memory().0, heap());
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     // `up`: user plane as fast as it goes (0); `up=MBPS`: that rate each way.
     let (mut up, mut size) = (None, PACKET);
@@ -566,8 +588,8 @@ fn main() {
     config.max_eos = 16;
     let mut runtime = Runtime::new(config).unwrap();
     librecn_common::log::set_default_level(librecn_common::log::Level::Error);
-    runtime.add(LogSink::config().pool("core"), LogSink::stdout()).unwrap();
-    runtime.add(AlarmManager::config().pool("core"), AlarmManager::new()).unwrap();
+    let log = runtime.add(LogSink::config().pool("core"), LogSink::stdout()).unwrap();
+    let alarm = runtime.add(AlarmManager::config().pool("core"), AlarmManager::new()).unwrap();
     let subscribers = serde_json::json!({ "subscribers": [{
         "supi": format!("imsi-20893{FIRST:010}"), "count": rounds * total,
         "k": "465B5CE8B199B49FAA5F0A2EE238A6BC", "opc": "E8ED289DEBA952E4283B54E88E6183CA" }] });
@@ -598,6 +620,7 @@ fn main() {
         }
         std::thread::sleep(Duration::from_millis(1));
     };
+    let ready = (memory().0, heap());
     let setup =
         std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../proto/ngap/tests/vectors/free5gc/ci0000.bin")).unwrap();
     let setup = Arc::new(setup);
@@ -633,6 +656,7 @@ fn main() {
     let head = format!("cores {cores}, {gnbs} gNB(s) x {per_gnb} UEs, window {window}");
     let (mut latencies, sessions, elapsed, load) = round(busy(&runtime));
     println!("{head}: control plane alone: {}, pool busy {load:.0} %", registrations(&mut latencies, total, elapsed));
+    let mut registered = vec![(total, memory().0, heap())];
     if let (Some(dn), Some(mbps)) = (&dn, up) {
         let traffic = Traffic::start(Arc::new(sessions), dn, mbps, size);
         std::thread::sleep(Duration::from_millis(500)); // warm up
@@ -650,10 +674,31 @@ fn main() {
             registrations(&mut latencies, total, elapsed),
             user_plane(before, traffic.counts(), elapsed, size)
         );
+        registered.push((2 * total, memory().0, heap()));
     }
     for t in threads {
         t.join().unwrap();
     }
+    // What each EO preallocated (mailbox, buffers, timers, I/O, recorder).
+    nfs.extend([("log", log), ("alarm", alarm)]);
+    let reserved: Vec<(&str, f64)> = nfs
+        .iter()
+        .filter_map(|(name, id)| Some((*name, runtime.stats(*id)?.creation.bytes_reserved as f64 / 1048576.0)))
+        .collect();
+    let after: Vec<String> =
+        registered.iter().map(|(n, m, h)| format!("after {n} UEs {m:.1} MiB (heap {h:.1})")).collect();
+    println!(
+        "{head}: memory: empty process {:.1} MiB (heap {:.1}), LibreCN ready {:.1} MiB (heap {:.1}), {}, \
+         peak {:.1} MiB; preallocated by the EOs {:.1} MiB ({})",
+        empty.0,
+        empty.1,
+        ready.0,
+        ready.1,
+        after.join(", "),
+        memory().1,
+        reserved.iter().map(|(_, m)| m).sum::<f64>(),
+        reserved.iter().map(|(n, m)| format!("{n} {m:.2}")).collect::<Vec<_>>().join(", ")
+    );
     if std::env::var_os("LOAD_STATS").is_some() {
         for (name, id) in &nfs {
             let Some(s) = runtime.stats(*id) else { continue };
