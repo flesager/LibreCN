@@ -173,6 +173,9 @@ pub struct Mm {
     allowed: SnssaiList,
     /// The message waiting for its answer, and how often it was sent again.
     retransmit: Option<(Downlink<'static>, u8)>,
+    /// A registration from idle without follow-on request: once complete,
+    /// the UE goes back to idle (§5.5.1.3.4).
+    release_when_complete: bool,
 }
 
 /// The type of an initial message (plain or integrity protected), if it is one.
@@ -339,6 +342,8 @@ impl Mm {
             // Back from idle: the kept context vouches for the UE (§5.5.1.3).
             (State::Registered, Uplink::RegistrationRequest(request)) if verified => {
                 fx.log(Level::Info, format_args!("registration from idle ({:?}): no new authentication", request.kind));
+                let update = matches!(request.kind, RegistrationKind::Mobility | RegistrationKind::Periodic);
+                self.release_when_complete = update && !request.follow_on;
                 if request.capability.is_some() {
                     self.capability = request.capability;
                 }
@@ -383,6 +388,10 @@ impl Mm {
                 self.state = State::Registered;
                 if let (Some(supi), Some(guti)) = (&self.supi, &self.guti) {
                     fx.log(Level::Info, format_args!("registered: {supi}, {guti}"));
+                }
+                if std::mem::take(&mut self.release_when_complete) {
+                    fx.log(Level::Info, format_args!("registration updated, no follow-on request: back to idle"));
+                    fx.release(Release::Normal);
                 }
             }
             (_, Uplink::DeregistrationRequest { switch_off, .. }) => {
@@ -552,7 +561,7 @@ impl Mm {
         self.state = State::Accepting;
         // As Open5GS and free5GC: the Accept goes in Initial Context Setup.
         let Some(context) = self.as_context() else { return self.reject(cause::PROTOCOL_ERROR, fx) };
-        let accept = Downlink::RegistrationAccept { guti, tai, allowed };
+        let accept = Downlink::RegistrationAccept { guti, tai, allowed, t3512: config.t3512 };
         let mut pdu = [0u8; DOWNLINK_MAX + 7];
         if let Some(n) = self.seal(accept, &mut pdu, fx) {
             fx.setup_context(&pdu[..n], &context, "Registration Accept in Initial Context Setup");
@@ -947,7 +956,7 @@ mod tests {
         let accept = ue.open(&fx.sent.pop().unwrap(), 1);
         assert_eq!(accept[..5], [0x7e, 0, 0x42, 0x01, 0x01], "Registration Accept over 3GPP access");
         assert!(accept.windows(4).any(|w| w == [0x00, 0xc0, 0xff, 0xee]), "the new 5G-TMSI");
-        assert_eq!(accept[accept.len() - 4..], [0x15, 0x02, 0x01, 0x01], "allowed NSSAI: SST 1");
+        assert_eq!(accept[accept.len() - 7..], hex("1502 0101 5e01 06"), "allowed NSSAI: SST 1; T3512: 1 h");
         let context = fx.contexts.pop().expect("the Accept went in Initial Context Setup");
         assert_eq!(context.kgnb, kdf::kgnb(&kamf, 0), "from the count of Security Mode Complete");
         assert_eq!(context.capability.as_bytes(), [0xf0; 4]);
@@ -1127,6 +1136,14 @@ mod tests {
         assert_eq!(fx.contexts.len(), 1);
         mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
         assert_eq!(mm.state(), State::Registered);
+        assert_eq!(fx.released, Some(Release::Normal), "no follow-on request: back to idle");
+
+        // Periodic, with a follow-on request (data to send): the UE stays connected.
+        let mut fx = Recorder::default();
+        let periodic = hex("7e00410b 000b f299f907 010040 00c0ffee 2e04f0f0f0f0");
+        mm.on_uplink(&config, tai(), &mut ue.initial(&periodic, &periodic), &mut fx);
+        mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
+        assert_eq!((mm.state(), fx.released), (State::Registered, None));
 
         // A Registration Request the kept context does not check: a full registration.
         let mut forged = ue.initial(&cleartext, &whole);

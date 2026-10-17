@@ -79,6 +79,7 @@ max_ues = 1024
 ausf = "ausf"
 smf = "smf"
 ciphering = ["NEA2", "NEA0"]
+t3512_s = 3240                # periodic registration timer (54 min, sent as 1 h)
 
 [[nf]]
 kind = "demo"

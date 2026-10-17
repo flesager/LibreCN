@@ -16,6 +16,7 @@
 //! ausf = "ausf"                 # the AUSF's EO name
 //! smf = "smf"                   # the SMF's EO name
 //! ciphering = ["NEA2", "NEA0"]  # NAS ciphering by preference
+//! t3512_s = 3240                # periodic registration (54 min: sent as 1 h)
 //! ```
 //!
 //! Every field is optional; the defaults are test values matching UERANSIM's
@@ -57,6 +58,7 @@ struct Params {
     ausf: String,
     smf: String,
     ciphering: Vec<String>,
+    t3512_s: u32,
 }
 
 impl Default for Params {
@@ -73,6 +75,7 @@ impl Default for Params {
             ausf: "ausf".into(),
             smf: "smf".into(),
             ciphering: vec!["NEA2".into(), "NEA0".into()],
+            t3512_s: 3240,
         }
     }
 }
@@ -104,6 +107,23 @@ pub struct AmfConfig {
     pub smf: String,
     /// NAS ciphering algorithm identities, by preference.
     pub ciphering: Vec<u8>,
+    /// T3512, the periodic registration timer given to the UEs, as sent (a
+    /// GPRS timer 3 value: the parameter rounded up to what it can say).
+    pub t3512: u8,
+}
+
+impl AmfConfig {
+    /// T3512 as the UEs run it.
+    pub fn t3512(&self) -> std::time::Duration {
+        let seconds = librecn_nas::ie::gprs_timer_3_seconds(self.t3512).unwrap_or(u32::MAX);
+        std::time::Duration::from_secs(u64::from(seconds))
+    }
+
+    /// The mobile reachable timer: T3512 and 4 minutes (TS 24.501 §5.3.7);
+    /// an idle UE silent for longer is implicitly deregistered.
+    pub fn mobile_reachable(&self) -> std::time::Duration {
+        self.t3512() + std::time::Duration::from_secs(4 * 60)
+    }
 }
 
 impl AmfConfig {
@@ -116,6 +136,9 @@ impl AmfConfig {
         };
         if p.amf_set >= 1 << 10 || p.amf_pointer >= 1 << 6 {
             return Err("amf_set is 10 bits and amf_pointer 6 bits".into());
+        }
+        if p.t3512_s < 2 {
+            return Err("t3512_s: 2 s at least".into());
         }
         let slices = p
             .slices
@@ -147,6 +170,7 @@ impl AmfConfig {
             ausf: p.ausf,
             smf: p.smf,
             ciphering,
+            t3512: librecn_nas::ie::gprs_timer_3(p.t3512_s),
         })
     }
 
@@ -170,6 +194,15 @@ fn parse_sd(hex: &str) -> Result<[u8; 3], String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t3512_is_sent_as_it_can_be_said_and_the_mobile_reachable_timer_follows() {
+        let d = AmfConfig::from_params("amf", &serde_json::Value::Null).unwrap();
+        assert_eq!((d.t3512().as_secs(), d.mobile_reachable().as_secs()), (3600, 3840), "54 min: sent as 1 h");
+        let short = AmfConfig::from_params("amf", &serde_json::json!({ "t3512_s": 30 })).unwrap();
+        assert_eq!((short.t3512, short.mobile_reachable().as_secs()), (0b011 << 5 | 15, 270));
+        assert!(AmfConfig::from_params("amf", &serde_json::json!({ "t3512_s": 1 })).is_err());
+    }
 
     #[test]
     fn defaults_are_the_test_values_and_params_override_them() {

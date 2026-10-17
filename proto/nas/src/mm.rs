@@ -359,6 +359,8 @@ pub enum Downlink<'a> {
         guti: Guti,
         tai: Tai,
         allowed: SnssaiList,
+        /// T3512, a GPRS timer 3 value ([`crate::ie::gprs_timer_3`]).
+        t3512: u8,
     },
     RegistrationReject {
         cause: u8,
@@ -429,13 +431,14 @@ impl Downlink<'_> {
                 w.u8(0xe1); // IMEISV requested
                 w.tlv(0x36, |w| w.u8(u8::from(retransmit_initial) << 1));
             }
-            Downlink::RegistrationAccept { guti, tai, allowed } => {
+            Downlink::RegistrationAccept { guti, tai, allowed, t3512 } => {
                 w.lv(|w| w.u8(0x01)); // registered over 3GPP access, no SMS
                 w.tlve(0x77, |w| guti.encode(w));
                 w.tlv(0x54, |w| tai.encode_list(w));
                 if !allowed.is_empty() {
                     w.tlv(0x15, |w| allowed.encode(w));
                 }
+                w.tlv(0x5e, |w| w.u8(t3512));
             }
             Downlink::RegistrationReject { cause } | Downlink::ServiceReject { cause } | Downlink::Status { cause } => {
                 w.u8(cause)
@@ -538,8 +541,8 @@ mod tests {
         let mut allowed = SnssaiList::default();
         allowed.push(Snssai { sst: 1, sd: None });
         allowed.push(Snssai { sst: 1, sd: None });
-        let accept = Downlink::RegistrationAccept { guti, tai: Tai { plmn, tac: [0, 0, 1] }, allowed };
-        let expected = "7e0042 0101 77000b f299f907 01 0040 01020304 5407 00 99f907 000001 1502 0101";
+        let accept = Downlink::RegistrationAccept { guti, tai: Tai { plmn, tac: [0, 0, 1] }, allowed, t3512: 6 };
+        let expected = "7e0042 0101 77000b f299f907 01 0040 01020304 5407 00 99f907 000001 1502 0101 5e0106";
         assert_eq!(encode(accept, &mut buf), h(expected), "one slice: duplicates dropped");
         assert_eq!(encode(Downlink::RegistrationReject { cause: 111 }, &mut buf), "7e00446f");
         assert_eq!(encode(Downlink::IdentityRequest(IdentityType::Suci), &mut buf), "7e005b01");

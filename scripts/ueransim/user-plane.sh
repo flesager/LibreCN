@@ -8,7 +8,10 @@
 # it: one answer at least is expected). Released again, the UE is then
 # pinged from the data network (the core's container, through upf0): the
 # UPF parks the packets and reports them, the AMF pages the UE, whose
-# Service Request brings its session back with the parked packets.
+# Service Request brings its session back with the parked packets. Released
+# a last time, the UE registers periodically when T3512 expires (30 s in
+# docker/core.toml), accepted without a new authentication (UERANSIM sets
+# the follow-on request: the AMF keeps the connection).
 # UERANSIM is expected next to this repository: ../UERANSIM/build
 # (override with UERANSIM=), with patches/0001 applied. Needs docker and the
 # host's sctp module.
@@ -36,7 +39,9 @@ docker network create --subnet 10.210.0.0/24 "$net" >/dev/null
 # run NAME IP COMMAND...: the command is PID 1 (LibreCN must get SIGTERM).
 run() {
   name=$1 ip=$2; shift 2
-  docker run -d --name "$name" --network "$net" --ip "$ip" --cap-add NET_ADMIN --device /dev/net/tun "$image" "$@" >/dev/null
+  # No IPv6: the kernel's router solicitations on uesimtun0 would wake the idle UE.
+  docker run -d --name "$name" --network "$net" --ip "$ip" --cap-add NET_ADMIN --device /dev/net/tun \
+    --sysctl net.ipv6.conf.all.disable_ipv6=1 "$image" "$@" >/dev/null
 }
 run librecn-core 10.210.0.10 /etc/librecn/core.sh
 wait_for() { for _ in $(seq 100); do docker logs "$1" 2>&1 | grep -q "$2" && return 0; sleep 0.1; done; return 1; }
@@ -60,6 +65,11 @@ idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 |
 release
 wait_count librecn-core "deactivated (the UE is idle)" 2 || true
 paged_ping=$(docker exec librecn-core ping -c 3 -W 2 10.45.0.2 2>&1 || true)
+release
+for _ in $(seq 60); do
+  [ "$(docker logs librecn-core 2>&1 | grep -c "registered: imsi-999700000000001")" -ge 2 ] && break
+  sleep 1
+done
 metrics=$(docker exec librecn-core curl -s http://127.0.0.1:8080/metrics | grep 'eo="upf"' | grep counter_total || true)
 docker stop -t 5 librecn-core >/dev/null
 
@@ -77,6 +87,8 @@ echo "$ping" | grep -q " 0% packet loss" \
   && echo "$core" | grep -q "PDU session 1 reactivated" \
   && echo "$paged_ping" | grep -Eq " [1-9][0-9]* received" \
   && echo "$core" | grep -q "paged for PDU session 1" \
+  && echo "$core" | grep -q "registration from idle (Periodic)" \
+  && [ "$(echo "$core" | grep -c "registered: imsi-999700000000001")" -ge 2 ] \
   && echo "$metrics" | grep -Eq 'counter="downlink_packets"} [1-9]' \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane, before and after idle; pinged while idle: paged" \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane, before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

@@ -1,8 +1,8 @@
 //! UEs in CM-IDLE (TS 23.502 §4.2.6): a registered UE whose N2 connection
 //! goes keeps its 5GMM context and its PDU sessions, their user plane
 //! deactivated, until it comes back (Service Request, Registration Request)
-//! or the mobile reachable timer expires: the UE is then implicitly
-//! deregistered (TS 24.501 §5.3.7). Downlink data for an idle UE pages it
+//! or the mobile reachable timer (T3512 + 4 min) expires: the UE is then
+//! implicitly deregistered (TS 24.501 §5.3.7). Downlink data for an idle UE pages it
 //! (TS 23.502 §4.2.3.3) in its last tracking area; its Service Request then
 //! sets the paged sessions up again.
 
@@ -18,9 +18,6 @@ use crate::sessions::Notice;
 use crate::ue::{AmfUeId, PduSession, UeContext};
 use crate::{Amf, n2};
 
-/// The mobile reachable timer: T3512's default (54 min, the AMF sends no
-/// other value) plus 4 minutes (§5.3.7).
-pub(crate) const MOBILE_REACHABLE: Duration = Duration::from_secs(58 * 60);
 /// Expired idle contexts are swept at this period.
 pub(crate) const SWEEP: Duration = Duration::from_secs(60);
 
@@ -97,9 +94,9 @@ impl Amf {
 
     /// Implicit deregistration of the UEs idle for too long.
     pub(crate) fn sweep_idle(&mut self, ctx: &mut Context<'_>) {
-        let now = ctx.now();
+        let (now, reachable) = (ctx.now(), self.config.mobile_reachable());
         let expired: Vec<u32> =
-            self.idle.iter().filter(|(_, i)| now - i.since >= MOBILE_REACHABLE).map(|(tmsi, _)| *tmsi).collect();
+            self.idle.iter().filter(|(_, i)| now - i.since >= reachable).map(|(tmsi, _)| *tmsi).collect();
         for tmsi in expired {
             self.forget_idle(ctx, tmsi, "implicitly deregistered, unreachable");
         }

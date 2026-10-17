@@ -331,7 +331,11 @@ fn a_ue_registers_then_deregisters() {
     let accept = ue.register(&mut s, &gnb);
     assert_eq!(accept[..5], hex("7e0042 0101"), "Registration Accept");
     assert_eq!(accept[5..12], hex("77000b f2 02f839"), "a 5G-GUTI of this PLMN");
-    assert_eq!(accept[accept.len() - 13..], hex("5407 00 02f839 000001 1502 0101"), "TAI list, allowed NSSAI");
+    assert_eq!(
+        accept[accept.len() - 16..],
+        hex("5407 00 02f839 000001 1502 0101 5e01 06"),
+        "TAI list, allowed NSSAI, T3512"
+    );
     let registered = format!("UE {}: registered: imsi-208930000000001, 5G-GUTI 208/93 1:1:0", ue.amf_id);
     assert!(s.logged("amf-1", &registered), "{:#?}", s.log.lines());
     assert!(s.logged("amf-1", "Initial Context Setup done"));

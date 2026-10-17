@@ -424,6 +424,28 @@ impl fmt::Display for Dnn<'_> {
     }
 }
 
+/// GPRS timer 3 units (TS 24.008 §10.5.7.4a): code, seconds; finest first.
+const TIMER_3_UNITS: [(u8, u32); 7] =
+    [(0b011, 2), (0b100, 30), (0b101, 60), (0b000, 600), (0b001, 3600), (0b010, 36_000), (0b110, 1_152_000)];
+
+/// A GPRS timer 3 value (T3512 among others): a unit in the top three bits,
+/// up to 31 of them below. The finest unit that holds `seconds` exactly,
+/// else the finest one that holds it rounded up.
+pub fn gprs_timer_3(seconds: u32) -> u8 {
+    let value = |code: u8, n: u32| (n <= 31).then_some(code << 5 | n as u8);
+    let exact =
+        TIMER_3_UNITS.iter().find_map(|&(c, unit)| value(c, seconds / unit).filter(|_| seconds.is_multiple_of(unit)));
+    exact
+        .or_else(|| TIMER_3_UNITS.iter().find_map(|&(c, unit)| value(c, seconds.div_ceil(unit))))
+        .unwrap_or(0b110 << 5 | 31)
+}
+
+/// The seconds of a GPRS timer 3 value; `None` if it is deactivated.
+pub fn gprs_timer_3_seconds(value: u8) -> Option<u32> {
+    let unit = TIMER_3_UNITS.iter().find(|(code, _)| *code == value >> 5)?.1;
+    Some(unit * u32::from(value & 0x1f))
+}
+
 /// PDU session IDs as a bitmap (PDU session status, uplink data status,
 /// §9.11.3.44, §9.11.3.57): bit `n` is PDU session `n`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -500,6 +522,16 @@ mod tests {
         assert_eq!(MobileIdentity::decode(&v).unwrap().to_string(), "suci-0-999-70-123-1-5-abcd");
         assert_eq!(MobileIdentity::decode(&hex("11 00")).unwrap(), MobileIdentity::SuciNai);
         assert!(MobileIdentity::decode(&hex("01 99f9")).is_err());
+    }
+
+    #[test]
+    fn gprs_timer_3_takes_the_finest_unit() {
+        assert_eq!(gprs_timer_3(30), 0b011 << 5 | 15, "15 x 2 s");
+        assert_eq!(gprs_timer_3(120), 0b100 << 5 | 4, "4 x 30 s");
+        assert_eq!(gprs_timer_3(3240), 6, "54 min is not a value: 6 x 10 min");
+        assert_eq!(gprs_timer_3_seconds(gprs_timer_3(3240)), Some(3600));
+        assert_eq!(gprs_timer_3_seconds(gprs_timer_3(7200)), Some(7200), "2 x 1 h, exact");
+        assert_eq!(gprs_timer_3_seconds(0xe0), None, "deactivated");
     }
 
     #[test]

@@ -40,3 +40,4 @@ kind = "amf"
 name = "amf-1"
 [nf.params]
 n2 = "10.210.0.10:38412"
+t3512_s = 30                  # short: user-plane.sh waits for a periodic registration
