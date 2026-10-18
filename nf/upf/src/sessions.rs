@@ -6,6 +6,8 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use librecn_sbi::policy::SessionRule;
 use librecn_scheduler::Time;
 
+use crate::qos::Limits;
+
 /// One PDU session's forwarding state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Session {
@@ -13,6 +15,8 @@ pub struct Session {
     pub ul_teid: u32,
     /// The PCF's policy: the extra QoS flows' filters.
     pub rule: SessionRule,
+    /// Its rates: the session AMBR, the flows' MBRs.
+    pub limits: Limits,
     /// The gNB's GTP-U endpoint and TEID, once known.
     pub dl: Option<(SocketAddrV4, u32)>,
     /// When downlink data without a tunnel was last reported to the SMF.
@@ -76,7 +80,14 @@ impl Sessions {
         };
         self.by_teid.insert(ul_teid, seid);
         self.by_ue.insert(ue_ip, seid);
-        Ok(self.by_seid.entry(seid).or_insert(Session { ue_ip, ul_teid, rule: *rule, dl: None, reported: None }))
+        Ok(self.by_seid.entry(seid).or_insert(Session {
+            ue_ip,
+            ul_teid,
+            rule: *rule,
+            limits: Limits::new(rule),
+            dl: None,
+            reported: None,
+        }))
     }
 
     /// Sets the downlink tunnel (its data reported no longer), or clears it
@@ -97,17 +108,12 @@ impl Sessions {
     }
 
     /// The session an uplink G-PDU with `teid` belongs to.
-    pub fn by_teid(&self, teid: u32) -> Option<&Session> {
-        self.by_teid.get(&teid).and_then(|seid| self.by_seid.get(seid))
+    pub fn by_teid(&mut self, teid: u32) -> Option<&mut Session> {
+        self.by_teid.get(&teid).and_then(|seid| self.by_seid.get_mut(seid))
     }
 
-    /// The session of the UE with address `ip` (downlink).
-    pub fn by_ue(&self, ip: Ipv4Addr) -> Option<&Session> {
-        self.by_ue.get(&ip).and_then(|seid| self.by_seid.get(seid))
-    }
-
-    /// The same, with its SEID, to update.
-    pub fn by_ue_mut(&mut self, ip: Ipv4Addr) -> Option<(u64, &mut Session)> {
+    /// The session of the UE with address `ip` (downlink), with its SEID.
+    pub fn by_ue(&mut self, ip: Ipv4Addr) -> Option<(u64, &mut Session)> {
         let seid = *self.by_ue.get(&ip)?;
         self.by_seid.get_mut(&seid).map(|s| (seid, s))
     }
@@ -132,9 +138,9 @@ mod tests {
         let gnb = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2152);
         assert!(s.modify(1, Some((gnb, 9))) && !s.modify(7, Some((gnb, 9))));
         assert_eq!(s.by_teid(a.ul_teid).unwrap().dl, Some((gnb, 9)));
-        assert!(s.modify(1, None) && s.by_ue(ue).unwrap().dl.is_none());
+        assert!(s.modify(1, None) && s.by_ue(ue).unwrap().1.dl.is_none());
         s.modify(1, Some((gnb, 9)));
-        assert_eq!(s.by_ue(ue).unwrap().ul_teid, a.ul_teid);
+        assert_eq!(s.by_ue(ue).unwrap().1.ul_teid, a.ul_teid);
         assert!(s.delete(1).is_some());
         assert!(s.by_teid(a.ul_teid).is_none() && s.by_ue(ue).is_none() && s.len() == 1);
     }

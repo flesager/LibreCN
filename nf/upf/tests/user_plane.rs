@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_sbi::pdu_session::{N4Establish, N4EstablishResult, N4Modify, N4Report, REPORT_PERIOD};
-use librecn_sbi::policy::{PacketFilter, PccRule, SessionRule, direction};
+use librecn_sbi::policy::{PacketFilter, PccRule, Rates, SessionRule, direction};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
 use librecn_scheduler::{EoConfig, EoId};
 use librecn_upf::Upf;
@@ -187,6 +187,36 @@ fn downlink_packets_go_on_their_qos_flow_and_uplink_ones_on_the_sessions() {
     let counters = p.tb.stats(p.upf).unwrap().counters;
     let n = |name: &str| counters.iter().find(|c| c.0 == name).unwrap().1;
     assert_eq!((n("extra_flow_packets"), n("downlink_packets"), n("dropped_packets")), (1, 2, 1));
+}
+
+#[test]
+fn packets_beyond_the_session_ambr_are_dropped() {
+    // 8 kbit/s down: a 100 ms burst lets 5 packets of 24 bytes (24 ms each) through.
+    let mut rule = SessionRule::new_zeroed();
+    rule.ambr = Rates { uplink: 0, downlink: 8_000 };
+    let (mut p, _) = plane_with(Ipv4Addr::new(127, 0, 0, 70), "event", rule);
+    let gnb = UdpSocket::bind("127.0.0.71:2152").unwrap();
+    gnb.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 71], dl_teid: 0x7a }).unwrap();
+    p.pump();
+    let packet = ipv4(SERVER, UE, b"pong");
+    let received = || {
+        let mut buf = [0u8; 128];
+        std::iter::from_fn(|| gnb.recv(&mut buf).ok()).count()
+    };
+    for _ in 0..8 {
+        p.dn.send(&packet).unwrap();
+    }
+    p.pump();
+    assert_eq!(received(), 5);
+    // A second later the limit has room again.
+    p.tb.advance(Duration::from_secs(1));
+    p.dn.send(&packet).unwrap();
+    p.pump();
+    assert_eq!(received(), 1);
+    let counters = p.tb.stats(p.upf).unwrap().counters;
+    let n = |name: &str| counters.iter().find(|c| c.0 == name).unwrap().1;
+    assert_eq!((n("downlink_packets"), n("rate_limited_packets"), n("dropped_packets")), (6, 3, 0));
 }
 
 #[test]

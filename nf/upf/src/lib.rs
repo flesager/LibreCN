@@ -4,12 +4,12 @@
 //!   the uplink tunnel the UPF allocates (its N3 address and a TEID) and the
 //!   downlink one, the gNB's.
 //! - N3: GTP-U on UDP port 2152 of the `n3` address. An uplink G-PDU goes
-//!   to N6 if its TEID and inner source address match a session, and its
-//!   QFI one of the session's flows.
+//!   to N6 if its TEID and inner source address match a session, its QFI
+//!   is one of the session's flows, and its rates allow it.
 //! - N6: a TUN device (`n6`). A packet to a UE's address goes to its gNB in
 //!   a G-PDU with the PDU Session Container: the QFI of its QoS flow, the
 //!   first of the PCF's rules whose filters it matches, else the default
-//!   flow (see [`qos`]). For
+//!   flow, if its rates allow it (see [`qos`]). For
 //!   an idle UE (no downlink tunnel) it is parked, and the SMF told
 //!   (`N4Report`, at most every `REPORT_PERIOD`): the network pages the UE,
 //!   whose tunnel then comes back with the parked packets.
@@ -26,7 +26,7 @@
 //!   a row find nothing, and sleeps on epoll again.
 //!
 //! - [`sessions`], the session table;
-//! - [`qos`], the QoS flows;
+//! - [`qos`], the QoS flows and their rates;
 //! - [`parked`], the downlink packets of idle UEs;
 //! - [`tun`], the N6 device.
 
@@ -48,6 +48,7 @@ use librecn_sbi::Outcome;
 use librecn_sbi::pdu_session::{
     N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult, N4Report, REPORT_PERIOD,
 };
+use librecn_sbi::policy::DEFAULT_QFI;
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Interest, IoToken, Message, system};
 use serde::Deserialize;
 
@@ -91,8 +92,15 @@ impl Default for Params {
 }
 
 /// The UPF's counters (`/metrics`: `librecn_eo_counter_total`), by index.
-const COUNTERS: &[&str] =
-    &["uplink_packets", "uplink_bytes", "downlink_packets", "downlink_bytes", "dropped_packets", "extra_flow_packets"];
+const COUNTERS: &[&str] = &[
+    "uplink_packets",
+    "uplink_bytes",
+    "downlink_packets",
+    "downlink_bytes",
+    "dropped_packets",
+    "extra_flow_packets",
+    "rate_limited_packets",
+];
 const UPLINK_PACKETS: usize = 0;
 const UPLINK_BYTES: usize = 1;
 const DOWNLINK_PACKETS: usize = 2;
@@ -100,6 +108,8 @@ const DOWNLINK_BYTES: usize = 3;
 const DROPPED: usize = 4;
 /// Downlink packets sent on one of the PCF's extra QoS flows.
 const EXTRA_FLOW: usize = 5;
+/// Packets dropped beyond the session AMBR or their flow's MBR.
+const RATE_LIMITED: usize = 6;
 
 /// The UPF EO.
 pub struct Upf {
@@ -192,6 +202,7 @@ impl Upf {
     /// GTP-U datagrams from the gNBs; how many were read.
     fn on_n3(&mut self, ctx: &mut Context<'_>) -> usize {
         let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return 0 };
+        let now = ctx.now();
         for read in 0..PACKETS_PER_TURN {
             let (n, from) = match socket.recv_from(&mut self.buffer) {
                 Ok(received) => received,
@@ -205,9 +216,15 @@ impl Upf {
                 Ok(Gtp::GPdu { teid, qfi, payload }) => {
                     // The inner source must be the session's UE (no spoofing).
                     let session = self.sessions.by_teid(teid);
-                    let valid =
-                        session.is_some_and(|s| ipv4_src(payload) == Some(s.ue_ip) && qos::uplink_known(&s.rule, qfi));
-                    if valid && device.write(payload).is_ok() {
+                    let Some(s) =
+                        session.filter(|s| ipv4_src(payload) == Some(s.ue_ip) && qos::uplink_known(&s.rule, qfi))
+                    else {
+                        ctx.count(DROPPED, 1);
+                        continue;
+                    };
+                    if !s.limits.allow(qfi.unwrap_or(DEFAULT_QFI), false, now, payload.len()) {
+                        ctx.count(RATE_LIMITED, 1);
+                    } else if device.write(payload).is_ok() {
                         ctx.count(UPLINK_PACKETS, 1);
                         ctx.count(UPLINK_BYTES, payload.len() as u64);
                     } else {
@@ -228,6 +245,7 @@ impl Upf {
     /// IP packets from the data network, to the UEs; how many were read.
     fn on_n6(&mut self, ctx: &mut Context<'_>) -> usize {
         let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return 0 };
+        let now = ctx.now();
         for read in 0..PACKETS_PER_TURN {
             // The packet lands after the room left for its GTP-U header.
             let n = match device.read(&mut self.buffer[G_PDU_HEADER..]) {
@@ -240,7 +258,7 @@ impl Upf {
                 }
             };
             let packet = &self.buffer[G_PDU_HEADER..G_PDU_HEADER + n];
-            let Some((seid, session)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue_mut(dst)) else {
+            let Some((seid, session)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue(dst)) else {
                 ctx.count(DROPPED, 1);
                 continue;
             };
@@ -249,7 +267,6 @@ impl Upf {
                 if self.parked.park(seid, packet) != Parking::Kept {
                     ctx.count(DROPPED, 1);
                 }
-                let now = ctx.now();
                 if session.reported.is_none_or(|at| now - at >= REPORT_PERIOD) {
                     session.reported = Some(now);
                     let sent = self
@@ -263,14 +280,18 @@ impl Upf {
                 }
                 continue;
             };
-            let (qfi, extra) = qos::downlink(&session.rule, packet);
+            let qfi = qos::downlink(&session.rule, packet);
+            if !session.limits.allow(qfi, true, now, n) {
+                ctx.count(RATE_LIMITED, 1);
+                continue;
+            }
             let header: &mut [u8; G_PDU_HEADER] = (&mut self.buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
             librecn_gtpu::write_g_pdu_header(header, teid, qfi, n);
             match socket.send_to(&self.buffer[..G_PDU_HEADER + n], SocketAddr::V4(gnb)) {
                 Ok(_) => {
                     ctx.count(DOWNLINK_PACKETS, 1);
                     ctx.count(DOWNLINK_BYTES, n as u64);
-                    ctx.count(EXTRA_FLOW, u64::from(extra.is_some()));
+                    ctx.count(EXTRA_FLOW, u64::from(qfi != DEFAULT_QFI));
                 }
                 Err(_) => ctx.count(DROPPED, 1),
             }
@@ -342,7 +363,8 @@ impl Upf {
         }
     }
 
-    /// The packets parked for session `seid`, now that its tunnel is back.
+    /// The packets parked for session `seid`, now that its tunnel is back
+    /// (64 at most in all: outside the session's rates).
     fn send_parked(&mut self, ctx: &mut Context<'_>, seid: u64, gnb: SocketAddrV4, teid: u32) {
         let (buffer, socket) = (&mut self.buffer, &self.n3_socket);
         let Some(rule) = self.sessions.get(seid).map(|s| &s.rule) else { return };
@@ -350,14 +372,14 @@ impl Upf {
         self.parked.release(seid, |packet| {
             let n = packet.len();
             buffer[G_PDU_HEADER..G_PDU_HEADER + n].copy_from_slice(packet);
-            let (qfi, extra) = qos::downlink(rule, packet);
+            let qfi = qos::downlink(rule, packet);
             let header: &mut [u8; G_PDU_HEADER] = (&mut buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
             librecn_gtpu::write_g_pdu_header(header, teid, qfi, n);
             let delivered = socket.as_ref().is_some_and(|(s, _)| s.send_to(&buffer[..G_PDU_HEADER + n], gnb).is_ok());
             if delivered {
                 ctx.count(DOWNLINK_PACKETS, 1);
                 ctx.count(DOWNLINK_BYTES, n as u64);
-                ctx.count(EXTRA_FLOW, u64::from(extra.is_some()));
+                ctx.count(EXTRA_FLOW, u64::from(qfi != DEFAULT_QFI));
                 sent += 1;
             } else {
                 ctx.count(DROPPED, 1);
