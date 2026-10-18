@@ -91,9 +91,9 @@ server answers 503 at once. Today:
 | SMF | `GET dnns` | `[{"dnn", "pool", "sessions"}]` |
 | SMF | `GET sessions` | `{"count", "sessions": [...]}`, the first 64 by id (`id`, `supi`, `pdu_session_id`, `ue_ip`, `dnn`, `state`), `state` one of `setting up` (before the UPF answered), `active`, `idle` (no downlink tunnel: the UE idle, or the gNB yet to answer), `releasing`, and the session's `five_qi`, `ambr_mbps`, `flows` (extra QoS flows); `sessions?supi=...` only that subscriber's |
 | SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
-| AMF | `GET gnbs` | `[{"assoc", "key", "id", "name", "tas", "connected", "inactive", "idle", "cells": [{"cell", "connected", "inactive", "idle"}]}]`: the gNBs connected, by association, their UEs by cell (NR Cell Identity) and RRC state; idle UEs under the cell they were last in |
+| AMF | `GET gnbs` | `[{"assoc", "key", "bits", "id", "name", "tas", "connected", "inactive", "idle", "cells": [{"cell", "connected", "inactive", "idle"}]}]`: the gNBs connected, by association, their UEs by cell (NR Cell Identity) and RRC state; idle UEs under the cell they were last in |
 | AMF | `GET ues`, `ues?gnb={assoc}` | `{"connected", "registered", "idle", "count", "ues": [...]}`, the first 64 UEs, or one gNB's (`supi`, `cm`, `rrc`: connected, inactive or idle, `cell`, `state`, `tmsi`, `sessions`) |
-| UPF | `GET gnbs` | `[{"gnb", "uplink_bytes", "uplink_packets", "downlink_bytes", "downlink_packets"}]`: traffic per gNB (`gnb`: the AMF's `key`) |
+| UPF | `GET cells` | `[{"cell", "uplink_bytes", "uplink_packets", "downlink_bytes", "downlink_packets"}]`: traffic per cell (NR Cell Identity; a gNB's cells start with its `key` on `bits` bits) |
 | AMF | `GET ues/{supi}` | that UE, or 404 |
 | AMF | `POST capacity`, body `{"relative_capacity"}` | the AMF's relative capacity, announced to every gNB (AMF Configuration Update): 202, 400 |
 | AMF | `POST ues/{supi}/guti` | a new 5G-GUTI for the connected UE (Configuration Update Command, acknowledged): 202, 409 if idle or in another procedure, 404 |
@@ -114,8 +114,8 @@ by kind (`GET /api/nfs`), not by name:
   sessions, subscribers, policies, throughput); the gNBs and their UEs, the
   data networks; 3GPP NFs LibreCN has not (NSSF, NEF, NRF, AF) in grey. A
   click on an NF shows its role and its EO's statistics. Below, a card per
-  gNB (the owner's sketch): its throughput, its UEs by cell in their RRC
-  state (connected, inactive, idle); side by side as they fit.
+  gNB (the owner's sketch): its throughput and each cell's, its UEs by cell
+  in their RRC state (connected, inactive, idle); side by side as they fit.
 - **UEs** (`#ues`, one UE at `#ues/{supi}`): gNBs, UEs, a UE's details (its
   gNB, state, UE-AMBR from its policy, sessions with their QoS; a new
   5G-GUTI, deregistration), PDU sessions with the UPF's throughput.

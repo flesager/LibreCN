@@ -1,7 +1,9 @@
 #!/usr/bin/env sh
 # A long run to watch in the GUI, in Docker: the core, GNBS gNBs (default
 # 2), each in its own container with UES UEs (default 10) beside it, every
-# UE with a session on each DNN (internet, ims). The GUI is on the host,
+# UE with a session on each DNN (internet, ims). The first gNB has two
+# cells (NR Cell Identities ...10 and ...11, UERANSIM patch 0005), half its
+# UEs in each; the others one. The GUI is on the host,
 # http://127.0.0.1:$PORT (default 8080). Then, until Ctrl-C, the network
 # keeps busy, each step printed:
 # - every 5 s, a few pings from UEs (uplink) and to UEs (from the data
@@ -9,8 +11,11 @@
 # - every 10 s, two UEs released to idle by their gNB;
 # - every 30 s, a UE releases its ims session, set up again 10 s later;
 # - every 40 s, the network deregisters a UE, which registers again;
-# - every 60 s, 5 s of UDP at 20 Mbit/s down to a UE (the PCF's default
-#   session AMBR: 20 Mbit/s up, 50 down).
+# - every 5 s, two new UDP flows of 12 s on random UEs, 20 to 200 Mbit/s,
+#   three times out of four downlink, on either DNN: about five flows at a
+#   time, over the cells (the PCF's default session AMBR: 500 Mbit/s up,
+#   1000 down; UE-AMBR 1000 up, 2000 down); ten iperf3 servers in the
+#   core, ports 5202 to 5211.
 # Ctrl-C, or `demo.sh stop` from another terminal, removes the containers;
 # the core's log is kept in target/demo-core.log.
 # See docker.sh for what is expected of the host.
@@ -28,6 +33,9 @@ if [ "${1:-}" = stop ]; then
 fi
 gnbs=${GNBS:-2}
 ues=${UES:-10}
+patch=scripts/ueransim/patches/0005-gnb-several-cells-each-with-its-radio-address.patch
+git -C "${UERANSIM:-../UERANSIM/build}/../src" apply --check -R "$PWD/$patch" 2>/dev/null \
+  || { echo "UERANSIM lacks $patch (the first gNB's second cell): apply it, then rebuild"; exit 1; }
 port=${PORT:-8080}
 total=$((gnbs * ues))
 [ "$ues" -le 512 ] || { echo "UES: 512 at most per gNB (UERANSIM's nr-ue)"; exit 1; }
@@ -70,14 +78,14 @@ max_sessions = $((2 * total + 16))
 kind = "pcf"
 name = "pcf"
 [nf.params.default]
-ue_ambr_mbps = { uplink = 100, downlink = 200 }
+ue_ambr_mbps = { uplink = 1000, downlink = 2000 }
 [[nf.params.default.sessions]]
-ambr_mbps = { uplink = 20, downlink = 50 }
+ambr_mbps = { uplink = 500, downlink = 1000 }
 [[nf.params.policies]]           # the first UE: pings from the data network on their own flow
 supi = "imsi-999700000000001"
 [[nf.params.policies.sessions]]
 dnn = "internet"
-ambr_mbps = { uplink = 20, downlink = 50 }
+ambr_mbps = { uplink = 500, downlink = 1000 }
 [[nf.params.policies.sessions.flows]]
 five_qi = 7
 filters = [{ direction = "downlink", remote = "10.45.0.1", protocol = 1 }]
@@ -98,16 +106,33 @@ run librecn-core 10.210.0.10 /etc/librecn/core.sh /etc/librecn/demo.toml
 opts=""
 wait_for librecn-core "AMF amf-1 ready" || { docker logs librecn-core; exit 1; }
 echo "GUI: http://127.0.0.1:$port ($gnbs gNB(s) x $ues UE(s) starting; Ctrl-C to stop)"
+# The traffic's servers, one flow each at a time (core.sh's own serves 5201).
+for p in $(seq 5202 5211); do docker exec -d librecn-core iperf3 -s -p "$p"; done
 
 # gNB g (1, 2...): 10.210.0.(20 + g), gNB id g, tracking area g, and its UEs.
 for g in $(seq "$gnbs"); do
   ip=10.210.0.$((20 + g))
-  imsi=imsi-99970$(printf %010d $(((g - 1) * ues + 1)))
+  first=$(((g - 1) * ues + 1))
+  # The first gNB's second cell: radio address 127.0.0.2, half its UEs
+  # (a second nr-ue, searching that cell only, its TUN devices named apart).
+  cell2=: ue2=: here=$ues
+  if [ "$g" -eq 1 ] && [ "$ues" -ge 2 ]; then
+    here=$((ues / 2))
+    # Two nr-ue add their routing tables to rt_tables at once, with the same
+    # numbers: every table is there first, numbered apart.
+    cell2="printf 'extraCells:\n  - nci: $(printf 0x%09x $((g << 4 | 1)))\n    linkIp: 127.0.0.2\n' >> /tmp/gnb.yaml
+    for i in \$(seq 0 $((2 * ues))); do echo \"\$((1000 + i)) rt_uesimtun\$i\"; echo \"\$((3000 + i)) rt_uesimc2tun\$i\"; done >> /etc/iproute2/rt_tables"
+    ue2='sed -e "s/^  - 127.0.0.1\$/  - 127.0.0.2/" -e "\$a tunName: uesimc2tun" /etc/librecn/ue.yaml > /tmp/ue2.yaml
+    nr-ue -c /tmp/ue2.yaml -n '$((ues - here))' -i imsi-99970'$(printf %010d $((first + here)))' -t 200 > /tmp/ue2.log 2>&1 &'
+  fi
   run "librecn-gnb-$g" "$ip" sh -c "
     sed -e \"s/^nci: .*/nci: '$(printf 0x%09x $((g << 4)))'/\" -e 's/^tac: .*/tac: $g/' \
         -e 's/^ngapIp: .*/ngapIp: $ip/' -e 's/^gtpIp: .*/gtpIp: $ip/' /etc/librecn/gnb.yaml > /tmp/gnb.yaml
+    $cell2
     nr-gnb -c /tmp/gnb.yaml > /tmp/gnb.log 2>&1 &
-    sleep 1; exec nr-ue -c /etc/librecn/ue.yaml -n $ues -i $imsi -t 200"
+    sleep 1
+    $ue2
+    exec nr-ue -c /etc/librecn/ue.yaml -n $here -i imsi-99970$(printf %010d $first) -t 200"
 done
 
 # Helpers, on the containers.
@@ -120,13 +145,14 @@ say() { echo "$(date +%T) $*"; }
 
 t=0
 released=""
+flow=5202
 while alive; do
   sleep 5
   t=$((t + 5))
   # Pings: from two UEs to the UPF's N6 side, and from the data network to two UEs.
   for _ in 1 2; do
     c=$(gnb)
-    tun=$(docker exec "$c" ip -o link 2>/dev/null | grep -o 'uesimtun[0-9]*' | shuf -n 1 || true)
+    tun=$(docker exec "$c" ip -o link 2>/dev/null | grep -o 'uesim[c0-9]*tun[0-9]*' | shuf -n 1 || true)
     [ -n "$tun" ] && docker exec "$c" ping -I "$tun" -c 1 -W 2 10.45.0.1 >/dev/null 2>&1 &
     ip=$(ue_ip || true)
     [ -n "$ip" ] && docker exec librecn-core ping -c 1 -W 3 "$ip" >/dev/null 2>&1 &
@@ -160,14 +186,20 @@ while alive; do
       say "the network deregisters $supi (it registers again)"
     fi
   fi
-  if [ $((t % 60)) -eq 0 ]; then
+  # Two new flows every tick, each on the next server port: a UE's address
+  # on either DNN, to that DNN's N6 side (10.45.0.1 or 10.46.0.1).
+  for _ in 1 2; do
     c=$(gnb)
-    bind=$(docker exec "$c" ip -4 -o addr 2>/dev/null | grep -o 'inet 10\.45\.[0-9.]*' | cut -d' ' -f2 | shuf -n 1 || true)
-    if [ -n "$bind" ]; then
-      say "5 s of UDP at 20 Mbit/s down to $bind"
-      docker exec "$c" iperf3 -c 10.45.0.1 -B "$bind" -u -b 20M -t 5 -R >/dev/null 2>&1 &
-    fi
-  fi
+    bind=$(docker exec "$c" ip -4 -o addr 2>/dev/null | grep -o 'inet 10\.4[56]\.[0-9.]*' | cut -d' ' -f2 | shuf -n 1 || true)
+    [ -n "$bind" ] || continue
+    rate=$(shuf -i 20-200 -n 1)
+    way=$(shuf -n 1 -e down down down up)
+    reverse=""
+    [ "$way" = down ] && reverse=-R
+    docker exec -d "$c" iperf3 -c "${bind%.*.*}.0.1" -B "$bind" -p "$flow" -u -b "${rate}M" -t 12 $reverse
+    say "UE $bind: 12 s of UDP at $rate Mbit/s $way"
+    flow=$((flow == 5211 ? 5202 : flow + 1))
+  done
 done
 say "the core is gone"
 keep_log

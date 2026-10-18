@@ -135,8 +135,8 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     // The gNB's GTP-U endpoint: port 2152 of an address of its own.
     let gnb = UdpSocket::bind("127.0.0.63:2152").unwrap();
     gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-    // gNB key 7 (the AMF's gNB ID, through the SMF): its traffic counted apart.
-    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify::new(1, [127, 0, 0, 63], 0x77, 7)).unwrap();
+    // The UE's cell (its NR Cell Identity, from the AMF through the SMF): its traffic counted apart.
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify::new(1, [127, 0, 0, 63], 0x77, 0x10)).unwrap();
     p.pump();
 
     let packet = ipv4(SERVER, UE, b"pong");
@@ -153,12 +153,12 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     let (probe, replies) = Probe::new();
     let web = p.tb.add(EoConfig::new("web").buffers(&[(16 * 1024, 2)]), probe).unwrap();
     let mut request = Manage::new_zeroed();
-    request.fill(Method::Get, "gnbs", "");
+    request.fill(Method::Get, "cells", "");
     p.tb.inject_from(web, p.upf, 9, &request).unwrap();
     p.tb.run_until_idle();
     let reply: Reply = replies.take()[0].body().unwrap();
     let expected = format!(
-        r#"[{{"downlink_bytes":{},"downlink_packets":1,"gnb":7,"uplink_bytes":0,"uplink_packets":0}}]"#,
+        r#"[{{"cell":"000000010","downlink_bytes":{},"downlink_packets":1,"uplink_bytes":0,"uplink_packets":0}}]"#,
         packet.len()
     );
     assert_eq!(reply.text(), expected);

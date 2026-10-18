@@ -1,0 +1,372 @@
+gNB: several cells, each with its own radio address (extraCells).
+
+UERANSIM v3.3.0's gNB has one cell: one NR Cell Identity (nci), one radio
+address (linkIp), reported for every UE. extraCells lists more cells, each
+{ nci, linkIp }: the gNB listens on every address, answers each with that
+cell's transmitter identity (the UE tells cells apart by it), and reports
+to the AMF the cell a UE is attached through (User Location Information).
+A UE should search one cell of a gNB only (gnbSearchList). Used by
+LibreCN's demo.sh (its first gNB has two cells).
+
+diff --git a/src/utils/network.hpp b/src/utils/network.hpp
+index b8137c47..5b6a9115 100644
+--- a/src/utils/network.hpp
++++ b/src/utils/network.hpp
+@@ -58,6 +58,7 @@ class Socket
+     void send(const InetAddress &address, const uint8_t *buffer, size_t size) const;
+     void close();
+     [[nodiscard]] bool hasFd() const;
++    [[nodiscard]] int getFd() const;
+     [[nodiscard]] InetAddress getAddress() const;
+     [[nodiscard]] int getIpVersion() const;
+ 
+diff --git a/src/utils/network.cpp b/src/utils/network.cpp
+index 8c5c3850..1b7ed357 100644
+--- a/src/utils/network.cpp
++++ b/src/utils/network.cpp
+@@ -196,6 +196,11 @@ bool Socket::hasFd() const
+     return fd >= 0;
+ }
+ 
++int Socket::getFd() const
++{
++    return fd;
++}
++
+ Socket Socket::CreateAndBindUdp(const InetAddress &address)
+ {
+     Socket s(address.getSockAddr()->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+diff --git a/src/lib/udp/server.hpp b/src/lib/udp/server.hpp
+index 3ba1140d..ad25eab3 100644
+--- a/src/lib/udp/server.hpp
++++ b/src/lib/udp/server.hpp
+@@ -22,10 +22,15 @@ class UdpServer
+   public:
+     UdpServer();
+     UdpServer(const std::string &address, uint16_t port);
++    /* Bound to several addresses (a gNB's cells): Receive tells which one a
++       datagram came to, SendFrom sends from one. */
++    UdpServer(const std::vector<std::string> &addresses, uint16_t port);
+     ~UdpServer();
+ 
+     int Receive(uint8_t *buffer, size_t bufferSize, int timeoutMs, InetAddress &outPeerAddress) const;
++    int Receive(uint8_t *buffer, size_t bufferSize, int timeoutMs, InetAddress &outPeerAddress, size_t &outIndex) const;
+     void Send(const InetAddress &address, const uint8_t *buffer, size_t bufferSize) const;
++    void SendFrom(size_t index, const InetAddress &address, const uint8_t *buffer, size_t bufferSize) const;
+ };
+ 
+ } // namespace udp
+diff --git a/src/lib/udp/server.cpp b/src/lib/udp/server.cpp
+index 3054a123..438c8d87 100644
+--- a/src/lib/udp/server.cpp
++++ b/src/lib/udp/server.cpp
+@@ -22,6 +22,29 @@ UdpServer::UdpServer(const std::string &address, uint16_t port) : sockets{Socket
+ {
+ }
+ 
++UdpServer::UdpServer(const std::vector<std::string> &addresses, uint16_t port) : sockets{}
++{
++    for (auto &address : addresses)
++        sockets.push_back(Socket::CreateAndBindUdp({address, port}));
++}
++
++int UdpServer::Receive(uint8_t *buffer, size_t bufferSize, int timeoutMs, InetAddress &outPeerAddress,
++                       size_t &outIndex) const
++{
++    auto socket = Socket::Select(sockets, {}, timeoutMs);
++    if (!socket.hasFd())
++        return 0;
++    for (size_t i = 0; i < sockets.size(); i++)
++        if (sockets[i].getFd() == socket.getFd())
++            outIndex = i;
++    return socket.receive(buffer, bufferSize, timeoutMs, outPeerAddress);
++}
++
++void UdpServer::SendFrom(size_t index, const InetAddress &address, const uint8_t *buffer, size_t bufferSize) const
++{
++    sockets.at(index).send(address, buffer, bufferSize);
++}
++
+ int UdpServer::Receive(uint8_t *buffer, size_t bufferSize, int timeoutMs, InetAddress &outPeerAddress) const
+ {
+     auto socket = Socket::Select(sockets, {}, timeoutMs);
+diff --git a/src/gnb/types.hpp b/src/gnb/types.hpp
+index 042adb8f..55707628 100644
+--- a/src/gnb/types.hpp
++++ b/src/gnb/types.hpp
+@@ -317,6 +317,13 @@ inline bool IsNtn(ECellAccessType type)
+            type == ECellAccessType::NrGeo || type == ECellAccessType::NrOthersat;
+ }
+ 
++/* A gNB's cell beyond its first: its NR Cell Identity and its radio address. */
++struct GnbCellConfig
++{
++    int64_t nci{};
++    std::string linkIp{};
++};
++
+ struct GnbConfig
+ {
+     /* Read from config file */
+@@ -327,6 +334,7 @@ struct GnbConfig
+     NetworkSlice nssai{};
+     std::vector<GnbAmfConfig> amfConfigs{};
+     std::string linkIp{};
++    std::vector<GnbCellConfig> extraCells{}; // more cells, each with its own radio address
+     std::string ngapIp{};
+     std::string gtpIp{};
+     std::optional<std::string> gtpAdvertiseIp{};
+diff --git a/src/gnb.cpp b/src/gnb.cpp
+index 7ff2282c..e8467dbd 100644
+--- a/src/gnb.cpp
++++ b/src/gnb.cpp
+@@ -49,6 +49,16 @@ static nr::gnb::GnbConfig *ReadConfigYaml()
+     result->tac = yaml::GetInt32(config, "tac", 0, 0xFFFFFF);
+ 
+     result->linkIp = yaml::GetIpAddress(config, "linkIp");
++    if (yaml::HasField(config, "extraCells"))
++    {
++        for (auto &cell : yaml::GetSequence(config, "extraCells"))
++        {
++            nr::gnb::GnbCellConfig c{};
++            c.nci = yaml::GetInt64(cell, "nci", 0, 0xFFFFFFFFFll);
++            c.linkIp = yaml::GetIpAddress(cell, "linkIp");
++            result->extraCells.push_back(c);
++        }
++    }
+     result->ngapIp = yaml::GetIpAddress(config, "ngapIp");
+     result->gtpIp = yaml::GetIpAddress(config, "gtpIp");
+ 
+diff --git a/src/gnb/rls/udp_task.hpp b/src/gnb/rls/udp_task.hpp
+index 7261f549..9acb02f6 100644
+--- a/src/gnb/rls/udp_task.hpp
++++ b/src/gnb/rls/udp_task.hpp
+@@ -29,6 +29,7 @@ class RlsUdpTask : public NtsTask
+         uint64_t sti{};
+         InetAddress address;
+         int64_t lastSeen{};
++        size_t cell{}; // the cell (radio address) the UE is attached through
+     };
+ 
+   private:
+@@ -36,6 +37,8 @@ class RlsUdpTask : public NtsTask
+     udp::UdpServer *m_server;
+     NtsTask *m_ctlTask;
+     uint64_t m_sti;
++    std::vector<uint64_t> m_cellStis; // each cell's transmitter identity
++    std::vector<int64_t> m_cellNcis;  // each cell's NR Cell Identity
+     Vector3 m_phyLocation;
+     int64_t m_lastLoop;
+     std::unordered_map<uint64_t, int> m_stiToUe;
+@@ -54,13 +57,14 @@ class RlsUdpTask : public NtsTask
+     void onQuit() override;
+ 
+   private:
+-    void receiveRlsPdu(const InetAddress &addr, std::unique_ptr<rls::RlsMessage> &&msg);
+-    void sendRlsPdu(const InetAddress &addr, const rls::RlsMessage &msg);
++    void receiveRlsPdu(size_t cell, const InetAddress &addr, std::unique_ptr<rls::RlsMessage> &&msg);
++    void sendRlsPdu(size_t cell, const InetAddress &addr, const rls::RlsMessage &msg);
+     void heartbeatCycle(int64_t time);
+ 
+   public:
+     void initialize(NtsTask *ctlTask);
+     void send(int ueId, const rls::RlsMessage &msg);
++    int64_t nciOf(int ueId); // the NR Cell Identity of the UE's cell
+ };
+ 
+ } // namespace nr::gnb
+diff --git a/src/gnb/rls/udp_task.cpp b/src/gnb/rls/udp_task.cpp
+index cd9a06d4..be3c5c5f 100644
+--- a/src/gnb/rls/udp_task.cpp
++++ b/src/gnb/rls/udp_task.cpp
+@@ -49,9 +49,20 @@ RlsUdpTask::RlsUdpTask(TaskBase *base, uint64_t sti, Vector3 phyLocation)
+ {
+     m_logger = base->logBase->makeUniqueLogger("rls-udp");
+ 
++    // The first cell, then the extra ones: each its address and transmitter identity.
++    std::vector<std::string> addresses{base->config->linkIp};
++    m_cellStis.push_back(sti);
++    m_cellNcis.push_back(base->config->nci);
++    for (auto &cell : base->config->extraCells)
++    {
++        addresses.push_back(cell.linkIp);
++        m_cellStis.push_back(sti + m_cellStis.size());
++        m_cellNcis.push_back(cell.nci);
++    }
++
+     try
+     {
+-        m_server = new udp::UdpServer(base->config->linkIp, cons::RadioLinkPort);
++        m_server = new udp::UdpServer(addresses, cons::RadioLinkPort);
+     }
+     catch (const LibError &e)
+     {
+@@ -77,14 +88,15 @@ void RlsUdpTask::onLoop()
+     uint8_t buffer[BUFFER_SIZE];
+     InetAddress peerAddress;
+ 
+-    int size = m_server->Receive(buffer, BUFFER_SIZE, RECEIVE_TIMEOUT, peerAddress);
++    size_t cell = 0;
++    int size = m_server->Receive(buffer, BUFFER_SIZE, RECEIVE_TIMEOUT, peerAddress, cell);
+     if (size > 0)
+     {
+         auto rlsMsg = rls::DecodeRlsMessage(OctetView{buffer, static_cast<size_t>(size)});
+         if (rlsMsg == nullptr)
+             m_logger->err("Unable to decode RLS message");
+         else
+-            receiveRlsPdu(peerAddress, std::move(rlsMsg));
++            receiveRlsPdu(cell, peerAddress, std::move(rlsMsg));
+     }
+ }
+ 
+@@ -93,7 +105,7 @@ void RlsUdpTask::onQuit()
+     delete m_server;
+ }
+ 
+-void RlsUdpTask::receiveRlsPdu(const InetAddress &addr, std::unique_ptr<rls::RlsMessage> &&msg)
++void RlsUdpTask::receiveRlsPdu(size_t cell, const InetAddress &addr, std::unique_ptr<rls::RlsMessage> &&msg)
+ {
+     std::lock_guard<std::mutex> lock(m_mapMutex);
+     if (msg->msgType == rls::EMessageType::HEARTBEAT)
+@@ -110,6 +122,7 @@ void RlsUdpTask::receiveRlsPdu(const InetAddress &addr, std::unique_ptr<rls::Rls
+             int ueId = m_stiToUe[msg->sti];
+             m_ueMap[ueId].address = addr;
+             m_ueMap[ueId].lastSeen = utils::CurrentTimeMillis();
++            m_ueMap[ueId].cell = cell;
+         }
+         else
+         {
+@@ -125,16 +138,17 @@ void RlsUdpTask::receiveRlsPdu(const InetAddress &addr, std::unique_ptr<rls::Rls
+             m_ueMap[ueId].sti = msg->sti;
+             m_ueMap[ueId].address = addr;
+             m_ueMap[ueId].lastSeen = utils::CurrentTimeMillis();
++            m_ueMap[ueId].cell = cell;
+ 
+             auto w = std::make_unique<NmGnbRlsToRls>(NmGnbRlsToRls::SIGNAL_DETECTED);
+             w->ueId = ueId;
+             m_ctlTask->push(std::move(w));
+         }
+ 
+-        rls::RlsHeartBeatAck ack{m_sti};
++        rls::RlsHeartBeatAck ack{m_cellStis[cell]};
+         ack.dbm = dbm;
+ 
+-        sendRlsPdu(addr, ack);
++        sendRlsPdu(cell, addr, ack);
+         return;
+     }
+ 
+@@ -150,12 +164,24 @@ void RlsUdpTask::receiveRlsPdu(const InetAddress &addr, std::unique_ptr<rls::Rls
+     m_ctlTask->push(std::move(w));
+ }
+ 
+-void RlsUdpTask::sendRlsPdu(const InetAddress &addr, const rls::RlsMessage &msg)
++void RlsUdpTask::sendRlsPdu(size_t cell, const InetAddress &addr, const rls::RlsMessage &msg)
+ {
+     OctetString stream;
+     rls::EncodeRlsMessage(msg, stream);
+ 
+-    m_server->Send(addr, stream.data(), static_cast<size_t>(stream.length()));
++    // From the cell's address, with its transmitter identity (octets 5 to 12):
++    // the UE tells cells apart by it.
++    std::vector<uint8_t> bytes(stream.data(), stream.data() + stream.length());
++    if (bytes.size() >= 13)
++        for (int i = 0; i < 8; i++)
++            bytes[5 + i] = static_cast<uint8_t>(m_cellStis[cell] >> (8 * (7 - i)));
++    m_server->SendFrom(cell, addr, bytes.data(), bytes.size());
++}
++
++int64_t RlsUdpTask::nciOf(int ueId)
++{
++    std::lock_guard<std::mutex> lock(m_mapMutex);
++    return m_cellNcis[m_ueMap.count(ueId) ? m_ueMap[ueId].cell : 0];
+ }
+ 
+ void RlsUdpTask::heartbeatCycle(int64_t time)
+@@ -194,20 +220,20 @@ void RlsUdpTask::initialize(NtsTask *ctlTask)
+ 
+ void RlsUdpTask::send(int ueId, const rls::RlsMessage &msg)
+ {
+-    std::vector<InetAddress> targets{};
++    std::vector<std::pair<size_t, InetAddress>> targets{};
+     {
+         std::lock_guard<std::mutex> lock(m_mapMutex);
+         if (ueId == 0)
+         {
+             for (auto &ue : m_ueMap)
+-                targets.push_back(ue.second.address);
++                targets.emplace_back(ue.second.cell, ue.second.address);
+         }
+         else if (m_ueMap.count(ueId))
+-            targets.push_back(m_ueMap[ueId].address);
++            targets.emplace_back(m_ueMap[ueId].cell, m_ueMap[ueId].address);
+         // else: an unknown UE, the message is ignored
+     }
+-    for (auto &address : targets)
+-        sendRlsPdu(address, msg);
++    for (auto &target : targets)
++        sendRlsPdu(target.first, target.second, msg);
+ }
+ 
+ } // namespace nr::gnb
+diff --git a/src/gnb/rls/task.hpp b/src/gnb/rls/task.hpp
+index 57fc0c3a..bda4b19b 100644
+--- a/src/gnb/rls/task.hpp
++++ b/src/gnb/rls/task.hpp
+@@ -43,6 +43,9 @@ class GnbRlsTask : public NtsTask
+     explicit GnbRlsTask(TaskBase *base);
+     ~GnbRlsTask() override = default;
+ 
++    /* The NR Cell Identity of the cell UE `ueId` is attached through. */
++    int64_t nciOf(int ueId);
++
+   protected:
+     void onStart() override;
+     void onLoop() override;
+diff --git a/src/gnb/rls/task.cpp b/src/gnb/rls/task.cpp
+index b31f64c0..47b099e7 100644
+--- a/src/gnb/rls/task.cpp
++++ b/src/gnb/rls/task.cpp
+@@ -28,6 +28,11 @@ GnbRlsTask::GnbRlsTask(TaskBase *base) : m_base{base}
+     m_ctlTask->initialize(this, m_udpTask);
+ }
+ 
++int64_t GnbRlsTask::nciOf(int ueId)
++{
++    return m_udpTask->nciOf(ueId);
++}
++
+ void GnbRlsTask::onStart()
+ {
+     m_udpTask->start();
+diff --git a/src/gnb/ngap/transport.cpp b/src/gnb/ngap/transport.cpp
+index 46c58625..b7d4d6fe 100644
+--- a/src/gnb/ngap/transport.cpp
++++ b/src/gnb/ngap/transport.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include <gnb/app/task.hpp>
+ #include <gnb/nts.hpp>
++#include <gnb/rls/task.hpp>
+ #include <gnb/sctp/task.hpp>
+ #include <lib/asn/ngap.hpp>
+ #include <lib/asn/utils.hpp>
+@@ -170,7 +171,7 @@ void NgapTask::sendNgapUeAssociated(int ueId, ASN_NGAP_NGAP_PDU *pdu)
+ 
+         asn::ngap::AddProtocolIeIfUsable(
+             *pdu, asn_DEF_ASN_NGAP_UserLocationInformation, ASN_NGAP_ProtocolIE_ID_id_UserLocationInformation,
+-            FindCriticalityOfUserIe(pdu, ASN_NGAP_ProtocolIE_ID_id_UserLocationInformation), [this](void *mem) {
++            FindCriticalityOfUserIe(pdu, ASN_NGAP_ProtocolIE_ID_id_UserLocationInformation), [this, ue](void *mem) {
+                 auto *loc = reinterpret_cast<ASN_NGAP_UserLocationInformation *>(mem);
+                 loc->present = ASN_NGAP_UserLocationInformation_PR_userLocationInformationNR;
+                 loc->choice.userLocationInformationNR = asn::New<ASN_NGAP_UserLocationInformationNR>();
+@@ -179,7 +180,8 @@ void NgapTask::sendNgapUeAssociated(int ueId, ASN_NGAP_NGAP_PDU *pdu)
+                 nr->timeStamp = asn::New<ASN_NGAP_TimeStamp_t>();
+ 
+                 ngap_utils::ToPlmnAsn_Ref(m_base->config->plmn, nr->nR_CGI.pLMNIdentity);
+-                asn::SetBitStringLong<36>(m_base->config->nci, nr->nR_CGI.nRCellIdentity);
++                // The UE's own cell: a gNB may have several (extraCells).
++                asn::SetBitStringLong<36>(m_base->rlsTask->nciOf(ue->ctxId), nr->nR_CGI.nRCellIdentity);
+                 ngap_utils::ToPlmnAsn_Ref(m_base->config->plmn, nr->tAI.pLMNIdentity);
+                 asn::SetOctetString3(nr->tAI.tAC, octet3{m_base->config->tac});
+                 asn::SetOctetString4(*nr->timeStamp, octet4{utils::CurrentTimeStamp().seconds32()});

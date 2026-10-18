@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::sctp::AssocId;
+use crate::setup::RanNodeId;
 use crate::ue::{Location, UeContext};
 use crate::{Amf, n2};
 
@@ -83,7 +84,11 @@ impl Amf {
                                 "connected": c[0], "inactive": c[1], "idle": c[2] })
                     })
                     .collect();
-                json!({ "assoc": assoc, "key": g.node.as_ref().map(|(n, _)| n.key()),
+                let bits = match g.node.as_ref().map(|(n, _)| *n) {
+                    Some(RanNodeId::Gnb { bits, .. }) => Some(bits),
+                    _ => None,
+                };
+                json!({ "assoc": assoc, "key": g.node.as_ref().map(|(n, _)| n.key()), "bits": bits,
                         "id": g.node.as_ref().map(|(id, _)| id.to_string()),
                         "name": g.node.as_ref().and_then(|(_, name)| name.as_deref()), "tas": tas,
                         "ues": connected + inactive, "connected": connected, "inactive": inactive, "idle": idle,

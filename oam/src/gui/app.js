@@ -177,12 +177,27 @@ function notes(id, lines) {
   lines.forEach((line, i) => svg(g, "text", { x: 0, y: i * 18, "text-anchor": "middle", class: "note" + (i ? " sub" : "") }, line));
 }
 
+// Squeezes a box's line into the box if it is wider (shown boxes only: a
+// hidden one measures 0, and is fitted at its next refresh).
+function fit(el) {
+  el.removeAttribute("textLength");
+  if (el.getComputedTextLength() > W - 10) {
+    el.setAttribute("textLength", W - 10);
+    el.setAttribute("lengthAdjust", "spacingAndGlyphs");
+  }
+}
+
 function setBox(id, cls, l1, l2) {
   const s = shapes[id];
   s.g.setAttribute("class", `box nf ${cls}` + (picked === id ? " picked" : ""));
   s.l1.textContent = l1;
   s.l2.textContent = l2;
+  fit(s.l1);
+  fit(s.l2);
 }
+
+// A rate in Mbit/s, short: no decimal from 100 on.
+const mbit = (v) => num(v, v >= 100 ? 0 : 1);
 
 let eosNow = [];
 const plural = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
@@ -193,7 +208,7 @@ const refreshOverview = () => view("gnb-cards", async () => {
   const ask = (kind, path) => state(kind) === "running" ? nfGet(kind, path).catch(() => null) : Promise.resolve(null);
   const [gnbs, ues, sessions, dnns, subscribers, policies, traffic] = await Promise.all([
     ask("amf", "gnbs"), ask("amf", "ues"), ask("smf", "sessions"), ask("smf", "dnns"),
-    ask("udm", "subscribers"), ask("pcf", "policies"), ask("upf", "gnbs"),
+    ask("udm", "subscribers"), ask("pcf", "policies"), ask("upf", "cells"),
   ]);
   const registered = ues ? ues.registered + ues.idle : 0;
   const ausf = eoOf("ausf");
@@ -203,7 +218,7 @@ const refreshOverview = () => view("gnb-cards", async () => {
     udm: subscribers ? plural(subscribers.count, "subscriber") : "",
     pcf: policies ? plural(policies.count, "own policy", "own policies") : "",
     ausf: ausf && ausf.stats ? plural(ausf.stats.messages, "message") : "",
-    upf: rates ? `↑ ${num(rates.up, 1)}  ↓ ${num(rates.down, 1)} Mbit/s` : "",
+    upf: rates ? `↑ ${mbit(rates.up)} ↓ ${mbit(rates.down)} Mbit/s` : "",
   };
   for (const b of BOXES.filter((x) => x.kind)) {
     const eo = eoOf(b.kind);
@@ -217,7 +232,7 @@ const refreshOverview = () => view("gnb-cards", async () => {
   setBox("dn", dnns && dnns.length ? "running" : "absent", dnns ? plural(dnns.length, "DNN") : "", "");
   notes("dn", (dnns || []).map((d) => `${d.dnn} ${d.pool}: ${plural(d.sessions, "session")}`));
   renderPicked();
-  await renderCards(gnbs || [], gnbRates(traffic || []));
+  await renderCards(gnbs || [], cellRates(traffic || []));
 });
 
 function pick(id) {
@@ -246,22 +261,32 @@ function renderPicked() {
 
 /* ---- Overview: a card per gNB, its UEs by cell. ---- */
 
-// Each gNB's throughput (Mbit/s), from the UPF's counters per gNB key.
+// Each cell's throughput (Mbit/s), from the UPF's counters per cell.
 let trafficBefore = { at: 0, by: {} };
-function gnbRates(traffic) {
+function cellRates(traffic) {
   const now = performance.now();
   const dt = trafficBefore.at ? (now - trafficBefore.at) / 1000 : 0;
   const out = {};
   for (const t of traffic) {
-    const before = trafficBefore.by[t.gnb];
+    const before = trafficBefore.by[t.cell];
     if (before && dt > 0) {
       const mbps = (k) => Math.max(0, (t[k] - before[k]) * 8 / 1e6 / dt);
-      out[t.gnb] = { up: mbps("uplink_bytes"), down: mbps("downlink_bytes") };
+      out[t.cell] = { up: mbps("uplink_bytes"), down: mbps("downlink_bytes") };
     }
   }
-  trafficBefore = { at: now, by: Object.fromEntries(traffic.map((t) => [t.gnb, t])) };
+  trafficBefore = { at: now, by: Object.fromEntries(traffic.map((t) => [t.cell, t])) };
   return out;
 }
+
+// A gNB's throughput: the sum of its cells' (a cell's identity starts with the gNB ID).
+function gnbSpeed(g, speeds) {
+  if (g.key === null || g.key === undefined || !g.bits) return null;
+  const mine = Object.entries(speeds).filter(([cell]) => Math.floor(parseInt(cell, 16) / 2 ** (36 - g.bits)) === g.key);
+  if (!mine.length) return null;
+  return mine.reduce((sum, [, s]) => ({ up: sum.up + s.up, down: sum.down + s.down }), { up: 0, down: 0 });
+}
+
+const speedText = (s) => s ? `↑ ${num(s.up, 2)} ↓ ${num(s.down, 2)} Mbit/s` : "";
 
 const ANTENNA = `<svg class="antenna" viewBox="0 0 40 48" aria-hidden="true"><path d="M20 14 L10 46 M20 14 L30 46 M13 34 H27"/>
   <path d="M26 8 a8 8 0 0 1 0 12 M30 4 a13 13 0 0 1 0 20 M14 8 a8 8 0 0 0 0 12 M10 4 a13 13 0 0 0 0 20"/></svg>`;
@@ -288,12 +313,12 @@ async function renderCards(gnbs, speeds) {
       card.innerHTML = `<div class="card-head" id="gnb-head-${g.assoc}"></div><div class="cells" id="gnb-cells-${g.assoc}"></div>`;
       box.appendChild(card);
     }
-    const speed = speeds[g.key];
+    const speed = gnbSpeed(g, speeds);
     put($(`gnb-head-${g.assoc}`), `${ANTENNA}<div class="who"><b>${esc(g.name || g.id || "association " + g.assoc)}</b>` +
       `<div class="muted">${esc(g.id ?? "not set up")} · ${esc(g.tas.join(", "))}</div></div>` +
       `<div class="counts"><span class="ok">${g.connected} connected</span><span class="warn">${g.inactive} inactive</span>` +
       `<span class="muted">${g.idle} idle</span>` +
-      `<span class="speed">${speed ? `↑ ${num(speed.up, 2)} ↓ ${num(speed.down, 2)} Mbit/s` : ""}</span></div>`);
+      `<span class="speed">${speedText(speed)}</span></div>`);
   }
   // Each gNB's UEs by cell, one request after another (the AMF takes four at once).
   for (const g of gnbs) {
@@ -307,7 +332,8 @@ async function renderCards(gnbs, speeds) {
         ` <span class="${RRC[u.rrc] || ""}">${esc(u.rrc)}</span></li>`).join("");
       return `<div class="cell"><div class="cell-head"><b>Cell ${esc(c.cell ?? "unknown")}</b>` +
         `<span class="counts"><span class="ok">${c.connected}</span> / <span class="warn">${c.inactive}</span> / ` +
-        `<span class="muted">${c.idle}</span></span></div><ul>${list}</ul></div>`;
+        `<span class="muted">${c.idle}</span></span></div>` +
+        `<div class="speed muted">${speedText(speeds[c.cell])}</div><ul>${list}</ul></div>`;
     });
     const rest = ues.count > ues.ues.length ? `<p class="muted">${ues.count - ues.ues.length} more UEs not listed</p>` : "";
     put($(`gnb-cells-${g.assoc}`), (cells.join("") || `<p class="muted">no UE</p>`) + rest);

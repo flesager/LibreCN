@@ -993,7 +993,7 @@ fn rrc_report(amf_id: u64, ran_id: u32, state: RRCState, nci: u64) -> Vec<u8> {
 }
 
 #[test]
-fn rrc_inactive_is_allowed_reported_and_counted_per_cell_and_the_upf_counts_per_gnb() {
+fn rrc_inactive_is_allowed_reported_and_counted_per_cell_and_the_upf_counts_per_cell() {
     let (mut s, gnb, ids) = core_and_ids(1024);
     let mut ue = Ue::default();
     let accept = ue.register(&mut s, &gnb);
@@ -1032,20 +1032,22 @@ fn rrc_inactive_is_allowed_reported_and_counted_per_cell_and_the_upf_counts_per_
     s.pump();
     assert_eq!(counts(&mut s), Some((1, 0, 0)), "connected again");
 
-    // A PDU session: the UPF counts its traffic under the gNB's key.
+    // A PDU session: the UPF counts its traffic under the UE's cell (the
+    // test's uplink NAS says cell 0: the gNB reports the UE's cell again).
     let n1 = hex("2e 01 01 c1 ffff 91 a1");
     let transport = [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81")].concat();
     ue.uplink_protected(&gnb, 2, &transport);
     ue.downlink(&mut s, &gnb);
+    gnb.send(0, ue.stream, NGAP_PPID, &rrc_report(ue.amf_id, 1, RRCState::connected, nci)).unwrap();
     gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, 1, 0x77)).unwrap();
     s.pump();
-    let (status, traffic) = manage_at(&mut s, &ids, ids.upf, Method::Get, "gnbs", "");
-    assert_eq!((status, &traffic[0]["gnb"]), (200, &key.into()), "{traffic}");
+    let (status, traffic) = manage_at(&mut s, &ids, ids.upf, Method::Get, "cells", "");
+    assert_eq!((status, &traffic[0]["cell"]), (200, &cell.as_str().into()), "{traffic}");
+    let (_, gnbs) = manage(&mut s, &ids, Method::Get, "gnbs", "");
+    assert_eq!(gnbs[0]["bits"], bits, "the gNB ID's length: a cell's gNB is in its first bits");
 
-    // Released by the gNB: idle, counted under the cell it left (the test's
-    // uplink NAS says cell 0: the gNB reports the UE's cell again).
+    // Released by the gNB: idle, counted under the cell it left.
     let amf_id = ue.amf_id;
-    gnb.send(0, ue.stream, NGAP_PPID, &rrc_report(amf_id, 1, RRCState::connected, nci)).unwrap();
     gnb.send(0, ue.stream, NGAP_PPID, &release_request(amf_id, 1)).unwrap();
     let (_, pdu) = s.receive(&gnb);
     let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);

@@ -297,17 +297,17 @@ impl Smf {
     }
 
     /// N4Modify; `teid` 0 (deactivation) is a notification, not answered.
-    /// `key`: the gNB's, for the UPF's traffic per gNB.
+    /// `cell`: the UE's, for the UPF's traffic per cell.
     fn n4_modify(
         &mut self,
         ctx: &mut Context<'_>,
         id: u32,
-        (gnb, teid, key): (Ipv4Addr, u32, u32),
+        (gnb, teid, cell): (Ipv4Addr, u32, u64),
     ) -> librecn_scheduler::Result<()> {
         let flag = if teid == 0 { flags::NOTIFICATION } else { flags::REQUEST };
         let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
             let mut m = ctx.alloc::<N4Modify>(upf)?.with_corr_id(id).with_flags(flag);
-            *m = N4Modify::new(u64::from(id), gnb.octets(), teid, key);
+            *m = N4Modify::new(u64::from(id), gnb.octets(), teid, cell);
             ctx.send(m)
         });
         if sent.is_err() {
@@ -351,12 +351,12 @@ impl Smf {
                 self.remove(ctx, id);
                 self.update_result(ctx, to, psi, Answer { released: true, ..Answer::default() });
             }
-            _ => self.on_setup_response(ctx, to, id, request.gnb, container),
+            _ => self.on_setup_response(ctx, to, id, request.cell, container),
         }
     }
 
     /// The gNB's tunnel, to the UPF; answered once the UPF is.
-    fn on_setup_response(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), id: u32, key: u32, transfer: &[u8]) {
+    fn on_setup_response(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), id: u32, cell: u64, transfer: &[u8]) {
         let Some(c) = self.contexts.get_mut(&id) else { return };
         let (psi, supi) = (c.pdu_session_id, c.supi);
         let (gnb, teid) = match n2sm::setup_response_transfer(transfer) {
@@ -367,7 +367,7 @@ impl Smf {
             }
         };
         c.waiting = Some(to.1);
-        if let Err(e) = self.n4_modify(ctx, id, (gnb, teid, key)) {
+        if let Err(e) = self.n4_modify(ctx, id, (gnb, teid, cell)) {
             log!(self.log, ctx, Error, "cannot reach the UPF: {e}");
             if let Some(c) = self.contexts.get_mut(&id) {
                 c.waiting = None;
