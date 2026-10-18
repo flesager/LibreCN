@@ -26,6 +26,11 @@
 //!   a row find nothing, and sleeps on epoll again.
 //!
 //! - [`sessions`], the session table;
+//!
+//! Traffic is also counted per gNB (`GET gnbs` on the web API), by the
+//! gNB's key the SMF gives with each downlink tunnel: a slot per gNB in a
+//! preallocated table of [`MAX_GNBS`].
+//!
 //! - [`qos`], the QoS flows and their rates;
 //! - [`parked`], the downlink packets of idle UEs;
 //! - [`tun`], the N6 device.
@@ -42,6 +47,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
 use librecn_common::log::Logger;
+use librecn_common::manage::{Manage, Method, send_reply};
 use librecn_common::msg::flags;
 use librecn_gtpu::{G_PDU_HEADER, Message as Gtp};
 use librecn_sbi::Outcome;
@@ -61,6 +67,8 @@ const PACKETS_PER_TURN: usize = 64;
 const BUFFER: usize = G_PDU_HEADER + 65_535;
 /// Alarm raised while the user plane cannot run.
 const ALARM_USER_PLANE: u32 = 0;
+/// gNBs whose traffic is counted apart; the others' only in the totals.
+pub const MAX_GNBS: usize = 256;
 /// Hybrid mode: polls in a row without a packet before the UPF sleeps.
 pub const EMPTY_POLLS: u32 = 256;
 
@@ -127,6 +135,8 @@ pub struct Upf {
     parked: Parked,
     /// The SMF, from its N4 messages: where downlink data reports go.
     smf: Option<EoId>,
+    /// Per gNB (its key): uplink bytes and packets, downlink bytes and packets.
+    traffic: Vec<(u32, [u64; 4])>,
     log: Logger,
     alarms: Alarms,
 }
@@ -153,6 +163,7 @@ impl Upf {
             buffer: vec![0; BUFFER].into_boxed_slice(),
             parked: Parked::default(),
             smf: None,
+            traffic: Vec::with_capacity(MAX_GNBS),
             log: Logger::default(),
             alarms: Alarms::new(),
         })
@@ -163,10 +174,12 @@ impl Upf {
         Ok((Self::eo_config(name), Self::new(name, params)?))
     }
 
-    /// N4 messages are small, but N4Establish (the session's rule); N3 and
-    /// N6 are two I/O registrations; the packet counters.
+    /// N4 messages are small, but N4Establish (the session's rule); web
+    /// API requests 8 KiB; N3 and N6 are two I/O registrations; the packet
+    /// counters.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_io(2).max_timers(0).buffers(&[(256, 1024), (512, 1024)]).counters(COUNTERS)
+        let buffers = [(256, 1024), (512, 1024), (8 * 1024, 2)];
+        EoConfig::new(name).max_io(2).max_timers(0).buffers(&buffers).counters(COUNTERS)
     }
 
     /// N6 on an already open, non-blocking packet device instead of the
@@ -226,6 +239,9 @@ impl Upf {
                     } else if device.write(payload).is_ok() {
                         ctx.count(UPLINK_PACKETS, 1);
                         ctx.count(UPLINK_BYTES, payload.len() as u64);
+                        if let Some(t) = s.gnb.and_then(|i| self.traffic.get_mut(usize::from(i))) {
+                            (t.1[0], t.1[1]) = (t.1[0] + payload.len() as u64, t.1[1] + 1);
+                        }
                     } else {
                         ctx.count(DROPPED, 1);
                     }
@@ -291,6 +307,9 @@ impl Upf {
                     ctx.count(DOWNLINK_PACKETS, 1);
                     ctx.count(DOWNLINK_BYTES, n as u64);
                     ctx.count(EXTRA_FLOW, u64::from(qfi != DEFAULT_QFI));
+                    if let Some(t) = session.gnb.and_then(|i| self.traffic.get_mut(usize::from(i))) {
+                        (t.1[2], t.1[3]) = (t.1[2] + n as u64, t.1[3] + 1);
+                    }
                 }
                 Err(_) => ctx.count(DROPPED, 1),
             }
@@ -333,6 +352,10 @@ impl Upf {
         self.smf = Some(msg.from());
         let gnb = SocketAddrV4::new(Ipv4Addr::from(request.gnb_addr), librecn_gtpu::PORT);
         let dl = (request.dl_teid != 0).then_some((gnb, request.dl_teid));
+        let slot = self.gnb_slot(request.gnb);
+        if let Some(s) = self.sessions.get_mut(request.seid).filter(|_| slot.is_some()) {
+            s.gnb = slot;
+        }
         let outcome = if self.sessions.modify(request.seid, dl) {
             let (seid, teid) = (request.seid, request.dl_teid);
             match dl {
@@ -362,11 +385,50 @@ impl Upf {
         }
     }
 
+    /// The slot of gNB `key` in the traffic table, a new one if there is
+    /// room; none for key 0 (unknown).
+    fn gnb_slot(&mut self, key: u32) -> Option<u16> {
+        if key == 0 {
+            return None;
+        }
+        let slot = match self.traffic.iter().position(|(k, _)| *k == key) {
+            Some(slot) => slot,
+            None if self.traffic.len() < MAX_GNBS => {
+                self.traffic.push((key, [0; 4]));
+                self.traffic.len() - 1
+            }
+            None => return None,
+        };
+        u16::try_from(slot).ok()
+    }
+
+    /// `GET gnbs`: the traffic per gNB.
+    fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
+        let (status, json) = match (request.method(), request.path()) {
+            (Some(Method::Get), "gnbs") => {
+                let gnbs: Vec<_> = self
+                    .traffic
+                    .iter()
+                    .map(|(key, t)| {
+                        serde_json::json!({ "gnb": key, "uplink_bytes": t[0], "uplink_packets": t[1],
+                                            "downlink_bytes": t[2], "downlink_packets": t[3] })
+                    })
+                    .collect();
+                (200, serde_json::json!(gnbs))
+            }
+            (_, path) => (404, serde_json::json!({ "error": format!("no resource {path:?}") })),
+        };
+        if let Err(e) = send_reply(ctx, msg, status, &json.to_string()) {
+            log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
+        }
+    }
+
     /// The packets parked for session `seid`, now that its tunnel is back
     /// (64 at most in all: outside the session's rates).
     fn send_parked(&mut self, ctx: &mut Context<'_>, seid: u64, gnb: SocketAddrV4, teid: u32) {
         let (buffer, socket) = (&mut self.buffer, &self.n3_socket);
-        let Some(qos) = self.sessions.get(seid).map(|s| &s.qos) else { return };
+        let Some((qos, slot)) = self.sessions.get(seid).map(|s| (&s.qos, s.gnb)) else { return };
+        let mut traffic = slot.and_then(|i| self.traffic.get_mut(usize::from(i)));
         let mut sent = 0;
         self.parked.release(seid, |packet| {
             let n = packet.len();
@@ -379,6 +441,9 @@ impl Upf {
                 ctx.count(DOWNLINK_PACKETS, 1);
                 ctx.count(DOWNLINK_BYTES, n as u64);
                 ctx.count(EXTRA_FLOW, u64::from(qfi != DEFAULT_QFI));
+                if let Some(t) = traffic.as_mut() {
+                    (t.1[2], t.1[3]) = (t.1[2] + n as u64, t.1[3] + 1);
+                }
                 sent += 1;
             } else {
                 ctx.count(DROPPED, 1);
@@ -449,6 +514,8 @@ impl ExecutionObject for Upf {
             self.on_establish(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Modify>() {
             self.on_modify(ctx, msg, request);
+        } else if let Some(request) = msg.body::<Manage>() {
+            self.on_manage(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Delete>()
             && self.sessions.delete(request.seid).is_some()
         {

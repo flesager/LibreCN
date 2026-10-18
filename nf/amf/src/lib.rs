@@ -338,6 +338,17 @@ impl Amf {
                     (Err(mismatch), _) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
                 }
             }
+            Incoming::RrcState { amf_id, ran_id, inactive, location } => {
+                match self.ues.get_mut(assoc, amf_id, ran_id) {
+                    Ok(ue) => {
+                        ue.inactive = inactive;
+                        ue.location = location.or(ue.location);
+                        let state = if inactive { "RRC_INACTIVE" } else { "RRC_CONNECTED" };
+                        log!(self.log, ctx, Info, "UE {amf_id}: {state}");
+                    }
+                    Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
+                }
+            }
             Incoming::SessionRelease { amf_id, ran_id, released } => match self.ues.get_mut(assoc, amf_id, ran_id) {
                 Ok(_) => log!(self.log, ctx, Info, "UE {amf_id}: the gNB released PDU session(s) {released:?}"),
                 Err(mismatch) => self.unknown_ue(ctx, assoc, amf_id, ran_id, mismatch),
@@ -440,6 +451,7 @@ impl Amf {
             ambr: ue.ambr,
             timer: &mut ue.timer,
             ids: (amf_id, ue.ran_id, ue.assoc, ue.stream),
+            tai,
             release: None,
         };
         step(&mut ue.mm, &self.config, tai, &mut port);
@@ -686,6 +698,8 @@ struct Port<'a, 'c, 's> {
     timer: &'a mut Option<TimerId>,
     /// AMF-UE-NGAP-ID, RAN-UE-NGAP-ID, association, stream.
     ids: (AmfUeId, RanUeId, AssocId, u16),
+    /// Where the UE is: its registration area for RRC_INACTIVE.
+    tai: Option<Tai>,
     release: Option<Release>,
 }
 
@@ -716,7 +730,8 @@ impl Effects for Port<'_, '_, '_> {
             // Connected already (a Service Request for a deactivated session): the NAS alone.
             return self.ngap(n2::downlink_nas_transport(amf_id, ran_id, pdu), "NAS in DL NAS Transport");
         }
-        let request = n2::initial_context_setup_request(amf_id, ran_id, self.config, context, pdu);
+        let tai = self.tai.map(|t| (t.plmn, t.tac));
+        let request = n2::initial_context_setup_request(amf_id, ran_id, self.config, context, tai, pdu);
         self.ngap(request, what);
     }
 

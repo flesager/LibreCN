@@ -67,6 +67,8 @@ pub struct AsContext {
     pub kgnb: [u8; 32],
     pub capability: UeSecurityCapability,
     pub allowed: SnssaiList,
+    /// The UE's 5G-TMSI: its identity index for RRC_INACTIVE paging.
+    pub tmsi: Option<u32>,
 }
 
 /// A 5GSM message from the UE, for the SMF.
@@ -716,7 +718,8 @@ impl Mm {
         let (Some(kamf), Some(security), Some(capability)) = (self.kamf, &self.security, self.capability) else {
             return None;
         };
-        Some(AsContext { kgnb: kdf::kgnb(&kamf, security.last_uplink_count()), capability, allowed: self.allowed })
+        let kgnb = kdf::kgnb(&kamf, security.last_uplink_count());
+        Some(AsContext { kgnb, capability, allowed: self.allowed, tmsi: self.tmsi() })
     }
 
     /// A Service Request from idle, integrity checked (§5.6.1.4).

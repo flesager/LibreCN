@@ -297,11 +297,17 @@ impl Smf {
     }
 
     /// N4Modify; `teid` 0 (deactivation) is a notification, not answered.
-    fn n4_modify(&mut self, ctx: &mut Context<'_>, id: u32, gnb: Ipv4Addr, teid: u32) -> librecn_scheduler::Result<()> {
+    /// `key`: the gNB's, for the UPF's traffic per gNB.
+    fn n4_modify(
+        &mut self,
+        ctx: &mut Context<'_>,
+        id: u32,
+        (gnb, teid, key): (Ipv4Addr, u32, u32),
+    ) -> librecn_scheduler::Result<()> {
         let flag = if teid == 0 { flags::NOTIFICATION } else { flags::REQUEST };
         let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
             let mut m = ctx.alloc::<N4Modify>(upf)?.with_corr_id(id).with_flags(flag);
-            *m = N4Modify { seid: u64::from(id), gnb_addr: gnb.octets(), dl_teid: teid };
+            *m = N4Modify::new(u64::from(id), gnb.octets(), teid, key);
             ctx.send(m)
         });
         if sent.is_err() {
@@ -323,7 +329,7 @@ impl Smf {
             (update::DEACTIVATE, _) => {
                 c.active = false;
                 log!(self.log, ctx, Info, "{supi}: PDU session {psi} deactivated (the UE is idle)");
-                let _ = self.n4_modify(ctx, id, Ipv4Addr::UNSPECIFIED, 0);
+                let _ = self.n4_modify(ctx, id, (Ipv4Addr::UNSPECIFIED, 0, 0));
                 // The AMF's acknowledgement: it paces its notices on them.
                 self.update_result(ctx, to, psi, Answer::default());
             }
@@ -345,12 +351,12 @@ impl Smf {
                 self.remove(ctx, id);
                 self.update_result(ctx, to, psi, Answer { released: true, ..Answer::default() });
             }
-            _ => self.on_setup_response(ctx, to, id, container),
+            _ => self.on_setup_response(ctx, to, id, request.gnb, container),
         }
     }
 
     /// The gNB's tunnel, to the UPF; answered once the UPF is.
-    fn on_setup_response(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), id: u32, transfer: &[u8]) {
+    fn on_setup_response(&mut self, ctx: &mut Context<'_>, to: (EoId, u32), id: u32, key: u32, transfer: &[u8]) {
         let Some(c) = self.contexts.get_mut(&id) else { return };
         let (psi, supi) = (c.pdu_session_id, c.supi);
         let (gnb, teid) = match n2sm::setup_response_transfer(transfer) {
@@ -361,7 +367,7 @@ impl Smf {
             }
         };
         c.waiting = Some(to.1);
-        if let Err(e) = self.n4_modify(ctx, id, gnb, teid) {
+        if let Err(e) = self.n4_modify(ctx, id, (gnb, teid, key)) {
             log!(self.log, ctx, Error, "cannot reach the UPF: {e}");
             if let Some(c) = self.contexts.get_mut(&id) {
                 c.waiting = None;

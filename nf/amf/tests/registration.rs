@@ -212,6 +212,8 @@ struct Ue {
     dl: u32,
     amf_id: u64,
     stream: u16,
+    /// The IEs of the last Initial Context Setup Request.
+    context_setup: Vec<(u16, Any)>,
 }
 
 impl Ue {
@@ -233,7 +235,8 @@ impl Ue {
             }
             ID_INITIAL_CONTEXT_SETUP => {
                 let message: InitialContextSetupRequest = open(&m.value).unwrap();
-                let (amf_id, nas) = ids(message.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)).collect());
+                self.context_setup = message.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)).collect();
+                let (amf_id, nas) = ids(self.context_setup.clone());
                 (Carrier::ContextSetup, amf_id, open::<NASPDU>(&nas.unwrap()).unwrap().0.to_vec())
             }
             ID_PDUSESSION_RESOURCE_SETUP => {
@@ -962,4 +965,96 @@ fn the_web_api_changes_the_capacity_at_the_gnbs_and_the_pcf_a_ue_ambr_at_its_gnb
     let setup: PDUSessionResourceSetupRequest = initiating(&pdu, ID_PDUSESSION_RESOURCE_SETUP);
     let ies: Vec<_> = setup.protocol_ies.0.iter().map(|ie| (ie.id, ie.value.clone())).collect();
     assert_eq!(ambr(&ies), (Integer::from(50_000_000), Integer::from(200_000_000)), "with the session");
+}
+
+/// RRC Inactive Transition Report: the UE in `state`, in NR cell `nci` (TAC 1).
+fn rrc_report(amf_id: u64, ran_id: u32, state: RRCState, nci: u64) -> Vec<u8> {
+    let plmn = PLMNIdentity(FixedOctetString::new(PLMN));
+    let tai = TAI::new(plmn.clone(), TAC(FixedOctetString::new([0, 0, 1])), None);
+    let mut cell = FixedBitString::<36>::ZERO;
+    for i in 0..36 {
+        cell.set(i, nci >> (35 - i) & 1 == 1);
+    }
+    let cgi = NRCGI::new(plmn, NRCellIdentity(cell), None);
+    let nr = UserLocationInformationNR::new(cgi, tai, None, None);
+    let uli = wrap(&UserLocationInformation::userLocationInformationNR(nr)).unwrap();
+    let ie = |id: ProtocolIEID, value: Any| {
+        AnonymousRRCInactiveTransitionReportProtocolIEs::new(id, Criticality::ignore, value)
+    };
+    let ies = vec![
+        ie(ID_AMF_UE_NGAP_ID, wrap(&AMFUENGAPID(amf_id)).unwrap()),
+        ie(ID_RAN_UE_NGAP_ID, wrap(&RANUENGAPID(ran_id)).unwrap()),
+        ie(ID_RRCSTATE, wrap(&state).unwrap()),
+        ie(ID_USER_LOCATION_INFORMATION, uli),
+    ];
+    let message = wrap(&RRCInactiveTransitionReport::new(RRCInactiveTransitionReportProtocolIEs(ies))).unwrap();
+    let pdu = InitiatingMessage::new(ID_RRCINACTIVE_TRANSITION_REPORT, Criticality::ignore, message);
+    encode(&NGAPPDU::initiatingMessage(pdu)).unwrap()
+}
+
+#[test]
+fn rrc_inactive_is_allowed_reported_and_counted_per_cell_and_the_upf_counts_per_gnb() {
+    let (mut s, gnb, ids) = core_and_ids(1024);
+    let mut ue = Ue::default();
+    let accept = ue.register(&mut s, &gnb);
+
+    // The gNB may use RRC_INACTIVE: the UE's identity index (5G-S-TMSI mod
+    // 1024), T3512, its tracking area; and it reports every transition.
+    let tmsi = u32::from_be_bytes(accept[15..19].try_into().unwrap());
+    let ie = |id: ProtocolIEID| ue.context_setup.iter().find(|(i, _)| *i == id.0).map(|(_, v)| v.clone());
+    let assistance: CoreNetworkAssistanceInformationForInactive =
+        open(&ie(ID_CORE_NETWORK_ASSISTANCE_INFORMATION_FOR_INACTIVE).expect("assistance information")).unwrap();
+    let UEIdentityIndexValue::indexLength10(index) = assistance.u_eidentity_index_value else { panic!() };
+    assert_eq!(index.iter().fold(0u32, |acc, b| acc << 1 | u32::from(*b)), tmsi & 0x3ff);
+    assert_eq!(*assistance.t_ailist_for_inactive.0[0].t_ai.t_ac.0, [0, 0, 1]);
+    let report: RRCInactiveTransitionReportRequest =
+        open(&ie(ID_RRCINACTIVE_TRANSITION_REPORT_REQUEST).unwrap()).unwrap();
+    assert_eq!(report, RRCInactiveTransitionReportRequest::subsequent_state_transition_report);
+
+    // Cell 1 of the gNB: its NR Cell Identity starts with the gNB ID.
+    let (_, gnbs) = manage(&mut s, &ids, Method::Get, "gnbs", "");
+    let key = gnbs[0]["key"].as_u64().unwrap();
+    let bits: u64 = gnbs[0]["id"].as_str().unwrap().rsplit('/').next().unwrap().parse().unwrap();
+    let nci = key << (36 - bits) | 1;
+    let cell = format!("{nci:09x}");
+    let counts = |s: &mut Setup| {
+        let (_, gnbs) = manage(s, &ids, Method::Get, "gnbs", "");
+        let c = gnbs[0]["cells"].as_array().unwrap().iter().find(|c| c["cell"] == cell.as_str()).cloned();
+        c.map(|c| (c["connected"].as_u64().unwrap(), c["inactive"].as_u64().unwrap(), c["idle"].as_u64().unwrap()))
+    };
+    gnb.send(0, ue.stream, NGAP_PPID, &rrc_report(ue.amf_id, 1, RRCState::inactive, nci)).unwrap();
+    s.pump();
+    assert!(s.logged("amf-1", &format!("UE {}: RRC_INACTIVE", ue.amf_id)), "{:#?}", s.log.lines());
+    assert_eq!(counts(&mut s), Some((0, 1, 0)), "inactive, in its new cell");
+    let (_, ues) = manage(&mut s, &ids, Method::Get, "ues", "");
+    assert_eq!((&ues["ues"][0]["rrc"], &ues["ues"][0]["cell"]), (&"inactive".into(), &cell.as_str().into()));
+    gnb.send(0, ue.stream, NGAP_PPID, &rrc_report(ue.amf_id, 1, RRCState::connected, nci)).unwrap();
+    s.pump();
+    assert_eq!(counts(&mut s), Some((1, 0, 0)), "connected again");
+
+    // A PDU session: the UPF counts its traffic under the gNB's key.
+    let n1 = hex("2e 01 01 c1 ffff 91 a1");
+    let transport = [&hex("7e0067 01")[..], &(n1.len() as u16).to_be_bytes(), &n1, &hex("1201 81")].concat();
+    ue.uplink_protected(&gnb, 2, &transport);
+    ue.downlink(&mut s, &gnb);
+    gnb.send(0, ue.stream, NGAP_PPID, &session_setup_response(ue.amf_id, 1, 1, 0x77)).unwrap();
+    s.pump();
+    let (status, traffic) = manage_at(&mut s, &ids, ids.upf, Method::Get, "gnbs", "");
+    assert_eq!((status, &traffic[0]["gnb"]), (200, &key.into()), "{traffic}");
+
+    // Released by the gNB: idle, counted under the cell it left (the test's
+    // uplink NAS says cell 0: the gNB reports the UE's cell again).
+    let amf_id = ue.amf_id;
+    gnb.send(0, ue.stream, NGAP_PPID, &rrc_report(amf_id, 1, RRCState::connected, nci)).unwrap();
+    gnb.send(0, ue.stream, NGAP_PPID, &release_request(amf_id, 1)).unwrap();
+    let (_, pdu) = s.receive(&gnb);
+    let _: UEContextReleaseCommand = initiating(&pdu, ID_UECONTEXT_RELEASE);
+    gnb.send(0, ue.stream, NGAP_PPID, &release_complete(amf_id, 1)).unwrap();
+    s.pump();
+    assert_eq!(counts(&mut s), Some((0, 0, 1)), "idle, last seen in that cell");
+    let assoc = gnbs[0]["assoc"].as_i64().unwrap();
+    let (_, mine) = manage(&mut s, &ids, Method::Get, &format!("ues?gnb={assoc}"), "");
+    assert_eq!((&mine["count"], &mine["ues"][0]["rrc"]), (&1.into(), &"idle".into()), "{mine}");
+    let (_, other) = manage(&mut s, &ids, Method::Get, &format!("ues?gnb={}", assoc + 1), "");
+    assert_eq!(other["count"], 0);
 }

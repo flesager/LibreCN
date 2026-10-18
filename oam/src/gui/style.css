@@ -62,3 +62,21 @@ tr.pick:hover td { background: var(--bg); }
 #diagram text.label { fill: var(--muted); font-size: 12px; }
 #diagram text.note { fill: var(--ink); font-size: 13px; }
 #diagram text.note.sub { fill: var(--muted); }
+
+/* The overview's gNB cards: side by side as they fit. */
+#gnb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; align-items: start; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--card); }
+.card-head { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
+.card-head .counts { grid-column: 1 / -1; }
+.who { min-width: 0; overflow-wrap: anywhere; }
+.antenna { width: 30px; height: 36px; }
+.antenna path { stroke: var(--ink); stroke-width: 2; fill: none; stroke-linecap: round; }
+.counts { display: flex; gap: 10px; flex-wrap: wrap; }
+.speed { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cells { margin-top: 8px; }
+.cell { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
+.cell-head { display: flex; justify-content: space-between; gap: 8px; }
+.cell-head .counts { gap: 0; white-space: pre; }
+.cell ul { list-style: none; margin: 4px 0 0; padding: 0; max-height: 150px; overflow-y: auto; font-size: 13px; }
+.cell li { padding: 1px 0; }
+.cell a { color: var(--ink); }

@@ -176,6 +176,9 @@ impl Amf {
         setup: Vec<(u8, Vec<u8>)>,
         failed: Vec<(u8, Vec<u8>)>,
     ) {
+        // The gNB's key: the UPF counts traffic per gNB.
+        let assoc = self.ues.get_mut_by_id(amf_id).map(|ue| ue.assoc);
+        let key = assoc.and_then(|a| self.gnbs.get(&a)).and_then(|g| g.node.as_ref()).map_or(0, |(n, _)| n.key());
         let answers = setup.into_iter().map(|a| (a, update::SETUP_RESPONSE));
         for ((psi, transfer), kind) in answers.chain(failed.into_iter().map(|a| (a, update::SETUP_FAILED))) {
             let Some(ue) = self.ues.get_mut_by_id(amf_id) else { return };
@@ -190,7 +193,7 @@ impl Amf {
                 log!(self.log, ctx, Info, "UE {amf_id}: the gNB could not set PDU session {psi} up");
             }
             request::<UpdateSmContext>(ctx, &mut self.smf, &mut self.log, amf_id, |m| {
-                (m.sm_ctx, m.kind) = (sm_ctx, kind);
+                (m.sm_ctx, m.kind, m.gnb) = (sm_ctx, kind, key);
                 m.container.set(&transfer);
             });
         }

@@ -139,7 +139,7 @@ impl Bench {
             std::thread::sleep(Duration::from_millis(1));
         };
         for i in 0..ues {
-            let modify = N4Modify { seid: i as u64 + 1, gnb_addr: GNB.octets(), dl_teid: DL_TEID + i as u32 };
+            let modify = N4Modify::new(i as u64 + 1, GNB.octets(), DL_TEID + i as u32, 0);
             inject(&runtime, smf, upf, &modify);
         }
         std::thread::sleep(Duration::from_millis(100));

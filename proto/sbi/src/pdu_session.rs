@@ -128,6 +128,8 @@ pub mod n2 {
 #[repr(C)]
 pub struct UpdateSmContext {
     pub sm_ctx: u32,
+    /// With a setup response: the gNB's key (its gNB ID); 0: unknown.
+    pub gnb: u32,
     /// [`update`] kind.
     pub kind: u8,
     _pad: u8,
@@ -206,13 +208,22 @@ impl MsgBody for N4EstablishResult {
 }
 
 /// SMF → UPF: the downlink tunnel endpoint, the gNB's; TEID 0: none (the
-/// UE is idle, downlink packets are dropped).
+/// UE is idle, downlink packets are dropped). `gnb`: the gNB's key (its
+/// gNB ID, from the AMF), for the UPF's traffic per gNB; 0: unknown.
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct N4Modify {
     pub seid: u64,
     pub gnb_addr: [u8; 4],
     pub dl_teid: u32,
+    pub gnb: u32,
+    _pad: u32,
+}
+
+impl N4Modify {
+    pub fn new(seid: u64, gnb_addr: [u8; 4], dl_teid: u32, gnb: u32) -> Self {
+        N4Modify { seid, gnb_addr, dl_teid, gnb, _pad: 0 }
+    }
 }
 
 impl MsgBody for N4Modify {

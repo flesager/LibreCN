@@ -7,6 +7,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixDatagram;
 use std::time::Duration;
 
+use librecn_common::manage::{Manage, Method, Reply};
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_sbi::pdu_session::{N4Establish, N4EstablishResult, N4Modify, N4Report, REPORT_PERIOD};
 use librecn_sbi::policy::{PacketFilter, PccRule, Rates, SessionRule, direction};
@@ -134,7 +135,8 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     // The gNB's GTP-U endpoint: port 2152 of an address of its own.
     let gnb = UdpSocket::bind("127.0.0.63:2152").unwrap();
     gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 63], dl_teid: 0x77 }).unwrap();
+    // gNB key 7 (the AMF's gNB ID, through the SMF): its traffic counted apart.
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify::new(1, [127, 0, 0, 63], 0x77, 7)).unwrap();
     p.pump();
 
     let packet = ipv4(SERVER, UE, b"pong");
@@ -147,6 +149,19 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     assert_eq!((teid, qfi, payload), (0x77, Some(1), &packet[..]));
     gnb.set_nonblocking(true).unwrap();
     assert!(gnb.recv(&mut buf).is_err(), "no session for 10.45.0.99: dropped");
+
+    let (probe, replies) = Probe::new();
+    let web = p.tb.add(EoConfig::new("web").buffers(&[(16 * 1024, 2)]), probe).unwrap();
+    let mut request = Manage::new_zeroed();
+    request.fill(Method::Get, "gnbs", "");
+    p.tb.inject_from(web, p.upf, 9, &request).unwrap();
+    p.tb.run_until_idle();
+    let reply: Reply = replies.take()[0].body().unwrap();
+    let expected = format!(
+        r#"[{{"downlink_bytes":{},"downlink_packets":1,"gnb":7,"uplink_bytes":0,"uplink_packets":0}}]"#,
+        packet.len()
+    );
+    assert_eq!(reply.text(), expected);
 }
 
 #[test]
@@ -159,7 +174,7 @@ fn downlink_packets_go_on_their_qos_flow_and_uplink_ones_on_the_sessions() {
     let (mut p, ul_teid) = plane_with(Ipv4Addr::new(127, 0, 0, 68), "event", rule);
     let gnb = UdpSocket::bind("127.0.0.69:2152").unwrap();
     gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 69], dl_teid: 0x79 }).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify::new(1, [127, 0, 0, 69], 0x79, 0)).unwrap();
     p.pump();
     assert!(p.log.lines().iter().any(|l| l.msg.contains("uplink TEID 0x1, 1 extra flow(s)")), "{:#?}", p.log.lines());
 
@@ -197,7 +212,7 @@ fn packets_beyond_the_session_ambr_are_dropped() {
     let (mut p, _) = plane_with(Ipv4Addr::new(127, 0, 0, 70), "event", rule);
     let gnb = UdpSocket::bind("127.0.0.71:2152").unwrap();
     gnb.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
-    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 71], dl_teid: 0x7a }).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify::new(1, [127, 0, 0, 71], 0x7a, 0)).unwrap();
     p.pump();
     let packet = ipv4(SERVER, UE, b"pong");
     let received = || {
@@ -238,7 +253,7 @@ fn downlink_for_an_idle_ue_is_parked_reported_then_sent_with_its_tunnel() {
     // The tunnel is back: the parked packets go, in order.
     let gnb = UdpSocket::bind("127.0.0.67:2152").unwrap();
     gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 67], dl_teid: 0x78 }).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify::new(1, [127, 0, 0, 67], 0x78, 0)).unwrap();
     p.pump();
     let mut buf = [0u8; 128];
     for expected in [&first, &second, &first] {

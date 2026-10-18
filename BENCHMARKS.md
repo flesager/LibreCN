@@ -147,9 +147,9 @@ The 20 000 row is eleven runs on 1 to 4 cores, some with one malloc arena (`MALL
 
 | EO | AMF | SMF | log | UPF | UDM | PCF | AUSF | alarms |
 |---|---|---|---|---|---|---|---|---|
-| MiB | 2.45 | 1.38 | 1.32 | 0.85 | 0.36 | 0.36 | 0.33 | 0.10 |
+| MiB | 2.45 | 1.38 | 1.32 | 0.86 | 0.36 | 0.36 | 0.33 | 0.10 |
 
-The UPF's share includes a class of 512-byte buffers for N4Establish, which carries the session's PCF rule. The rule's PCC rules are kept per session only when a session has some, so a session without them costs about 40 bytes more in the UPF and the SMF.
+The UPF's share includes a class of 512-byte buffers for N4Establish, which carries the session's PCF rule, and two 8 KiB buffers for the web API (its traffic per gNB). The rule's PCC rules are kept per session only when a session has some, so a session without them costs about 40 bytes more in the UPF and the SMF.
 
 The AMF's share grows with `max_ues` (one NAS timer per UE): 5.13 MiB for 40 000.
 

@@ -12,10 +12,9 @@ use librecn_common::log;
 use librecn_nas::ie::SessionSet;
 use librecn_scheduler::{Context, Time};
 
-use crate::config::Plmn;
 use crate::mm::{self, Mm, State};
 use crate::sessions::{Holder, Notice};
-use crate::ue::{AmfUeId, PduSession, UeContext};
+use crate::ue::{AmfUeId, Location, PduSession, UeContext};
 use crate::{Amf, n2};
 
 /// Expired idle contexts are swept at this period.
@@ -26,8 +25,8 @@ pub(crate) struct Idle {
     mm: Mm,
     sessions: [Option<PduSession>; 16],
     since: Time,
-    /// Its last tracking area: where it is paged.
-    tai: Option<(Plmn, [u8; 3])>,
+    /// Its last location: paged in its tracking area, shown under its cell.
+    pub(crate) location: Option<Location>,
     /// Sessions it was paged for.
     paged: SessionSet,
     ambr: Option<(u64, u64)>,
@@ -49,6 +48,8 @@ impl Idle {
         serde_json::json!({
             "supi": self.mm.supi().map(|s| s.as_str()),
             "cm": "idle",
+            "rrc": "idle",
+            "cell": self.location.map(|l| format!("{:09x}", l.cell.1)),
             "tmsi": format!("{tmsi:08x}"),
             "idle_s": (now - self.since).as_secs(),
             "sessions": sessions,
@@ -73,12 +74,11 @@ impl Amf {
             self.notify_smf(ctx, Notice::Deactivate { sm_ctx });
             self.holders.insert(sm_ctx, Holder::Idle(tmsi));
         }
-        let tai = ue.location.map(|l| l.tai);
         let idle = Idle {
             mm: ue.mm,
             sessions: ue.sessions,
             since: ctx.now(),
-            tai,
+            location: ue.location,
             paged: SessionSet::default(),
             ambr: ue.ambr,
         };
@@ -147,7 +147,7 @@ impl Amf {
             return false;
         };
         idle.paged.insert(psi as u8);
-        let Some(tai) = idle.tai else {
+        let Some(tai) = idle.location.map(|l| l.tai) else {
             log!(self.log, ctx, Error, "5G-TMSI {tmsi:08x}: no tracking area known, not paged");
             return true;
         };

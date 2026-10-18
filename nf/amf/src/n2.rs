@@ -62,6 +62,13 @@ pub(crate) enum Incoming {
         ran_id: RanUeId,
         failure: Option<String>,
     },
+    /// RRC Inactive Transition Report: the UE's RRC state, and where it is.
+    RrcState {
+        amf_id: AmfUeId,
+        ran_id: RanUeId,
+        inactive: bool,
+        location: Option<Location>,
+    },
     /// PDU Session Resource Release Response: the PDU session IDs released.
     SessionRelease {
         amf_id: AmfUeId,
@@ -226,6 +233,18 @@ pub(crate) fn decode(bytes: &[u8]) -> Incoming {
                 })
             })
         }
+        ID_RRCINACTIVE_TRANSITION_REPORT => {
+            open::<RRCInactiveTransitionReport>(&message.value).map_err(|e| e.to_string()).and_then(|m| {
+                let ies = &m.protocol_ies.0;
+                let state = mandatory::<RRCState, _>(ies, ID_RRCSTATE, "RRC State")?;
+                Ok(Incoming::RrcState {
+                    amf_id: amf_id(ies)?,
+                    ran_id: ran_id(ies)?,
+                    inactive: state == RRCState::inactive,
+                    location: location(ies),
+                })
+            })
+        }
         ID_NGSETUP => open::<NGSetupRequest>(&message.value).map_err(|e| e.to_string()).and_then(|m| setup_request(&m)),
         ID_NGRESET => open::<NGReset>(&message.value).map(|_| Incoming::NgReset).map_err(|e| e.to_string()),
         ID_ERROR_INDICATION => open::<ErrorIndication>(&message.value).map_err(|e| e.to_string()).map(|m| {
@@ -268,6 +287,7 @@ ie! {
     AnonymousPDUSessionResourceReleaseResponseProtocolIEs: |e: &Self| e.id;
     AnonymousUEContextModificationResponseProtocolIEs: |e: &Self| e.id.0;
     AnonymousUEContextModificationFailureProtocolIEs: |e: &Self| e.id.0;
+    AnonymousRRCInactiveTransitionReportProtocolIEs: |e: &Self| e.id.0;
 }
 
 fn find<E: Ie>(ies: &[E], id: ProtocolIEID) -> Option<&Any> {
@@ -497,6 +517,7 @@ pub(crate) fn initial_context_setup_request(
     ran_id: RanUeId,
     config: &AmfConfig,
     context: &AsContext,
+    tai: Option<(Plmn, [u8; 3])>,
     nas: &[u8],
 ) -> Result<Vec<u8>, String> {
     use AnonymousInitialContextSetupRequestProtocolIEsCriticality::{ignore, reject};
@@ -527,15 +548,33 @@ pub(crate) fn initial_context_setup_request(
     let ie = |id: ProtocolIEID, criticality, value: Result<Any, EncodeError>| {
         value.map(|v| AnonymousInitialContextSetupRequestProtocolIEs::new(id.0, criticality, v)).map_err(encoding_error)
     };
-    let ies = vec![
+    let mut ies = vec![
         ie(ID_AMF_UE_NGAP_ID, reject, wrap(&AMFUENGAPID(amf_id)))?,
         ie(ID_RAN_UE_NGAP_ID, reject, wrap(&RANUENGAPID(ran_id)))?,
         ie(ID_GUAMI, reject, wrap(&guami))?,
         ie(ID_ALLOWED_NSSAI, reject, wrap(&allowed))?,
         ie(ID_UESECURITY_CAPABILITIES, reject, wrap(&security))?,
         ie(ID_SECURITY_KEY, reject, wrap(&key))?,
-        ie(ID_NAS_PDU, ignore, wrap(&NASPDU(nas.into())))?,
     ];
+    // The gNB may keep the UE in RRC_INACTIVE (TS 38.413 §9.3.1.15): its
+    // identity index (5G-S-TMSI mod 1024, TS 38.304 §7.1), T3512, and its
+    // registration area; it reports each transition (§8.3.5).
+    if let (Some(tmsi), Some((plmn_id, tac))) = (context.tmsi, tai) {
+        let area = TAIListForInactiveItem::new(TAI::new(plmn(plmn_id), TAC(FixedOctetString::new(tac)), None), None);
+        let assistance = CoreNetworkAssistanceInformationForInactive::new(
+            UEIdentityIndexValue::indexLength10((0..10).rev().map(|i| tmsi >> i & 1 == 1).collect()),
+            None,
+            PeriodicRegistrationUpdateTimer(bits(u32::from(config.t3512))),
+            None,
+            TAIListForInactive(vec![area]),
+            None,
+            None,
+        );
+        let report = RRCInactiveTransitionReportRequest::subsequent_state_transition_report;
+        ies.push(ie(ID_CORE_NETWORK_ASSISTANCE_INFORMATION_FOR_INACTIVE, ignore, wrap(&assistance))?);
+        ies.push(ie(ID_RRCINACTIVE_TRANSITION_REPORT_REQUEST, ignore, wrap(&report))?);
+    }
+    ies.push(ie(ID_NAS_PDU, ignore, wrap(&NASPDU(nas.into())))?);
     let message =
         wrap(&InitialContextSetupRequest::new(InitialContextSetupRequestProtocolIEs(ies))).map_err(encoding_error)?;
     pdu(NGAPPDU::initiatingMessage(InitiatingMessage::new(ID_INITIAL_CONTEXT_SETUP, Criticality::reject, message)))
@@ -794,5 +833,20 @@ mod tests {
         // ci0003: Downlink NAS Transport, which only the AMF sends.
         assert!(matches!(decode(&vector("ci0003")), Incoming::Unsupported { procedure: 4, .. }));
         assert_eq!(decode(&vector("ci0709")), Incoming::NgReset);
+    }
+
+    #[test]
+    fn the_context_setup_allows_rrc_inactive() {
+        let config = AmfConfig::from_params("amf", &serde_json::Value::Null).unwrap();
+        let mut allowed = librecn_nas::ie::SnssaiList::default();
+        allowed.push(Snssai { sst: 1, sd: None });
+        let context = AsContext {
+            kgnb: [0; 32],
+            capability: librecn_nas::ie::UeSecurityCapability::decode(&[0xf0, 0xf0]).unwrap(),
+            allowed,
+            tmsi: Some(0x1234_5678),
+        };
+        let pdu = initial_context_setup_request(1, 2, &config, &context, Some((config.plmn, [0, 0, 1])), &[0x7e]);
+        assert!(pdu.is_ok(), "{pdu:?}");
     }
 }

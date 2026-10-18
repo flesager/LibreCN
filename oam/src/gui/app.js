@@ -65,7 +65,8 @@ async function view(id, render) {
   try {
     await render();
   } catch (e) {
-    $(id).innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
+    const el = $(id);
+    el.innerHTML = el.tagName === "TABLE" ? `<tr><td class="muted">${esc(e.message)}</td></tr>` : `<p class="muted">${esc(e.message)}</p>`;
   } finally {
     pending[id] = false;
   }
@@ -185,14 +186,14 @@ function setBox(id, cls, l1, l2) {
 
 let eosNow = [];
 const plural = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
-const refreshOverview = () => view("nf-table", async () => {
+const refreshOverview = () => view("gnb-cards", async () => {
   // Each NF's EO and state, then what the running ones say.
   const eoOf = (kind) => eosNow.find((e) => e.name === nfName(kind));
   const state = (kind) => { const eo = eoOf(kind); return !eo ? "absent" : eo.alive ? "running" : "faulted"; };
   const ask = (kind, path) => state(kind) === "running" ? nfGet(kind, path).catch(() => null) : Promise.resolve(null);
-  const [gnbs, ues, sessions, dnns, subscribers, policies] = await Promise.all([
+  const [gnbs, ues, sessions, dnns, subscribers, policies, traffic] = await Promise.all([
     ask("amf", "gnbs"), ask("amf", "ues"), ask("smf", "sessions"), ask("smf", "dnns"),
-    ask("udm", "subscribers"), ask("pcf", "policies"),
+    ask("udm", "subscribers"), ask("pcf", "policies"), ask("upf", "gnbs"),
   ]);
   const registered = ues ? ues.registered + ues.idle : 0;
   const ausf = eoOf("ausf");
@@ -216,6 +217,7 @@ const refreshOverview = () => view("nf-table", async () => {
   setBox("dn", dnns && dnns.length ? "running" : "absent", dnns ? plural(dnns.length, "DNN") : "", "");
   notes("dn", (dnns || []).map((d) => `${d.dnn} ${d.pool}: ${plural(d.sessions, "session")}`));
   renderPicked();
+  await renderCards(gnbs || [], gnbRates(traffic || []));
 });
 
 function pick(id) {
@@ -240,6 +242,76 @@ function renderPicked() {
   $("nf-text").innerHTML = esc(b.text) + (b.go ? ` <a href="#${b.go}">See the ${b.go === "ues" ? "UEs" : "provisioning"}.</a>` : "");
   if (eo) renderEos([eo], $("nf-table"));
   else $("nf-table").innerHTML = "";
+}
+
+/* ---- Overview: a card per gNB, its UEs by cell. ---- */
+
+// Each gNB's throughput (Mbit/s), from the UPF's counters per gNB key.
+let trafficBefore = { at: 0, by: {} };
+function gnbRates(traffic) {
+  const now = performance.now();
+  const dt = trafficBefore.at ? (now - trafficBefore.at) / 1000 : 0;
+  const out = {};
+  for (const t of traffic) {
+    const before = trafficBefore.by[t.gnb];
+    if (before && dt > 0) {
+      const mbps = (k) => Math.max(0, (t[k] - before[k]) * 8 / 1e6 / dt);
+      out[t.gnb] = { up: mbps("uplink_bytes"), down: mbps("downlink_bytes") };
+    }
+  }
+  trafficBefore = { at: now, by: Object.fromEntries(traffic.map((t) => [t.gnb, t])) };
+  return out;
+}
+
+const ANTENNA = `<svg class="antenna" viewBox="0 0 40 48" aria-hidden="true"><path d="M20 14 L10 46 M20 14 L30 46 M13 34 H27"/>
+  <path d="M26 8 a8 8 0 0 1 0 12 M30 4 a13 13 0 0 1 0 20 M14 8 a8 8 0 0 0 0 12 M10 4 a13 13 0 0 0 0 20"/></svg>`;
+const RRC = { connected: "ok", inactive: "warn", idle: "muted" };
+const shown = {};
+
+// Writes `html` into `el` only when it changed: lists keep their scroll.
+function put(el, html) {
+  if (shown[el.id] !== html) {
+    el.innerHTML = html;
+    shown[el.id] = html;
+  }
+}
+
+async function renderCards(gnbs, speeds) {
+  const box = $("gnb-cards");
+  // One card per gNB, kept across refreshes (its lists keep their scroll).
+  for (const el of [...box.children]) if (!gnbs.some((g) => String(g.assoc) === el.dataset.assoc)) el.remove();
+  for (const g of gnbs) {
+    if (!box.querySelector(`[data-assoc="${g.assoc}"]`)) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.dataset.assoc = g.assoc;
+      card.innerHTML = `<div class="card-head" id="gnb-head-${g.assoc}"></div><div class="cells" id="gnb-cells-${g.assoc}"></div>`;
+      box.appendChild(card);
+    }
+    const speed = speeds[g.key];
+    put($(`gnb-head-${g.assoc}`), `${ANTENNA}<div class="who"><b>${esc(g.name || g.id || "association " + g.assoc)}</b>` +
+      `<div class="muted">${esc(g.id ?? "not set up")} · ${esc(g.tas.join(", "))}</div></div>` +
+      `<div class="counts"><span class="ok">${g.connected} connected</span><span class="warn">${g.inactive} inactive</span>` +
+      `<span class="muted">${g.idle} idle</span>` +
+      `<span class="speed">${speed ? `↑ ${num(speed.up, 2)} ↓ ${num(speed.down, 2)} Mbit/s` : ""}</span></div>`);
+  }
+  // Each gNB's UEs by cell, one request after another (the AMF takes four at once).
+  for (const g of gnbs) {
+    const ues = await nfGet("amf", `ues?gnb=${g.assoc}`).catch(() => null);
+    if (!ues) continue;
+    const byCell = {};
+    for (const u of ues.ues) (byCell[u.cell ?? "unknown"] ||= []).push(u);
+    const cells = g.cells.map((c) => {
+      const list = (byCell[c.cell ?? "unknown"] || []).map((u) =>
+        `<li><a href="#ues/${encodeURIComponent(u.supi ?? "")}">${esc(u.supi ?? "unknown yet")}</a>` +
+        ` <span class="${RRC[u.rrc] || ""}">${esc(u.rrc)}</span></li>`).join("");
+      return `<div class="cell"><div class="cell-head"><b>Cell ${esc(c.cell ?? "unknown")}</b>` +
+        `<span class="counts"><span class="ok">${c.connected}</span> / <span class="warn">${c.inactive}</span> / ` +
+        `<span class="muted">${c.idle}</span></span></div><ul>${list}</ul></div>`;
+    });
+    const rest = ues.count > ues.ues.length ? `<p class="muted">${ues.count - ues.ues.length} more UEs not listed</p>` : "";
+    put($(`gnb-cells-${g.assoc}`), (cells.join("") || `<p class="muted">no UE</p>`) + rest);
+  }
 }
 
 /* ---- UEs: gNBs, UEs, one UE's details, PDU sessions. ---- */

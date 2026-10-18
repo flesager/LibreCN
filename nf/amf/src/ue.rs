@@ -45,6 +45,8 @@ pub struct UeContext {
     /// SCTP stream for this UE's signalling (never 0, kept for non-UE signalling).
     pub stream: u16,
     pub location: Option<Location>,
+    /// The gNB reported the UE in RRC_INACTIVE (CM-CONNECTED still).
+    pub inactive: bool,
     /// A UE Context Release Command was sent; waiting for the Complete.
     pub releasing: bool,
     /// The gNB answered Initial Context Setup: later NAS goes in DL NAS Transport.
@@ -113,6 +115,7 @@ impl UeTable {
             assoc,
             stream,
             location: None,
+            inactive: false,
             releasing: false,
             context_ready: false,
             mm: Mm::default(),

@@ -20,6 +20,17 @@ impl RanNodeId {
             RanNodeId::Other => 0,
         }
     }
+
+    /// Whether NR cell `cell` (PLMN, 36-bit NR Cell Identity) is one of
+    /// this gNB's: its identity starts with the gNB ID (TS 38.300 §8.2).
+    pub fn has_cell(&self, cell: (Plmn, u64)) -> bool {
+        match *self {
+            RanNodeId::Gnb { plmn, id, bits } => {
+                plmn == cell.0 && (22..=32).contains(&bits) && cell.1 >> (36 - u32::from(bits)) == u64::from(id)
+            }
+            RanNodeId::Other => false,
+        }
+    }
 }
 
 impl std::fmt::Display for RanNodeId {
@@ -74,6 +85,18 @@ mod tests {
             name: Some("gnb".into()),
             tas: vec![SupportedTa { tac: [0, 0, 1], plmns: vec![(plmn, vec![Snssai { sst: 1, sd: None }])] }],
         }
+    }
+
+    #[test]
+    fn a_cell_belongs_to_the_gnb_its_identity_starts_with() {
+        let plmn = Plmn::new("999", "70").unwrap();
+        // UERANSIM: nci 0x000000010 with a 32-bit gNB ID is gNB 1, cell 0.
+        let gnb = RanNodeId::Gnb { plmn, id: 1, bits: 32 };
+        assert!(gnb.has_cell((plmn, 0x0_0000_0010)) && gnb.has_cell((plmn, 0x0_0000_001f)));
+        assert!(!gnb.has_cell((plmn, 0x0_0000_0020)), "gNB 2's");
+        assert!(!gnb.has_cell((Plmn::new("001", "01").unwrap(), 0x10)), "another PLMN");
+        let short = RanNodeId::Gnb { plmn, id: 5, bits: 22 };
+        assert!(short.has_cell((plmn, 5 << 14 | 0x3fff)) && !RanNodeId::Other.has_cell((plmn, 0)));
     }
 
     #[test]

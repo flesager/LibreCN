@@ -15,6 +15,8 @@ pub struct Session {
     pub ul_teid: u32,
     /// The PCF's policy: the extra QoS flows, the rates.
     pub qos: Qos,
+    /// Its gNB's slot in the UPF's traffic per gNB, once known.
+    pub gnb: Option<u16>,
     /// The gNB's GTP-U endpoint and TEID, once known.
     pub dl: Option<(SocketAddrV4, u32)>,
     /// When downlink data without a tunnel was last reported to the SMF.
@@ -82,6 +84,7 @@ impl Sessions {
             ue_ip,
             ul_teid,
             qos: Qos::new(rule),
+            gnb: None,
             dl: None,
             reported: None,
         }))
@@ -102,6 +105,10 @@ impl Sessions {
 
     pub fn get(&self, seid: u64) -> Option<&Session> {
         self.by_seid.get(&seid)
+    }
+
+    pub fn get_mut(&mut self, seid: u64) -> Option<&mut Session> {
+        self.by_seid.get_mut(&seid)
     }
 
     /// The session an uplink G-PDU with `teid` belongs to.
