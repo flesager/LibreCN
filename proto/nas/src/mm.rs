@@ -450,12 +450,34 @@ impl Eap {
     }
 }
 
-/// A network name (TS 24.008 §10.5.3.5a), coded in UCS-2: no country
-/// initials, no spare bits.
+/// A network name (TS 24.008 §10.5.3.5a), no country initials: in the GSM
+/// 7-bit default alphabet (TS 23.038 §6.2.1), packed, when each character
+/// has the same code there as in ASCII (letters, digits, space, most
+/// punctuation: not `$`, `@`, brackets); in UCS-2 otherwise. Most cores
+/// send 7-bit names, and some UEs read no other (free5GC's NAS library).
 fn network_name(name: &str, w: &mut Writer<'_>) {
-    w.u8(0x90);
-    for unit in name.encode_utf16() {
-        w.bytes(&unit.to_be_bytes());
+    let gsm = |b: u8| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b' ' | b'!'..=b'#' | b'%'..=b'?');
+    if name.is_empty() || !name.bytes().all(gsm) {
+        w.u8(0x90); // UCS-2, no spare bits
+        for unit in name.encode_utf16() {
+            w.bytes(&unit.to_be_bytes());
+        }
+        return;
+    }
+    // Coding scheme 000, then the septets packed from the low bits up; the
+    // last octet's spare bits counted in the first.
+    w.u8(0x80 | ((8 - name.len() * 7 % 8) % 8) as u8);
+    let (mut bits, mut held) = (0u32, 0u32);
+    for b in name.bytes() {
+        bits |= u32::from(b) << held;
+        held += 7;
+        while held >= 8 {
+            w.u8(bits as u8);
+            (bits, held) = (bits >> 8, held - 8);
+        }
+    }
+    if held > 0 {
+        w.u8(bits as u8);
     }
 }
 
@@ -675,8 +697,15 @@ mod tests {
             full_name: Some("LibreCN"),
             short_name: Some("LC"),
         };
-        let full = "004c 0069 0062 0072 0065 0043 004e".replace(' ', "");
-        assert_eq!(encode(names, &mut buf), h(&format!("7e0054 d0 430f90{full} 4505 90004c0043")), "UCS-2 names");
+        assert_eq!(encode(names, &mut buf), h("7e0054 d0 4308 87ccb4585e1e3a01 4503 82cc21"), "GSM 7-bit names");
+        let accented = Downlink::ConfigurationUpdateCommand {
+            acknowledge: false,
+            guti: None,
+            full_name: Some("Réseau"),
+            short_name: Some("R@"),
+        };
+        let full = "0052 00e9 0073 0065 0061 0075".replace(' ', "");
+        assert_eq!(encode(accented, &mut buf), h(&format!("7e0054 d0 430d90{full} 4505 9000520040")), "UCS-2 names");
         assert_eq!(encode(Downlink::DeregistrationRequest { reregister: true }, &mut buf), "7e004705");
         assert_eq!(encode(Downlink::DeregistrationRequest { reregister: false }, &mut buf), "7e004701");
         assert_eq!(

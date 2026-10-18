@@ -1283,7 +1283,7 @@ mod tests {
         mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
         let names = ue.open(&fx.sent.pop().unwrap(), 3);
         assert_eq!(names[..4], hex("7e0054d0")[..], "Configuration Update Command, no acknowledgement");
-        assert!(names.ends_with(&hex("4505 90004c0043")), "the short name");
+        assert!(names.ends_with(&hex("4503 82cc21")), "the short name, in the GSM 7-bit alphabet");
         assert!(!fx.timer, "nothing to wait for");
 
         let old = mm.tmsi();
