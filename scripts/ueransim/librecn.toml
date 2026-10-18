@@ -40,6 +40,12 @@ ue_ambr_mbps = { uplink = 100, downlink = 500 }
 [[nf.params.policies.sessions]]
 dnn = "internet"
 ambr_mbps = { uplink = 50, downlink = 200 }
+[[nf.params.policies.sessions.flows]]  # a GBR voice flow: QoS rule, GFBR and MFBR to the UE and the gNB
+five_qi = 1
+arp = 2
+mbr_mbps = { uplink = 1, downlink = 1 }
+gbr_mbps = { uplink = 1, downlink = 1 }
+filters = [{ remote = "10.10.0.0/16", protocol = 17, remote_ports = "5060-5061" }]
 
 [[nf]]
 kind = "smf"

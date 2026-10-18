@@ -5,7 +5,9 @@
 # UERANSIM's UE read AT_KDF), NAS security mode, Registration Accept
 # in Initial Context Setup and Complete; it then establishes its PDU session
 # (SMF, UPF, PDU Session Resource Setup; the PCF gives the UE-AMBR and the
-# session AMBR of its subscriber), and a second one on the second DNN
+# session AMBR of its subscriber, and a GBR voice flow: its QoS rule and
+# flow description to the UE, its GBR information to the gNB), and a second
+# one on the second DNN
 # (ims; both in ue.yaml: on the host, UERANSIM's UE bars its own nr-cli
 # ps-establish, its RRC thread missing the 100 ms UAC check). The UE gets the
 # network's names, then a new 5G-GUTI (POST on the AMF's web API, a
@@ -84,7 +86,7 @@ grep -q "Initial Registration is successful" "$out/ue.log" \
   && grep -q "AMF configuration update received" "$out/gnb.log" \
   && grep -q "AMF Configuration Update acknowledged" "$out/core.log" \
   && grep -q "AM policy, UE-AMBR 100 / 500 Mbit/s" "$out/core.log" \
-  && grep -q "SM policy for PDU session 1 to internet: 5QI 9, ARP 8, AMBR 50 / 200 Mbit/s" "$out/core.log" \
+  && grep -q "SM policy for PDU session 1 to internet: 5QI 9, ARP 8, AMBR 50 / 200 Mbit/s, 1 extra flow(s)" "$out/core.log" \
   && grep -q "new UE-AMBR 50 / 200 Mbit/s, to its gNB" "$out/core.log" \
   && grep -q "UE Context Modification Request received" "$out/gnb.log" \
   && grep -q "UE Context Modification done" "$out/core.log" \

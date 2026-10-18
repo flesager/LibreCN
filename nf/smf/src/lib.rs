@@ -212,7 +212,7 @@ impl Smf {
         c.rule = Some(result.rule);
         let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
             let mut m = ctx.alloc::<N4Establish>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
-            *m = N4Establish::new(u64::from(id), ue_ip.octets());
+            *m = N4Establish::new(u64::from(id), ue_ip.octets(), result.rule);
             ctx.send(m)
         });
         if let Err(e) = sent {
@@ -248,7 +248,11 @@ impl Smf {
                 return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });
             }
         };
-        let n1 = session::accept(&self.config, psi, pti, slice, dnn, ue_ip, &rule);
+        let Some(n1) = session::accept(&self.config, psi, pti, slice, dnn, ue_ip, &rule) else {
+            log!(self.log, ctx, Error, "{supi}: the PCF's rules do not fit in a PDU Session Establishment Accept");
+            self.remove(ctx, id);
+            return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });
+        };
         log!(
             self.log,
             ctx,
@@ -501,14 +505,7 @@ impl Smf {
 /// The PDU Session Resource Setup Request Transfer for the UPF's tunnel `n3`
 /// and the PCF's `rule`.
 fn setup_transfer(n3: (Ipv4Addr, u32), rule: &SessionRule) -> Result<Vec<u8>, String> {
-    n2sm::setup_request_transfer(&n2sm::Setup {
-        upf: n3.0,
-        teid: n3.1,
-        qfi: session::DEFAULT_QFI,
-        five_qi: rule.five_qi,
-        arp: rule.arp,
-        ambr_bps: (rule.ambr.uplink, rule.ambr.downlink),
-    })
+    n2sm::setup_request_transfer(n3.0, n3.1, rule)
 }
 
 impl ExecutionObject for Smf {

@@ -28,7 +28,10 @@
 //! ```
 //!
 //! What an entry leaves out comes from the `default` one, then from the
-//! built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way.
+//! built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way. Flows are kept in
+//! precedence order (unique, below the default rule's 255); each becomes a
+//! QoS flow of the session (QFI 2 on), the UPF taking the first whose
+//! filters match a downlink packet.
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -224,7 +227,15 @@ fn session(s: &SessionParams, base: Option<&SessionRule>) -> Result<SessionPolic
         }
         let filters = f.filters.iter().map(filter).collect::<Result<Vec<_>, _>>()?;
         r.set_filters(&filters);
+        if r.precedence == u8::MAX {
+            return Err(format!("{what}: precedence 255 is the default rule's"));
+        }
         rules.push(r);
+    }
+    // In evaluation order: the UPF takes the first rule matching a packet.
+    rules.sort_by_key(|r| r.precedence);
+    if let Some(twice) = rules.windows(2).find(|w| w[0].precedence == w[1].precedence) {
+        return Err(format!("two flows with precedence {}", twice[0].precedence));
     }
     rule.set_rules(&rules);
     Ok(SessionPolicy { dnn: s.dnn.clone(), rule })
@@ -401,6 +412,22 @@ mod tests {
             bad(serde_json::json!({ "flows": [five.clone(), five.clone(), five.clone(), five.clone(), five] }))
                 .contains("4 at most")
         );
+        let same = serde_json::json!({ "five_qi": 9, "precedence": 5, "filters": filters });
+        assert!(bad(serde_json::json!({ "flows": [same.clone(), same] })).contains("two flows with precedence 5"));
+        let last = serde_json::json!({ "five_qi": 9, "precedence": 255, "filters": filters });
+        assert!(bad(serde_json::json!({ "flows": [last] })).contains("the default rule's"));
         assert!(parse(serde_json::json!({ "policies": [{ "supi": "nai-x" }] })).unwrap_err().contains("imsi-"));
+    }
+
+    #[test]
+    fn flows_are_kept_in_precedence_order() {
+        let flow = |precedence: u8, protocol: u8| serde_json::json!({ "five_qi": 9, "precedence": precedence, "filters": [{ "protocol": protocol }] });
+        let p = parse(
+            serde_json::json!({ "default": { "sessions": [{ "flows": [flow(30, 6), flow(10, 17), flow(20, 1)] }] } }),
+        )
+        .unwrap();
+        let rules = p.default.session("internet").unwrap().rules();
+        let order: Vec<_> = rules.iter().map(|r| (r.precedence, r.filters()[0].protocol)).collect();
+        assert_eq!(order, [(10, 17), (20, 1), (30, 6)]);
     }
 }

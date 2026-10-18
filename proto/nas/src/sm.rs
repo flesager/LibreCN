@@ -116,11 +116,38 @@ impl SmUplink {
     }
 }
 
-/// The default QoS flow of an accepted session.
+/// A packet filter of a QoS rule (§9.11.4.13), seen from the UE ("remote"
+/// is the other end). Zeros match anything.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PacketFilter {
+    /// 1 downlink, 2 uplink, 3 both.
+    pub direction: u8,
+    /// IP protocol; 0: any.
+    pub protocol: u8,
+    /// Remote IPv4 address and prefix length; length 0: any.
+    pub remote: ([u8; 4], u8),
+    /// First and last port; 0, 0: any.
+    pub remote_ports: [u16; 2],
+    pub local_ports: [u16; 2],
+}
+
+/// Guaranteed and maximum flow bit rates of a GBR flow, in bit/s: uplink, downlink.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QosFlow {
+pub struct FlowRates {
+    pub gfbr: (u64, u64),
+    pub mfbr: (u64, u64),
+}
+
+/// A QoS flow of an accepted session, with its QoS rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QosFlow<'a> {
     pub qfi: u8,
     pub five_qi: u8,
+    /// GBR flows only.
+    pub gbr: Option<FlowRates>,
+    /// The rule's precedence (lowest first) and packet filters.
+    pub precedence: u8,
+    pub filters: &'a [PacketFilter],
 }
 
 /// The downlink 5GSM messages the SMF sends.
@@ -130,9 +157,12 @@ pub enum SmDownlink<'a> {
         /// IPv4 address of the UE.
         address: [u8; 4],
         ssc_mode: u8,
-        flow: QosFlow,
-        /// Session AMBR in Mbit/s: uplink, downlink.
-        ambr_mbps: (u16, u16),
+        /// The first is the default flow: its rule is the default QoS
+        /// rule (match-all, precedence 255), its filters and precedence
+        /// unused.
+        flows: &'a [QosFlow<'a>],
+        /// Session AMBR in bit/s: uplink, downlink.
+        ambr: (u64, u64),
         snssai: Snssai,
         dnn: &'a str,
     },
@@ -151,8 +181,50 @@ pub enum SmDownlink<'a> {
     },
 }
 
-/// Unit of the session AMBR values (§9.11.4.14): 1 Mbit/s.
-const AMBR_UNIT_MBPS: u8 = 0x06;
+/// A bit rate as session AMBR (§9.11.4.14) and flow bit rates (§9.11.4.12)
+/// carry it: a unit, then 16 bits. In Mbit/s from 1 Mbit/s on, else kbit/s.
+fn bit_rate(bps: u64) -> [u8; 3] {
+    const KBPS: u8 = 0x01;
+    const MBPS: u8 = 0x06;
+    let (unit, value) = if bps >= 1_000_000 { (MBPS, bps / 1_000_000) } else { (KBPS, (bps / 1000).max(1)) };
+    let [hi, lo] = (value.min(u64::from(u16::MAX)) as u16).to_be_bytes();
+    [unit, hi, lo]
+}
+
+/// A QoS rule's packet filter `id` (§9.11.4.13): its components.
+fn encode_filter(w: &mut Writer<'_>, id: u8, f: &PacketFilter) {
+    w.u8((f.direction & 0x03) << 4 | id & 0x0f);
+    w.lv(|w| {
+        let any = f.protocol == 0 && f.remote.1 == 0 && f.remote_ports == [0, 0] && f.local_ports == [0, 0];
+        if any {
+            return w.u8(0x01); // match-all
+        }
+        if f.remote.1 > 0 {
+            let mask = u32::MAX.checked_shl(32 - u32::from(f.remote.1.min(32))).unwrap_or(0);
+            w.u8(0x10); // IPv4 remote address
+            w.bytes(&f.remote.0);
+            w.bytes(&mask.to_be_bytes());
+        }
+        if f.protocol != 0 {
+            w.bytes(&[0x30, f.protocol]);
+        }
+        // Single port (0x40, 0x50) or range (0x41, 0x51).
+        for (ports, single) in [(f.local_ports, 0x40), (f.remote_ports, 0x50)] {
+            match ports {
+                [0, 0] => {}
+                [first, last] if first == last => {
+                    w.u8(single);
+                    w.bytes(&first.to_be_bytes());
+                }
+                [first, last] => {
+                    w.u8(single + 1);
+                    w.bytes(&first.to_be_bytes());
+                    w.bytes(&last.to_be_bytes());
+                }
+            }
+        }
+    });
+}
 
 impl SmDownlink<'_> {
     pub fn kind(&self) -> u8 {
@@ -171,29 +243,57 @@ impl SmDownlink<'_> {
         let mut w = Writer::new(out);
         w.bytes(&[EPD_5GSM, pdu_session_id, pti, self.kind()]);
         match *self {
-            SmDownlink::EstablishmentAccept { address, ssc_mode, flow, ambr_mbps, snssai, dnn } => {
+            SmDownlink::EstablishmentAccept { address, ssc_mode, flows, ambr, snssai, dnn } => {
                 w.u8(ssc_mode << 4 | crate::sm::session_type::IPV4);
-                // Authorized QoS rules (§9.11.4.13): the default rule, one
-                // match-all packet filter, to the default flow.
+                // Authorized QoS rules (§9.11.4.13), one per flow, rule
+                // identifiers from 1: the default rule (DQR) with one
+                // match-all filter, then the flows' own.
                 w.lve(|w| {
-                    w.u8(1); // QoS rule identifier
-                    w.bytes(&6u16.to_be_bytes());
-                    w.u8(0x31); // create new rule, default (DQR), one packet filter
-                    w.bytes(&[0x31, 0x01, 0x01]); // bidirectional filter 1: match-all
-                    w.u8(0xff); // precedence
-                    w.u8(flow.qfi & 0x3f);
+                    for (i, flow) in flows.iter().enumerate() {
+                        w.u8(i as u8 + 1);
+                        w.lve(|w| {
+                            const CREATE: u8 = 0x20;
+                            const DQR: u8 = 0x10;
+                            if i == 0 {
+                                w.u8(CREATE | DQR | 1);
+                                encode_filter(w, 1, &PacketFilter { direction: 3, ..PacketFilter::default() });
+                                w.u8(0xff);
+                            } else {
+                                w.u8(CREATE | flow.filters.len() as u8 & 0x0f);
+                                for (id, f) in flow.filters.iter().enumerate() {
+                                    encode_filter(w, id as u8 + 1, f);
+                                }
+                                w.u8(flow.precedence);
+                            }
+                            w.u8(flow.qfi & 0x3f);
+                        });
+                    }
                 });
-                let [ul_hi, ul_lo] = ambr_mbps.0.to_be_bytes();
-                let [dl_hi, dl_lo] = ambr_mbps.1.to_be_bytes();
-                w.lv(|w| w.bytes(&[AMBR_UNIT_MBPS, dl_hi, dl_lo, AMBR_UNIT_MBPS, ul_hi, ul_lo]));
+                w.lv(|w| {
+                    w.bytes(&bit_rate(ambr.1));
+                    w.bytes(&bit_rate(ambr.0));
+                });
                 w.tlv(0x29, |w| {
                     w.u8(crate::sm::session_type::IPV4);
                     w.bytes(&address);
                 });
                 w.u8(0x22);
                 snssai.encode(&mut w);
-                // Authorized QoS flow descriptions (§9.11.4.12): the flow's 5QI.
-                w.tlve(0x79, |w| w.bytes(&[flow.qfi & 0x3f, 0x20, 0x41, 0x01, 0x01, flow.five_qi]));
+                // Authorized QoS flow descriptions (§9.11.4.12): each
+                // flow's 5QI, and a GBR flow's GFBR and MFBR.
+                w.tlve(0x79, |w| {
+                    for flow in flows {
+                        let parameters = if flow.gbr.is_some() { 5 } else { 1 };
+                        // Create new, E bit (parameters list included).
+                        w.bytes(&[flow.qfi & 0x3f, 0x20, 0x40 | parameters, 0x01, 0x01, flow.five_qi]);
+                        if let Some(FlowRates { gfbr, mfbr }) = flow.gbr {
+                            for (id, bps) in [(0x02, gfbr.0), (0x03, gfbr.1), (0x04, mfbr.0), (0x05, mfbr.1)] {
+                                w.bytes(&[id, 3]);
+                                w.bytes(&bit_rate(bps));
+                            }
+                        }
+                    }
+                });
                 w.tlv(0x25, |w| Dnn::encode(dnn, w));
             }
             SmDownlink::EstablishmentReject { cause }
@@ -232,8 +332,8 @@ mod tests {
         let accept = SmDownlink::EstablishmentAccept {
             address: [10, 45, 0, 2],
             ssc_mode: 1,
-            flow: QosFlow { qfi: 1, five_qi: 9 },
-            ambr_mbps: (100, 1000),
+            flows: &[QosFlow { qfi: 1, five_qi: 9, gbr: None, precedence: 0, filters: &[] }],
+            ambr: (100_000_000, 1_000_000_000),
             snssai: Snssai { sst: 1, sd: None },
             dnn: "internet",
         };
@@ -247,5 +347,54 @@ mod tests {
         assert_eq!(buf[..n], hex("2e0503c31b")[..]);
         let n = SmDownlink::ReleaseCommand { cause: cause::REGULAR_DEACTIVATION }.encode(1, 0, &mut buf).unwrap();
         assert_eq!(buf[..n], hex("2e0100d324")[..], "network-requested: PTI 0");
+    }
+
+    /// An extra GBR flow: its rule's filter components (§9.11.4.13) and its
+    /// GFBR and MFBR (§9.11.4.12).
+    #[test]
+    fn an_extra_flow_gets_its_rule_and_description() {
+        let sip = PacketFilter {
+            direction: 3,
+            protocol: 17,
+            remote: ([10, 10, 0, 0], 16),
+            remote_ports: [5060, 5061],
+            ..PacketFilter::default()
+        };
+        let voice = QosFlow {
+            qfi: 2,
+            five_qi: 1,
+            gbr: Some(FlowRates { gfbr: (1_000_000, 1_000_000), mfbr: (2_000_000, 64_000) }),
+            precedence: 10,
+            filters: &[sip],
+        };
+        let flows = [QosFlow { qfi: 1, five_qi: 9, gbr: None, precedence: 0, filters: &[] }, voice];
+        let accept = SmDownlink::EstablishmentAccept {
+            address: [10, 45, 0, 2],
+            ssc_mode: 1,
+            flows: &flows,
+            ambr: (20_000_000, 100_000_000),
+            snssai: Snssai { sst: 1, sd: None },
+            dnn: "internet",
+        };
+        let mut buf = [0u8; 256];
+        let n = accept.encode(1, 1, &mut buf).unwrap();
+        let expected = hex("2e 01 01 c2 11 0021 \
+             01 0006 31 310101 ff 01 \
+             02 0015 21 31 10 100a0a0000ffff0000 3011 5113c413c5 0a 02 \
+             06 060064060014 29 05 01 0a2d0002 22 01 01 \
+             79 0020 012041010109 \
+             022045010101 0203060001 0303060001 0403060002 0503010040 \
+             25 09 08696e7465726e6574");
+        assert_eq!(buf[..n], expected[..]);
+
+        // Single ports, a whole address, and a filter matching anything.
+        let mut out = [0u8; 32];
+        let mut w = Writer::new(&mut out);
+        let one =
+            PacketFilter { direction: 1, remote: ([8, 8, 8, 8], 32), local_ports: [80, 80], ..PacketFilter::default() };
+        encode_filter(&mut w, 2, &one);
+        encode_filter(&mut w, 3, &PacketFilter { direction: 2, ..PacketFilter::default() });
+        let n = w.finish().unwrap();
+        assert_eq!(out[..n], hex("12 0c 10 08080808 ffffffff 400050  23 01 01")[..]);
     }
 }

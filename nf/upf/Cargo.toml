@@ -12,6 +12,7 @@ librecn-common = { path = "../../common" }
 librecn-gtpu = { path = "../../proto/gtpu" }
 librecn-sbi = { path = "../../proto/sbi" }
 libc.workspace = true
+zerocopy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

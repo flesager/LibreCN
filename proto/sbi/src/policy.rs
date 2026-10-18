@@ -11,8 +11,11 @@
 //! ```
 //!
 //! A session rule gives the session AMBR and the default QoS flow's 5QI and
-//! ARP; each PCC rule an extra QoS flow, its packet filters and bit rates.
-//! A changed SM policy applies to the sessions set up after it.
+//! ARP; each PCC rule an extra QoS flow, its packet filters and bit rates,
+//! the rules in precedence order. The default flow is QFI [`DEFAULT_QFI`],
+//! rule `i`'s flow QFI [`rule_qfi`]`(i)`: the SMF, the gNB (through N2), the
+//! UE (N1) and the UPF (N4) agree on them. A changed SM policy applies to
+//! the sessions set up after it.
 
 use librecn_common::msg::{family, id};
 use librecn_scheduler::MsgBody;
@@ -25,6 +28,13 @@ use crate::{DnnText, Outcome, Supi};
 pub const MAX_RULES: usize = 4;
 /// Packet filters per PCC rule, at most.
 pub const MAX_FILTERS: usize = 4;
+/// The QoS flow of a session's default rule.
+pub const DEFAULT_QFI: u8 = 1;
+
+/// The QoS flow of a session's PCC rule `i`.
+pub const fn rule_qfi(i: usize) -> u8 {
+    DEFAULT_QFI + 1 + i as u8
+}
 
 /// Bit rates in bit/s.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable)]

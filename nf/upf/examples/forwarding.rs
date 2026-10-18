@@ -121,8 +121,9 @@ impl Bench {
         let gnb = UdpSocket::bind((GNB, librecn_gtpu::PORT)).expect("127.0.0.81:2152 free");
 
         let ue = |i: usize| (FIRST_UE + i as u32).to_be_bytes();
+        let rule = <librecn_sbi::policy::SessionRule as zerocopy::FromZeros>::new_zeroed();
         for i in 0..ues {
-            inject(&runtime, smf, upf, &N4Establish::new(i as u64 + 1, ue(i)));
+            inject(&runtime, smf, upf, &N4Establish::new(i as u64 + 1, ue(i), rule));
         }
         let deadline = Instant::now() + Duration::from_secs(5);
         let ul_teids: HashMap<u64, u32> = loop {

@@ -5,16 +5,14 @@
 use std::net::Ipv4Addr;
 
 use librecn_nas::Snssai;
-use librecn_nas::sm::{QosFlow, SmDownlink, SmUplink, cause, session_type};
-
-use librecn_sbi::policy::SessionRule;
+use librecn_nas::sm::{FlowRates, PacketFilter, QosFlow, SmDownlink, SmUplink, cause, session_type};
+use librecn_sbi::pdu_session::CONTAINER;
+use librecn_sbi::policy::{DEFAULT_QFI, MAX_FILTERS, MAX_RULES, SessionRule, rule_qfi};
 
 use crate::config::SmfConfig;
 
-/// The default QoS flow's identifier.
-pub const DEFAULT_QFI: u8 = 1;
-/// Largest N1 answer.
-pub const N1_MAX: usize = 128;
+/// Largest N1 answer: what a container carries.
+pub const N1_MAX: usize = CONTAINER;
 
 /// An accepted request: what the answer needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,14 +63,10 @@ pub fn decide(
     Ok(Accepted { pti: header.pti, dnn })
 }
 
-/// A bit rate in Mbit/s as NAS carries it (16 bits, 1 at least).
-fn mbps(bps: u64) -> u16 {
-    (bps / 1_000_000).clamp(1, u64::from(u16::MAX)) as u16
-}
-
 /// PDU Session Establishment Accept: IPv4 `address` on DNN `dnn` (an index
-/// in the configuration's), SSC mode 1, the default flow and the session
-/// AMBR of the PCF's `rule`.
+/// in the configuration's), SSC mode 1, the PCF's `rule`: the session AMBR,
+/// the default flow, and a flow per PCC rule. None if it does not fit in
+/// [`N1_MAX`] (the most filters with every field).
 pub fn accept(
     config: &SmfConfig,
     pdu_session_id: u8,
@@ -81,18 +75,44 @@ pub fn accept(
     dnn: usize,
     address: Ipv4Addr,
     rule: &SessionRule,
-) -> Vec<u8> {
+) -> Option<Vec<u8>> {
+    let mut filters = [[PacketFilter::default(); MAX_FILTERS]; MAX_RULES];
+    for (mine, pcc) in filters.iter_mut().zip(rule.rules()) {
+        for (f, p) in mine.iter_mut().zip(pcc.filters()) {
+            *f = PacketFilter {
+                direction: p.direction,
+                protocol: p.protocol,
+                remote: (p.remote, p.remote_prefix),
+                remote_ports: p.remote_ports,
+                local_ports: p.local_ports,
+            };
+        }
+    }
+    let default = QosFlow { qfi: DEFAULT_QFI, five_qi: rule.five_qi, gbr: None, precedence: 0, filters: &[] };
+    let mut flows = [default; 1 + MAX_RULES];
+    for (i, pcc) in rule.rules().iter().enumerate() {
+        flows[1 + i] = QosFlow {
+            qfi: rule_qfi(i),
+            five_qi: pcc.five_qi,
+            gbr: (!pcc.gbr.is_zero()).then_some(FlowRates {
+                gfbr: (pcc.gbr.uplink, pcc.gbr.downlink),
+                mfbr: (pcc.mbr.uplink, pcc.mbr.downlink),
+            }),
+            precedence: pcc.precedence,
+            filters: &filters[i][..pcc.filters().len()],
+        };
+    }
     let mut out = [0u8; N1_MAX];
     let accept = SmDownlink::EstablishmentAccept {
         address: address.octets(),
         ssc_mode: 1,
-        flow: QosFlow { qfi: DEFAULT_QFI, five_qi: rule.five_qi },
-        ambr_mbps: (mbps(rule.ambr.uplink), mbps(rule.ambr.downlink)),
+        flows: &flows[..1 + rule.rules().len()],
+        ambr: (rule.ambr.uplink, rule.ambr.downlink),
         snssai: slice,
         dnn: &config.dnns[dnn].dnn,
     };
-    let n = accept.encode(pdu_session_id, pti, &mut out).expect("an accept fits in 128 bytes");
-    out[..n].to_vec()
+    let n = accept.encode(pdu_session_id, pti, &mut out).ok()?;
+    Some(out[..n].to_vec())
 }
 
 /// PDU Session Release Command, cause #36 (regular deactivation).
@@ -130,11 +150,13 @@ mod tests {
         (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
     }
 
+    use librecn_sbi::policy::{self, PccRule};
+    use zerocopy::FromZeros;
+
     const SST1: Snssai = Snssai { sst: 1, sd: None };
 
     /// The PCF's rule: 5QI 9, 100 Mbit/s up, 1000 down.
     fn rule() -> SessionRule {
-        use zerocopy::FromZeros;
         let mut r = SessionRule::new_zeroed();
         (r.five_qi, r.arp) = (9, 8);
         r.ambr = librecn_sbi::policy::Rates { uplink: 100_000_000, downlink: 1_000_000_000 };
@@ -162,8 +184,29 @@ mod tests {
         assert_eq!(reject(1, Refused { pti: 7, cause: 27 }), hex("2e0107c31b"));
         assert_eq!(release_command(1, 0), hex("2e0100d324"));
         assert_eq!(modification_reject(1, 3), hex("2e0103ca1f"));
-        assert_eq!(accept(&c, 1, 7, SST1, 0, Ipv4Addr::new(10, 45, 0, 2), &rule())[..5], hex("2e0107c211")[..]);
-        let ims = accept(&c, 1, 7, SST1, 1, Ipv4Addr::new(10, 46, 0, 2), &rule());
+        let accept = |dnn, rule: &SessionRule| accept(&c, 1, 7, SST1, dnn, Ipv4Addr::new(10, 45, 0, 2), rule);
+        assert_eq!(accept(0, &rule()).unwrap()[..5], hex("2e0107c211")[..]);
+        let ims = accept(1, &rule()).unwrap();
         assert!(ims.ends_with(&hex("25 04 03696d73")), "DNN ims in the accept");
+
+        // A PCC rule: QoS rule 2 to flow 2, its filter, its description.
+        let mut with_flow = rule();
+        let mut pcc = PccRule::new_zeroed();
+        (pcc.five_qi, pcc.arp, pcc.precedence) = (7, 8, 10);
+        pcc.set_filters(&[policy::PacketFilter::new(1, 1, ([10, 45, 0, 1], 32), [0, 0], [0, 0])]);
+        with_flow.set_rules(&[pcc]);
+        let n1 = accept(0, &with_flow).unwrap();
+        let rule2 = hex("02 0010 21 11 0b 10 0a2d0001 ffffffff 3001 0a 02");
+        assert!(n1.windows(rule2.len()).any(|w| w == rule2), "the rule: ICMP from 10.45.0.1, downlink");
+        assert!(n1.windows(6).any(|w| w == hex("022041010107")), "flow 2, 5QI 7");
+
+        // Every filter with every field, on GBR flows: too big for a container.
+        let mut big = PccRule::new_zeroed();
+        (big.five_qi, big.precedence) = (1, 1);
+        (big.gbr, big.mbr) = (rule().ambr, rule().ambr);
+        big.set_filters(&[policy::PacketFilter::new(3, 6, ([10, 0, 0, 0], 8), [1, 2], [3, 4]); MAX_FILTERS]);
+        let mut huge = rule();
+        huge.set_rules(&[big; MAX_RULES]);
+        assert_eq!(accept(0, &huge), None);
     }
 }

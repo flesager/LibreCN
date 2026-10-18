@@ -3,7 +3,8 @@
 # root for uesimtun0): the core in one container, UERANSIM's gNB and UE in
 # another. The UE registers, gets its two PDU sessions (DNNs internet and
 # ims), then pings the UPF's N6 addresses (10.45.0.1 through uesimtun0,
-# 10.46.0.1 through uesimtun1): GTP-U on N3, upf0 on N6. The gNB
+# 10.46.0.1 through uesimtun1): GTP-U on N3, upf0 on N6; the PCF puts the
+# answers from 10.45.0.1 on an extra QoS flow (docker/core.toml). The gNB
 # then releases the UE (idle): the next ping brings it back with a Service
 # Request, its session reactivated (UERANSIM may drop the packet that woke
 # it: one answer at least is expected). Released again, the UE is then
@@ -60,5 +61,7 @@ echo "$ping" | grep -q " 0% packet loss" \
   && echo "$core" | grep -q "registration from idle (Periodic)" \
   && [ "$(echo "$core" | grep -c "registered: imsi-999700000000001")" -ge 2 ] \
   && echo "$metrics" | grep -Eq 'counter="downlink_packets"} [1-9]' \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs, before and after idle; pinged while idle: paged; periodic registration" \
+  && echo "$metrics" | grep -Eq 'counter="extra_flow_packets"} [1-9]' \
+  && echo "$core" | grep -q "1 extra flow(s)" \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow), before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

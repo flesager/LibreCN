@@ -4,59 +4,67 @@
 use std::net::Ipv4Addr;
 
 use librecn_ngap::*;
+use librecn_sbi::policy::{DEFAULT_QFI, PccRule, SessionRule, rule_qfi};
 use rasn::types::{BitString, FixedOctetString, Integer};
 
-/// What the gNB needs to set up a session: the UPF's tunnel endpoint and
-/// the default flow.
-pub struct Setup {
-    pub upf: Ipv4Addr,
-    pub teid: u32,
-    pub qfi: u8,
-    pub five_qi: u8,
-    /// ARP priority level (1 to 15).
-    pub arp: u8,
-    /// Session AMBR in bit/s: uplink, downlink.
-    pub ambr_bps: (u64, u64),
-}
-
-/// PDU Session Resource Setup Request Transfer.
-pub fn setup_request_transfer(s: &Setup) -> Result<Vec<u8>, String> {
-    use AnonymousPDUSessionResourceSetupRequestTransferProtocolIEsCriticality::reject;
-    let ambr = PDUSessionAggregateMaximumBitRate::new(
-        BitRate(Integer::from(s.ambr_bps.1)),
-        BitRate(Integer::from(s.ambr_bps.0)),
-        None,
-    );
-    let tunnel = UPTransportLayerInformation::gTPTunnel(GTPTunnel::new(
-        TransportLayerAddress(BitString::from_slice(&s.upf.octets())),
-        GTPTEID(FixedOctetString::new(s.teid.to_be_bytes())),
-        None,
-    ));
+/// A QoS flow to set up: QFI, 5QI, ARP, and a GBR flow's PCC rule.
+fn flow(qfi: u8, five_qi: u8, arp: u8, gbr: Option<&PccRule>) -> QosFlowSetupRequestItem {
+    let rate = |bps: u64| BitRate(Integer::from(bps));
+    let gbr = gbr.map(|r| {
+        GBRQosInformation::new(
+            rate(r.mbr.downlink),
+            rate(r.mbr.uplink),
+            rate(r.gbr.downlink),
+            rate(r.gbr.uplink),
+            None,
+            None,
+            None,
+            None,
+        )
+    });
     let qos = QosFlowLevelQosParameters::new(
         QosCharacteristics::nonDynamic5QI(NonDynamic5QIDescriptor::new(
-            FiveQI(Integer::from(s.five_qi)),
+            FiveQI(Integer::from(five_qi)),
             None,
             None,
             None,
             None,
         )),
         AllocationAndRetentionPriority::new(
-            PriorityLevelARP(s.arp),
+            PriorityLevelARP(arp),
             PreEmptionCapability::shall_not_trigger_pre_emption,
             PreEmptionVulnerability::not_pre_emptable,
             None,
         ),
-        None,
+        gbr,
         None,
         None,
         None,
     );
-    let flows = QosFlowSetupRequestList(vec![QosFlowSetupRequestItem::new(
-        QosFlowIdentifier(Integer::from(s.qfi)),
-        qos,
+    QosFlowSetupRequestItem::new(QosFlowIdentifier(Integer::from(qfi)), qos, None, None)
+}
+
+/// PDU Session Resource Setup Request Transfer: the UPF's tunnel endpoint
+/// (`upf`, `teid`) and the PCF's `rule`: the session AMBR, the default flow
+/// first (UERANSIM's gNB marks every uplink packet with the first flow),
+/// then one per PCC rule.
+pub fn setup_request_transfer(upf: Ipv4Addr, teid: u32, rule: &SessionRule) -> Result<Vec<u8>, String> {
+    use AnonymousPDUSessionResourceSetupRequestTransferProtocolIEsCriticality::reject;
+    let ambr = PDUSessionAggregateMaximumBitRate::new(
+        BitRate(Integer::from(rule.ambr.downlink)),
+        BitRate(Integer::from(rule.ambr.uplink)),
         None,
+    );
+    let tunnel = UPTransportLayerInformation::gTPTunnel(GTPTunnel::new(
+        TransportLayerAddress(BitString::from_slice(&upf.octets())),
+        GTPTEID(FixedOctetString::new(teid.to_be_bytes())),
         None,
-    )]);
+    ));
+    let mut flows = vec![flow(DEFAULT_QFI, rule.five_qi, rule.arp, None)];
+    for (i, r) in rule.rules().iter().enumerate() {
+        flows.push(flow(rule_qfi(i), r.five_qi, r.arp, (!r.gbr.is_zero()).then_some(r)));
+    }
+    let flows = QosFlowSetupRequestList(flows);
     let ie = |id: ProtocolIEID, value: Result<Any, EncodeError>| {
         value
             .map(|v| AnonymousPDUSessionResourceSetupRequestTransferProtocolIEs::new(id.0, reject, v))
@@ -111,16 +119,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_request_transfer_carries_the_upf_tunnel_and_the_default_flow() {
-        let setup = Setup {
-            upf: Ipv4Addr::new(127, 0, 0, 2),
-            teid: 0x1234,
-            qfi: 1,
-            five_qi: 9,
-            arp: 8,
-            ambr_bps: (1_000_000, 2_000_000),
-        };
-        let bytes = setup_request_transfer(&setup).unwrap();
+    fn the_request_transfer_carries_the_upf_tunnel_and_the_flows() {
+        use librecn_sbi::policy::Rates;
+        use zerocopy::FromZeros;
+        let mut rule = SessionRule::new_zeroed();
+        (rule.five_qi, rule.arp, rule.ambr) = (9, 8, Rates { uplink: 1_000_000, downlink: 2_000_000 });
+        let mut voice = PccRule::new_zeroed();
+        (voice.five_qi, voice.arp) = (1, 2);
+        (voice.gbr, voice.mbr) =
+            (Rates { uplink: 64_000, downlink: 64_000 }, Rates { uplink: 128_000, downlink: 256_000 });
+        let mut video = PccRule::new_zeroed();
+        (video.five_qi, video.arp) = (7, 9);
+        rule.set_rules(&[voice, video]);
+        let bytes = setup_request_transfer(Ipv4Addr::new(127, 0, 0, 2), 0x1234, &rule).unwrap();
         let t: PDUSessionResourceSetupRequestTransfer = open(&Any::new(bytes)).unwrap();
         let ie = |id: ProtocolIEID| &t.protocol_ies.0.iter().find(|ie| ie.id == id.0).unwrap().value;
         let UPTransportLayerInformation::gTPTunnel(tunnel) = open(ie(ID_UL_NGU_UP_TNLINFORMATION)).unwrap() else {
@@ -130,7 +141,27 @@ mod tests {
         assert_eq!(*tunnel.g_tp_teid.0, [0, 0, 0x12, 0x34]);
         assert_eq!(open::<PDUSessionType>(ie(ID_PDUSESSION_TYPE)).unwrap(), PDUSessionType::ipv4);
         let flows: QosFlowSetupRequestList = open(ie(ID_QOS_FLOW_SETUP_REQUEST_LIST)).unwrap();
-        assert_eq!(flows.0[0].qos_flow_identifier.0, Integer::from(1));
+        let described: Vec<_> = flows
+            .0
+            .iter()
+            .map(|f| {
+                let q = &f.qos_flow_level_qos_parameters;
+                let QosCharacteristics::nonDynamic5QI(d) = &q.qos_characteristics else { panic!() };
+                let mbr_dl = q.g_br_qos_information.as_ref().map(|g| g.maximum_flow_bit_rate_dl.0.clone());
+                (
+                    f.qos_flow_identifier.0.clone(),
+                    d.five_qi.0.clone(),
+                    q.allocation_and_retention_priority.priority_level_arp.0,
+                    mbr_dl,
+                )
+            })
+            .collect();
+        let int = Integer::from;
+        assert_eq!(
+            described,
+            [(int(1), int(9), 8, None), (int(2), int(1), 2, Some(int(256_000))), (int(3), int(7), 9, None)],
+            "the default flow first, then one per PCC rule, GBR information for the GBR one"
+        );
         let ambr: PDUSessionAggregateMaximumBitRate = open(ie(ID_PDUSESSION_AGGREGATE_MAXIMUM_BIT_RATE)).unwrap();
         assert_eq!(ambr.p_dusession_aggregate_maximum_bit_rate_dl.0, Integer::from(2_000_000), "downlink first");
     }

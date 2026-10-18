@@ -31,6 +31,7 @@ use librecn_common::msg::{family, id};
 use librecn_scheduler::MsgBody;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
+use crate::policy::SessionRule;
 use crate::{DnnText, Outcome, Supi};
 
 /// Largest N1 or N2 container carried.
@@ -174,11 +175,13 @@ pub struct N4Establish {
     pub seid: u64,
     pub ue_ip: [u8; 4],
     _pad: [u8; 4],
+    /// The PCF's policy: the session AMBR, the extra QoS flows' filters and MBRs.
+    pub rule: SessionRule,
 }
 
 impl N4Establish {
-    pub fn new(seid: u64, ue_ip: [u8; 4]) -> Self {
-        N4Establish { seid, ue_ip, _pad: [0; 4] }
+    pub fn new(seid: u64, ue_ip: [u8; 4], rule: SessionRule) -> Self {
+        N4Establish { seid, ue_ip, _pad: [0; 4], rule }
     }
 }
 
@@ -318,6 +321,6 @@ mod tests {
         assert!(!c.set(&[0; CONTAINER + 1]) && c.get().is_empty());
         assert!(std::mem::size_of::<CreateSmContext>() <= 1024);
         assert!(std::mem::size_of::<CreateSmContextResult>() <= 2048);
-        assert!(std::mem::size_of::<N4EstablishResult>() <= 256);
+        assert!(std::mem::size_of::<N4EstablishResult>() <= 256 && std::mem::size_of::<N4Establish>() <= 512);
     }
 }

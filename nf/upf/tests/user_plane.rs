@@ -9,9 +9,11 @@ use std::time::Duration;
 
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_sbi::pdu_session::{N4Establish, N4EstablishResult, N4Modify, N4Report, REPORT_PERIOD};
+use librecn_sbi::policy::{PacketFilter, PccRule, SessionRule, direction};
 use librecn_scheduler::testbed::{Probe, ProbeLog, TestBed};
 use librecn_scheduler::{EoConfig, EoId};
 use librecn_upf::Upf;
+use zerocopy::FromZeros;
 
 /// A minimal IPv4 header (20 bytes) from `src` to `dst`, then `data`.
 fn ipv4(src: [u8; 4], dst: [u8; 4], data: &[u8]) -> Vec<u8> {
@@ -45,6 +47,11 @@ fn plane(n3: Ipv4Addr) -> (Plane, u32) {
 }
 
 fn plane_in(n3: Ipv4Addr, mode: &str) -> (Plane, u32) {
+    plane_with(n3, mode, SessionRule::new_zeroed())
+}
+
+/// The same, the session with the PCF's `rule`.
+fn plane_with(n3: Ipv4Addr, mode: &str, rule: SessionRule) -> (Plane, u32) {
     let mut tb = TestBed::new();
     let (sink, log) = LogSink::capture();
     tb.add(LogSink::config(), sink).unwrap();
@@ -61,7 +68,7 @@ fn plane_in(n3: Ipv4Addr, mode: &str) -> (Plane, u32) {
     gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
     let mut p = Plane { tb, log, upf, smf, seen, dn, gnb, n3: (n3, librecn_gtpu::PORT).into() };
 
-    p.tb.inject_from(p.smf, p.upf, 1, &N4Establish::new(1, UE)).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 1, &N4Establish::new(1, UE, rule)).unwrap();
     p.tb.run_until_idle();
     let ul_teid = p.seen.take()[0].body::<N4EstablishResult>().unwrap().ul_teid;
     (p, ul_teid)
@@ -78,10 +85,15 @@ impl Plane {
 
 /// An uplink G-PDU as UERANSIM sends it.
 fn g_pdu(teid: u32, payload: &[u8]) -> Vec<u8> {
+    g_pdu_on(teid, 1, payload)
+}
+
+/// The same, on QoS flow `qfi`.
+fn g_pdu_on(teid: u32, qfi: u8, payload: &[u8]) -> Vec<u8> {
     let len = (8 + payload.len()) as u16;
     let mut d = vec![0x34, 0xff, (len >> 8) as u8, len as u8];
     d.extend_from_slice(&teid.to_be_bytes());
-    d.extend_from_slice(&[0, 0, 0, 0x85, 1, 0x10, 1, 0]);
+    d.extend_from_slice(&[0, 0, 0, 0x85, 1, 0x10, qfi, 0]);
     d.extend_from_slice(payload);
     d
 }
@@ -135,6 +147,46 @@ fn downlink_packets_go_to_the_gnb_in_a_g_pdu() {
     assert_eq!((teid, qfi, payload), (0x77, Some(1), &packet[..]));
     gnb.set_nonblocking(true).unwrap();
     assert!(gnb.recv(&mut buf).is_err(), "no session for 10.45.0.99: dropped");
+}
+
+#[test]
+fn downlink_packets_go_on_their_qos_flow_and_uplink_ones_on_the_sessions() {
+    // The PCF's rule: pings from the server on an extra flow (QFI 2).
+    let mut rule = SessionRule::new_zeroed();
+    let mut pings = PccRule::new_zeroed();
+    pings.set_filters(&[PacketFilter::new(direction::DOWNLINK, 1, (SERVER, 32), [0, 0], [0, 0])]);
+    rule.set_rules(&[pings]);
+    let (mut p, ul_teid) = plane_with(Ipv4Addr::new(127, 0, 0, 68), "event", rule);
+    let gnb = UdpSocket::bind("127.0.0.69:2152").unwrap();
+    gnb.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    p.tb.inject_from(p.smf, p.upf, 2, &N4Modify { seid: 1, gnb_addr: [127, 0, 0, 69], dl_teid: 0x79 }).unwrap();
+    p.pump();
+    assert!(p.log.lines().iter().any(|l| l.msg.contains("uplink TEID 0x1, 1 extra flow(s)")), "{:#?}", p.log.lines());
+
+    p.dn.send(&ipv4(SERVER, UE, b"pong")).unwrap();
+    p.dn.send(&ipv4([10, 45, 0, 7], UE, b"other")).unwrap();
+    p.pump();
+    let mut qfis = vec![];
+    let mut buf = [0u8; 128];
+    for _ in 0..2 {
+        let n = gnb.recv(&mut buf).unwrap();
+        let librecn_gtpu::Message::GPdu { qfi, .. } = librecn_gtpu::decode(&buf[..n]).unwrap() else { panic!() };
+        qfis.push(qfi);
+    }
+    assert_eq!(qfis, [Some(2), Some(1)], "the rule's flow, then the default one");
+
+    // Uplink: the session's flows only.
+    let packet = ipv4(UE, SERVER, b"ping");
+    for qfi in [2, 5] {
+        p.gnb.send_to(&g_pdu_on(ul_teid, qfi, &packet), p.n3).unwrap();
+    }
+    p.pump();
+    assert!(p.dn.recv(&mut buf).is_ok(), "QFI 2 forwarded");
+    p.dn.set_nonblocking(true).unwrap();
+    assert!(p.dn.recv(&mut buf).is_err(), "QFI 5 dropped");
+    let counters = p.tb.stats(p.upf).unwrap().counters;
+    let n = |name: &str| counters.iter().find(|c| c.0 == name).unwrap().1;
+    assert_eq!((n("extra_flow_packets"), n("downlink_packets"), n("dropped_packets")), (1, 2, 1));
 }
 
 #[test]
