@@ -24,6 +24,7 @@ librecn-ausf = { path = "../ausf" }
 librecn-udm = { path = "../udm" }
 librecn-smf = { path = "../smf" }
 librecn-upf = { path = "../upf" }
+librecn-pcf = { path = "../pcf" }
 proptest.workspace = true
 zerocopy.workspace = true
 

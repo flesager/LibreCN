@@ -7,12 +7,15 @@
 //! without changing the NFs' logic.
 //!
 //! - [`ue_authentication`]: Nausf_UEAuthentication (TS 29.509) and
-//!   Nudm_UEAuthentication (TS 29.503), 5G AKA only;
+//!   Nudm_UEAuthentication (TS 29.503), 5G AKA and EAP-AKA';
+//! - [`policy`]: Npcf_AMPolicyControl (TS 29.507) and Npcf_SMPolicyControl
+//!   (TS 29.512), between the AMF, the SMF and the PCF;
 //! - [`pdu_session`]: Nsmf_PDUSession (TS 29.502) between AMF and SMF, and
 //!   N4 between SMF and UPF. N4 is PFCP (TS 29.244) in 3GPP; here it is EO
 //!   messages too, by the owner's choice (small deployments, one process).
 
 pub mod pdu_session;
+pub mod policy;
 pub mod ue_authentication;
 
 use std::fmt;

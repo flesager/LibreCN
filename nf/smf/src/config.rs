@@ -10,12 +10,11 @@
 //! # addresses (its first one is the UPF's N6 side). Pools do not overlap.
 //! dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]
 //! slices = [{ sst = 1 }]
-//! five_qi = 9                    # default QoS flow
-//! ambr_mbps = { uplink = 1000, downlink = 1000 }   # session AMBR
+//! pcf = "pcf"                    # the PCF's EO name: each session's QoS (SM policy)
 //! ```
 //!
-//! Every field is optional; the defaults are these values. Without
-//! subscription data yet, they apply to every UE.
+//! Every field is optional; the defaults are these values. Each session's
+//! QoS (session AMBR, QoS flows) is the PCF's (its SM policy).
 
 use std::net::Ipv4Addr;
 
@@ -31,13 +30,6 @@ struct SliceParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Ambr {
-    uplink: u16,
-    downlink: u16,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct DnnParams {
     dnn: String,
     pool: String,
@@ -49,8 +41,7 @@ struct Params {
     upf: String,
     dnns: Vec<DnnParams>,
     slices: Vec<SliceParams>,
-    five_qi: u8,
-    ambr_mbps: Ambr,
+    pcf: String,
 }
 
 impl Default for Params {
@@ -59,8 +50,7 @@ impl Default for Params {
             upf: "upf".into(),
             dnns: vec![DnnParams { dnn: "internet".into(), pool: "10.45.0.0/16".into() }],
             slices: vec![SliceParams { sst: 1, sd: None }],
-            five_qi: 9,
-            ambr_mbps: Ambr { uplink: 1000, downlink: 1000 },
+            pcf: "pcf".into(),
         }
     }
 }
@@ -80,9 +70,8 @@ pub struct SmfConfig {
     /// The first is the default DNN.
     pub dnns: Vec<DnnConfig>,
     pub slices: Vec<Snssai>,
-    pub five_qi: u8,
-    /// Uplink, downlink.
-    pub ambr_mbps: (u16, u16),
+    /// The PCF's EO name.
+    pub pcf: String,
 }
 
 impl SmfConfig {
@@ -119,13 +108,7 @@ impl SmfConfig {
                 Ok(Snssai { sst: s.sst, sd })
             })
             .collect::<Result<_, String>>()?;
-        Ok(SmfConfig {
-            upf: p.upf,
-            dnns,
-            slices,
-            five_qi: p.five_qi,
-            ambr_mbps: (p.ambr_mbps.uplink, p.ambr_mbps.downlink),
-        })
+        Ok(SmfConfig { upf: p.upf, dnns, slices, pcf: p.pcf })
     }
 }
 
@@ -155,7 +138,7 @@ mod tests {
     fn defaults_and_checks() {
         let c = SmfConfig::from_params(&serde_json::Value::Null).unwrap();
         let internet = DnnConfig { dnn: "internet".into(), pool: (Ipv4Addr::new(10, 45, 0, 0), 16) };
-        assert_eq!((&c.dnns[..], c.five_qi), (&[internet][..], 9));
+        assert_eq!((&c.dnns[..], c.pcf.as_str()), (&[internet][..], "pcf"));
         let two = serde_json::json!({ "dnns": [{ "dnn": "internet", "pool": "10.45.0.0/16" },
                                                { "dnn": "ims", "pool": "10.46.0.0/24" }] });
         assert_eq!(SmfConfig::from_params(&two).unwrap().dnns[1].pool, (Ipv4Addr::new(10, 46, 0, 0), 24));

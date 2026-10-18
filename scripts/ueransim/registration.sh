@@ -4,13 +4,15 @@
 # deciphered by the UDM: EAP-AKA' (the subscriber's method; patch 0003 lets
 # UERANSIM's UE read AT_KDF), NAS security mode, Registration Accept
 # in Initial Context Setup and Complete; it then establishes its PDU session
-# (SMF, UPF, PDU Session Resource Setup), and a second one on the second DNN
+# (SMF, UPF, PDU Session Resource Setup; the PCF gives the UE-AMBR and the
+# session AMBR of its subscriber), and a second one on the second DNN
 # (ims; both in ue.yaml: on the host, UERANSIM's UE bars its own nr-cli
 # ps-establish, its RRC thread missing the 100 ms UAC check). The UE gets the
 # network's names, then a new 5G-GUTI (POST on the AMF's web API, a
 # Configuration Update Command it acknowledges; nr-cli status shows it).
 # The AMF then announces a new capacity to the gNB (AMF Configuration
-# Update) and sets the UE's UE-AMBR there (UE Context Modification).
+# Update), and the PCF a new UE-AMBR (POST on its web API), which the AMF
+# sets at the gNB (UE Context Modification).
 # Without root, the UE cannot create
 # its TUN interface: the user plane is not checked here. The UE releases its
 # session (nr-cli ps-release) and UERANSIM sets it up again; the network then
@@ -49,10 +51,12 @@ curl -s -X POST "$web/api/nfs/amf-1/ues/imsi-999700000000001/guti" >> "$out/cli.
 wait_for "$out/core.log" "5G-GUTI reallocated" || true
 guti=$(grep -o "5G-GUTI reallocated: 5G-GUTI [0-9/]* [0-9:]* [0-9a-f]*" "$out/core.log" | head -1 | awk '{print $NF}')
 "$bin/nr-cli" imsi-999700000000001 -e status > "$out/info.log" 2>&1 || true
-# The AMF's capacity (AMF Configuration Update), the UE's UE-AMBR (UE Context Modification).
+# The AMF's capacity (AMF Configuration Update), the PCF's UE-AMBR (UE Context Modification).
 curl -s -X POST "$web/api/nfs/amf-1/capacity" -d '{"relative_capacity": 100}' >> "$out/cli.log"
 wait_for "$out/core.log" "AMF Configuration Update acknowledged" || true
-curl -s -X POST "$web/api/nfs/amf-1/ues/imsi-999700000000001/ambr" -d '{"uplink_mbps": 50, "downlink_mbps": 200}' >> "$out/cli.log"
+curl -s -X POST "$web/api/nfs/pcf/policies" -d '{"supi": "imsi-999700000000001",
+  "ue_ambr_mbps": {"uplink": 50, "downlink": 200},
+  "sessions": [{"dnn": "internet", "ambr_mbps": {"uplink": 50, "downlink": 200}}]}' >> "$out/cli.log"
 wait_for "$out/core.log" "UE Context Modification done" || true
 cli "ps-release 1"
 wait_count "$out/core.log" "PDU session 1 set up" 2 || true
@@ -79,6 +83,9 @@ grep -q "Initial Registration is successful" "$out/ue.log" \
   && [ -n "$guti" ] && grep -qi "$guti" "$out/info.log" \
   && grep -q "AMF configuration update received" "$out/gnb.log" \
   && grep -q "AMF Configuration Update acknowledged" "$out/core.log" \
+  && grep -q "AM policy, UE-AMBR 100 / 500 Mbit/s" "$out/core.log" \
+  && grep -q "SM policy for PDU session 1 to internet: 5QI 9, ARP 8, AMBR 50 / 200 Mbit/s" "$out/core.log" \
+  && grep -q "new UE-AMBR 50 / 200 Mbit/s, to its gNB" "$out/core.log" \
   && grep -q "UE Context Modification Request received" "$out/gnb.log" \
   && grep -q "UE Context Modification done" "$out/core.log" \
   && [ "$(grep -c "UE 1: PDU session 1 set up" "$out/core.log")" -ge 2 ] \

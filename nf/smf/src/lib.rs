@@ -2,9 +2,9 @@
 //!
 //! This release establishes IPv4 PDU sessions (TS 23.502 §4.3.2.2.1): the
 //! AMF hands over the UE's PDU Session Establishment Request; the SMF
-//! checks it, gives the UE an address, sets the session up on the UPF (N4),
-//! and answers with the Accept for the UE (N1) and the setup for the gNB
-//! (N2). The gNB's answer, through the AMF, gives the UPF its downlink
+//! checks it, gives the UE an address, asks the PCF for the session's policy
+//! (QoS, AMBR), sets the session up on the UPF (N4), and answers with the
+//! Accept for the UE (N1) and the setup for the gNB (N2). The gNB's answer, through the AMF, gives the UPF its downlink
 //! tunnel.
 //!
 //! Sessions are released by the UE (PDU Session Release Request) or by the
@@ -37,6 +37,7 @@ use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult,
     N4Report, ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult, n2, update,
 };
+use librecn_sbi::policy::{SessionRule, SmPolicyCreate, SmPolicyResult};
 use librecn_sbi::{Outcome, Supi};
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Message};
 use serde_json::json;
@@ -75,8 +76,10 @@ struct SmContext {
     amf_ue: u32,
     /// A Release Command was sent: waiting for the UE's Release Complete.
     releasing: bool,
-    /// The AMF's request waiting for the UPF (its `corr_id`).
+    /// The AMF's request waiting for the PCF or the UPF (its `corr_id`).
     waiting: Option<u32>,
+    /// The PCF's policy, once it answered.
+    rule: Option<SessionRule>,
     /// The UPF's uplink tunnel endpoint, once it answered N4Establish.
     n3: Option<(Ipv4Addr, u32)>,
     /// The downlink tunnel is set on the UPF (false while the UE is idle).
@@ -88,6 +91,7 @@ pub struct Smf {
     name: String,
     config: SmfConfig,
     upf: Service,
+    pcf: Service,
     /// UE addresses, one pool per DNN.
     pools: Vec<Pool>,
     contexts: HashMap<u32, SmContext>,
@@ -100,6 +104,7 @@ impl Smf {
         Smf {
             name: name.to_string(),
             upf: Service::named(config.upf.clone()),
+            pcf: Service::named(config.pcf.clone()),
             pools: config.dnns.iter().map(|d| Pool::new(d.pool.0, d.pool.1)).collect(),
             config,
             contexts: HashMap::new(),
@@ -162,16 +167,16 @@ impl Smf {
             return self.refuse(ctx, to, &supi, psi, insufficient);
         };
         let id = self.next_ctx();
-        let upf = self.upf.get(ctx);
-        let sent = upf.ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
-            let mut m = ctx.alloc::<N4Establish>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
-            *m = N4Establish::new(u64::from(id), ue_ip.octets());
+        let pcf = self.pcf.get(ctx);
+        let sent = pcf.ok_or(librecn_scheduler::Error::UnknownEo).and_then(|pcf| {
+            let mut m = ctx.alloc::<SmPolicyCreate>(pcf)?.with_corr_id(id).with_flags(flags::REQUEST);
+            (m.supi, m.dnn, m.slice, m.pdu_session_id) = (supi, request.dnn, request.slice, psi);
             ctx.send(m)
         });
         if let Err(e) = sent {
-            self.upf.forget();
+            self.pcf.forget();
             self.pools[dnn].release(ue_ip);
-            log!(self.log, ctx, Error, "cannot reach the UPF {:?}: {e}", self.upf.name());
+            log!(self.log, ctx, Error, "cannot reach the PCF {:?}: {e}", self.pcf.name());
             return self.refuse(ctx, to, &supi, psi, insufficient);
         }
         let context = SmContext {
@@ -185,15 +190,45 @@ impl Smf {
             amf_ue: to.1,
             releasing: false,
             waiting: Some(to.1),
+            rule: None,
             n3: None,
             active: false,
         };
         self.contexts.insert(id, context);
     }
 
+    /// The PCF's policy: the session is set up on the UPF.
+    fn on_policy(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, result: &SmPolicyResult) {
+        let id = msg.corr_id();
+        let Some(c) = self.contexts.get_mut(&id).filter(|c| c.rule.is_none() && c.waiting.is_some()) else { return };
+        let (supi, psi, pti, ue_ip) = (c.supi, c.pdu_session_id, c.pti, c.ue_ip);
+        let insufficient = Refused { pti, cause: cause::INSUFFICIENT_RESOURCES };
+        if result.outcome() != Outcome::Ok {
+            log!(self.log, ctx, Info, "{supi}: no policy for PDU session {psi}: {:?}", result.outcome());
+            let to = (c.amf, c.waiting.take().unwrap_or_default());
+            self.remove(ctx, id);
+            return self.refuse(ctx, to, &supi, psi, insufficient);
+        }
+        c.rule = Some(result.rule);
+        let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
+            let mut m = ctx.alloc::<N4Establish>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
+            *m = N4Establish::new(u64::from(id), ue_ip.octets());
+            ctx.send(m)
+        });
+        if let Err(e) = sent {
+            self.upf.forget();
+            log!(self.log, ctx, Error, "cannot reach the UPF {:?}: {e}", self.upf.name());
+            let Some(c) = self.contexts.get_mut(&id) else { return };
+            let to = (c.amf, c.waiting.take().unwrap_or_default());
+            self.remove(ctx, id);
+            self.refuse(ctx, to, &supi, psi, insufficient);
+        }
+    }
+
     fn on_established(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, result: &N4EstablishResult) {
         let id = msg.corr_id();
         let Some(c) = self.contexts.get_mut(&id) else { return };
+        let Some(rule) = c.rule else { return };
         let Some(corr) = c.waiting.take() else { return };
         let (to, psi, supi) = ((c.amf, corr), c.pdu_session_id, c.supi);
         if result.outcome() != Outcome::Ok {
@@ -205,7 +240,7 @@ impl Smf {
         let n3 = (Ipv4Addr::from(result.n3_addr), result.ul_teid);
         c.n3 = Some(n3);
         let (pti, slice, dnn, ue_ip) = (c.pti, c.slice, c.dnn, c.ue_ip);
-        let n2 = match self.setup_transfer(n3) {
+        let n2 = match setup_transfer(n3, &rule) {
             Ok(n2) => n2,
             Err(e) => {
                 log!(self.log, ctx, Error, "{supi}: {e}");
@@ -213,7 +248,7 @@ impl Smf {
                 return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });
             }
         };
-        let n1 = session::accept(&self.config, psi, pti, slice, dnn, ue_ip);
+        let n1 = session::accept(&self.config, psi, pti, slice, dnn, ue_ip, &rule);
         log!(
             self.log,
             ctx,
@@ -224,18 +259,6 @@ impl Smf {
             n3.1
         );
         self.create_result(ctx, to, psi, id, &n1, &n2);
-    }
-
-    /// The PDU Session Resource Setup Request Transfer for the UPF's tunnel `n3`.
-    fn setup_transfer(&self, n3: (Ipv4Addr, u32)) -> Result<Vec<u8>, String> {
-        let (ul, dl) = self.config.ambr_mbps;
-        n2sm::setup_request_transfer(&n2sm::Setup {
-            upf: n3.0,
-            teid: n3.1,
-            qfi: session::DEFAULT_QFI,
-            five_qi: self.config.five_qi,
-            ambr_bps: (u64::from(ul) * 1_000_000, u64::from(dl) * 1_000_000),
-        })
     }
 
     /// N4Modify; `teid` 0 (deactivation) is a notification, not answered.
@@ -259,7 +282,7 @@ impl Smf {
             return self.update_result(ctx, to, 0, Answer::outcome(Outcome::ContextNotFound));
         };
         (c.amf, c.amf_ue) = to;
-        let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3);
+        let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3.zip(c.rule));
         let container = request.container.get();
         match (request.kind, n3) {
             (update::DEACTIVATE, _) => {
@@ -269,7 +292,7 @@ impl Smf {
                 // The AMF's acknowledgement: it paces its notices on them.
                 self.update_result(ctx, to, psi, Answer::default());
             }
-            (update::ACTIVATE, Some(n3)) => match self.setup_transfer(n3) {
+            (update::ACTIVATE, Some((n3, rule))) => match setup_transfer(n3, &rule) {
                 Ok(n2) => {
                     log!(self.log, ctx, Info, "{supi}: PDU session {psi} activated");
                     self.update_result(ctx, to, psi, Answer { n2_kind: n2::SETUP, n2: &n2, ..Answer::default() });
@@ -391,8 +414,8 @@ impl Smf {
     fn on_report(&mut self, ctx: &mut Context<'_>, id: u32) {
         let Some(c) = self.contexts.get(&id).filter(|c| !c.active && !c.releasing) else { return };
         let (amf, amf_ue, psi, supi) = (c.amf, c.amf_ue, c.pdu_session_id, c.supi);
-        let Some(n3) = c.n3 else { return };
-        let transfer = match self.setup_transfer(n3) {
+        let Some((n3, rule)) = c.n3.zip(c.rule) else { return };
+        let transfer = match setup_transfer(n3, &rule) {
             Ok(transfer) => transfer,
             Err(e) => return log!(self.log, ctx, Error, "{supi}: {e}"),
         };
@@ -475,16 +498,40 @@ impl Smf {
     }
 }
 
+/// The PDU Session Resource Setup Request Transfer for the UPF's tunnel `n3`
+/// and the PCF's `rule`.
+fn setup_transfer(n3: (Ipv4Addr, u32), rule: &SessionRule) -> Result<Vec<u8>, String> {
+    n2sm::setup_request_transfer(&n2sm::Setup {
+        upf: n3.0,
+        teid: n3.1,
+        qfi: session::DEFAULT_QFI,
+        five_qi: rule.five_qi,
+        arp: rule.arp,
+        ambr_bps: (rule.ambr.uplink, rule.ambr.downlink),
+    })
+}
+
 impl ExecutionObject for Smf {
     fn on_start(&mut self, ctx: &mut Context<'_>) {
         let dnns: Vec<String> =
             self.config.dnns.iter().map(|d| format!("{} ({}/{})", d.dnn, d.pool.0, d.pool.1)).collect();
-        log!(self.log, ctx, Vip, "SMF {} ready: DNN {}, UPF {:?}", self.name, dnns.join(", "), self.upf.name());
+        log!(
+            self.log,
+            ctx,
+            Vip,
+            "SMF {} ready: DNN {}, UPF {:?}, PCF {:?}",
+            self.name,
+            dnns.join(", "),
+            self.upf.name(),
+            self.pcf.name()
+        );
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
         if let Some(request) = msg.body::<CreateSmContext>() {
             self.on_create(ctx, msg, request);
+        } else if let Some(result) = msg.body::<SmPolicyResult>() {
+            self.on_policy(ctx, msg, result);
         } else if let Some(result) = msg.body::<N4EstablishResult>() {
             self.on_established(ctx, msg, result);
         } else if let Some(request) = msg.body::<UpdateSmContext>() {

@@ -1,0 +1,20 @@
+[package]
+name = "librecn-pcf"
+description = "PCF: per-subscriber policy, the UE-AMBR (AM policy) and each session's QoS (SM policy)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+librecn-scheduler = { path = "../../scheduler" }
+librecn-common = { path = "../../common" }
+librecn-sbi = { path = "../../proto/sbi" }
+serde.workspace = true
+serde_json.workspace = true
+zerocopy.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

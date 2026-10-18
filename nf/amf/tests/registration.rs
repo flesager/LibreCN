@@ -9,6 +9,7 @@ use librecn_amf::sctp::{NGAP_PPID, SctpSocket};
 use librecn_ausf::Ausf;
 use librecn_common::manage::{Manage, Method, Reply};
 use librecn_ngap::*;
+use librecn_pcf::Pcf;
 use librecn_sbi::pdu_session::N4Report;
 use librecn_scheduler::EoId;
 use librecn_scheduler::testbed::{Probe, ProbeLog};
@@ -44,6 +45,7 @@ fn core_with(smf_capacity: usize) -> (Setup, SctpSocket) {
 
 /// The SMF's and UPF's EOs, and a probe standing for the web server.
 struct Ids {
+    pcf: EoId,
     smf: EoId,
     upf: EoId,
     web: EoId,
@@ -59,13 +61,15 @@ fn core_and_ids(smf_capacity: usize) -> (Setup, SctpSocket, Ids) {
         tb.add(cfg, udm).unwrap();
         let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::Value::Null).unwrap();
         tb.add(cfg, ausf).unwrap();
+        let (cfg, pcf) = Pcf::from_params("pcf", &serde_json::Value::Null).unwrap();
+        let pcf = tb.add(cfg, pcf).unwrap();
         let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
         let smf = tb.add(cfg.data_capacity(smf_capacity), smf).unwrap();
         let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
         let upf = tb.add(cfg, upf).unwrap();
         let (probe, replies) = Probe::new();
         let web = tb.add(librecn_scheduler::EoConfig::new("web").buffers(&[(16 * 1024, 4)]), probe).unwrap();
-        ids = Some(Ids { smf, upf, web, replies });
+        ids = Some(Ids { pcf, smf, upf, web, replies });
     });
     let gnb = s.connect();
     assert!(matches!(s.exchange(&gnb, &vector("ci0000")), NGAPPDU::successfulOutcome(_)));
@@ -634,9 +638,15 @@ fn tmsi_text(bytes: &[u8]) -> String {
 
 /// A web API request to the AMF; its status and JSON.
 fn manage(s: &mut Setup, ids: &Ids, method: Method, path: &str, body: &str) -> (u16, serde_json::Value) {
+    let amf = s.amf;
+    manage_at(s, ids, amf, method, path, body)
+}
+
+/// The same, to the NF `to`.
+fn manage_at(s: &mut Setup, ids: &Ids, to: EoId, method: Method, path: &str, body: &str) -> (u16, serde_json::Value) {
     let mut request = Manage::new_zeroed();
     request.fill(method, path, body);
-    s.tb.inject_from(ids.web, s.amf, 7, &request).unwrap();
+    s.tb.inject_from(ids.web, to, 7, &request).unwrap();
     s.tb.run_until_idle();
     let reply: Reply = ids.replies.take().into_iter().find_map(|m| m.body()).expect("a reply");
     (reply.status(), serde_json::from_str(reply.text()).unwrap())
@@ -900,7 +910,7 @@ fn an_eap_aka_prime_subscriber_registers() {
 }
 
 #[test]
-fn the_web_api_changes_the_capacity_at_the_gnbs_and_a_ue_ambr_at_its_gnb() {
+fn the_web_api_changes_the_capacity_at_the_gnbs_and_the_pcf_a_ue_ambr_at_its_gnb() {
     let (mut s, gnb, ids) = core_and_ids(1024);
     // AMF Configuration Update: the new relative capacity, acknowledged.
     assert_eq!(manage(&mut s, &ids, Method::Post, "capacity", r#"{"relative_capacity": 100}"#).0, 202);
@@ -915,11 +925,12 @@ fn the_web_api_changes_the_capacity_at_the_gnbs_and_a_ue_ambr_at_its_gnb() {
     assert!(s.logged("amf-1", "AMF Configuration Update acknowledged"), "{:#?}", s.log.lines());
     assert_eq!(manage(&mut s, &ids, Method::Post, "capacity", r#"{"relative_capacity": 300}"#).0, 400);
 
-    // UE Context Modification: a UE-AMBR, then given with the UE's session.
+    // UE Context Modification: the PCF's new UE-AMBR, then given with the UE's session.
     let mut ue = Ue::default();
     ue.register(&mut s, &gnb);
-    let body = r#"{"uplink_mbps": 50, "downlink_mbps": 200}"#;
-    assert_eq!(manage(&mut s, &ids, Method::Post, "ues/imsi-208930000000001/ambr", body).0, 202);
+    assert!(s.logged("amf-1", "AM policy, UE-AMBR 1000 / 1000 Mbit/s"), "the default policy: {:#?}", s.log.lines());
+    let body = r#"{"supi": "imsi-208930000000001", "ue_ambr_mbps": {"uplink": 50, "downlink": 200}}"#;
+    assert_eq!(manage_at(&mut s, &ids, ids.pcf, Method::Post, "policies", body).0, 200);
     let (_, pdu) = s.receive(&gnb);
     let modification: UEContextModificationRequest = initiating(&pdu, ID_UECONTEXT_MODIFICATION);
     let ambr = |ies: &[(u16, Any)]| {

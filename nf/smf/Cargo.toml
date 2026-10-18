@@ -19,6 +19,7 @@ serde_json.workspace = true
 [dev-dependencies]
 librecn-oam = { path = "../../oam" }
 librecn-upf = { path = "../upf" }
+librecn-pcf = { path = "../pcf" }
 zerocopy.workspace = true
 
 [lints]

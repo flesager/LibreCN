@@ -82,16 +82,20 @@ server answers 503 at once. Today:
 | UDM | `GET subscribers` | `[{"supi", "amf", "sqn"}]`: keys never leave the UDM |
 | UDM | `POST subscribers` | adds one subscriber or an array, fields of the configuration (`supi`, `k`, `opc`, optional `amf`, `sqn`): 201, 409 if one exists |
 | UDM | `DELETE subscribers/{supi}` | 200, or 404 |
-
-With `[oam] state_dir`, the UDM keeps these changes, and the SQNs, across restarts (`<state_dir>/udm.json`).
+| PCF | `GET policies` | `{"default", "count", "policies": [...]}`: the default policy, the first 64 subscribers' |
+| PCF | `GET policies/{supi}` | that subscriber's policy (its own, else the default) |
+| PCF | `POST policies` | sets one or an array, fields of the configuration (`supi`, `count`, `ue_ambr_mbps`, `sessions`), replacing any: 200, 400; a new UE-AMBR reaches the UE's AMF (UE Context Modification), session policies apply to new sessions |
+| PCF | `DELETE policies/{supi}` | the subscriber falls back to the default: 200, or 404 |
 | SMF | `GET sessions` | `[{"id", "supi", "pdu_session_id", "ue_ip", "dnn", "state"}]` |
 | SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
 | AMF | `GET ues` | `{"connected", "registered", "idle", "ues": [...]}`, the first 64 UEs (`supi`, `cm`, `state`, `tmsi`, `sessions`) |
 | AMF | `GET ues/{supi}` | that UE, or 404 |
-| AMF | `POST ues/{supi}/ambr`, body `{"uplink_mbps", "downlink_mbps"}` | the connected UE's UE-AMBR, to its gNB (UE Context Modification) and with its sessions: 202, 400, 404 |
 | AMF | `POST capacity`, body `{"relative_capacity"}` | the AMF's relative capacity, announced to every gNB (AMF Configuration Update): 202, 400 |
 | AMF | `POST ues/{supi}/guti` | a new 5G-GUTI for the connected UE (Configuration Update Command, acknowledged): 202, 409 if idle or in another procedure, 404 |
 | AMF | `DELETE ues/{supi}`, body `{"reregister": true}` optional | the network deregisters the UE: 202 if it is connected (Deregistration Request), 200 if idle (locally), 409 if in another procedure, 404 |
+
+With `[oam] state_dir`, the UDM and the PCF keep these changes across
+restarts (`<state_dir>/udm.json`, with the SQNs, and `<state_dir>/pcf.json`).
 
 The GUI's Subscribers view uses them.
 

@@ -164,3 +164,11 @@ impl Amf {
         true
     }
 }
+
+impl Amf {
+    /// The UE-AMBR of idle UE `supi`, for when it is back; false if no idle UE has it.
+    pub(crate) fn set_idle_ambr(&mut self, supi: &str, ambr: (u64, u64)) -> bool {
+        let idle = self.idle.values_mut().find(|i| i.supi().is_some_and(|s| s.as_str() == supi));
+        idle.map(|i| i.ambr = Some(ambr)).is_some()
+    }
+}

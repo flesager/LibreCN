@@ -4,15 +4,16 @@ One crate per 3GPP network function, each hosted in an execution object of
 `librecn-scheduler`, logging and raising alarms through `librecn-common`, and
 registered as a kind in the `librecn` application so the control EO can
 deploy it. NFs talk to each other through EO messages (`proto/sbi`), found by
-their EO names (parameters `ausf` and `smf` of the AMF, `udm` of the AUSF,
-`upf` of the SMF).
+their EO names (parameters `ausf`, `smf` and `pcf` of the AMF, `udm` of the
+AUSF, `upf` and `pcf` of the SMF).
 
 | Crate | NF | Status |
 |---|---|---|
-| [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept in Initial Context Setup, retransmission timers (T3550, T3560, T3570), identification, deregistration by the UE or the network (`/api/nfs/amf-1/ues`, T3522); Configuration Update Command (the network's names after each registration, a new 5G-GUTI through `/api/nfs/amf-1/ues/{supi}/guti`, T3555); AMF Configuration Update (the relative capacity, `/api/nfs/amf-1/capacity`); UE Context Modification (a UE-AMBR, `/api/nfs/amf-1/ues/{supi}/ambr`, also given with the sessions; `ue_ambr_mbps`); overload control (Overload Start at 90 % of `max_ues`, Stop under 80 %, an alarm); idle UEs kept (Service Request, registration from idle with the sessions told back, mobility to another gNB and tracking area, periodic registration with the AMF's T3512, implicit deregistration), paged for downlink data; PDU sessions carried between UE, SMF and gNB (PDU Session Resource Setup, reactivation) |
+| [`amf`](amf/) | AMF | N2 (SCTP one-to-many, NG Setup, NG Reset, Error Indication, UE contexts, NAS transport, UE Context Release); registration: 5G AKA, NAS security, Registration Accept in Initial Context Setup, retransmission timers (T3550, T3560, T3570), identification, deregistration by the UE or the network (`/api/nfs/amf-1/ues`, T3522); Configuration Update Command (the network's names after each registration, a new 5G-GUTI through `/api/nfs/amf-1/ues/{supi}/guti`, T3555); AMF Configuration Update (the relative capacity, `/api/nfs/amf-1/capacity`); the UE-AMBR from the PCF (AM policy), given with the sessions and changed by UE Context Modification; overload control (Overload Start at 90 % of `max_ues`, Stop under 80 %, an alarm); idle UEs kept (Service Request, registration from idle with the sessions told back, mobility to another gNB and tracking area, periodic registration with the AMF's T3512, implicit deregistration), paged for downlink data; PDU sessions carried between UE, SMF and gNB (PDU Session Resource Setup, reactivation) |
 | [`ausf`](ausf/) | AUSF | 5G AKA and EAP-AKA' (Nausf_UEAuthentication): challenge (HXRES*, or EAP-Request/AKA'-Challenge), confirmation (RES*, or the UE's EAP-Response: AT_MAC, RES), K_SEAF, EAP-Success or EAP-Failure; contexts expire after 30 s |
-| [`smf`](smf/) | SMF | IPv4 PDU session establishment: checks (DNN, slice, type, SSC mode), several DNNs each with its address pool, several sessions per UE, default QoS flow, N1 accept/reject, N2 transfers, N4 to the UPF; release by the UE or the network (`/api/nfs/smf/sessions`); user plane deactivated and reactivated with the UE's idleness, downlink data for an idle UE passed to the AMF; a UE's modification request rejected |
+| [`smf`](smf/) | SMF | IPv4 PDU session establishment: checks (DNN, slice, type, SSC mode), several DNNs each with its address pool, several sessions per UE, the default QoS flow and the session AMBR from the PCF (SM policy), N1 accept/reject, N2 transfers, N4 to the UPF; release by the UE or the network (`/api/nfs/smf/sessions`); user plane deactivated and reactivated with the UE's idleness, downlink data for an idle UE passed to the AMF; a UE's modification request rejected |
 | [`upf`](upf/) | UPF | N4 sessions; GTP-U on N3 and a TUN device on N6, both ways, IPv4, source address checked, no allocation per packet; downlink packets of idle UEs parked (64 in all) and reported to the SMF; packet and byte counters on `/metrics`; event, poll or hybrid mode, measured in [`upf/README.md`](upf/README.md) |
+| [`pcf`](pcf/) | PCF | per-subscriber policies with a `default` entry, from the deployment or the web API (`/api/nfs/pcf/policies`), kept in the state file: AM policy (the UE-AMBR, its changes sent to the UE's AMF), SM policy by DNN (session AMBR, default 5QI and ARP, PCC rules with packet filters) |
 | [`udm`](udm/) | UDM | subscribers from the deployment or the web API (`/api/nfs/udm/subscribers`, GUI view); SUCI de-concealment (null scheme, ECIES Profile A with the home network keys of the deployment); authentication vectors (Milenage) for 5G AKA or EAP-AKA' (`auth` per subscriber), SQN resynchronisation |
 
 Each NF keeps protocol decisions as pure functions on domain values (unit
@@ -37,10 +38,11 @@ Deliberately left out of this release, to be added when a step needs them:
 - **Network-requested PDU session modification** (QoS, AMBR): UERANSIM
   supports neither the Modification Command nor PDU Session Resource Modify,
   so nothing could prove it; a UE's modification request is rejected (#31).
-- **QoS** beyond the default flow (5QI 9, match-all rule); the UE-AMBR enforced by
-  the UPF (the gNB gets it); N4 as PFCP (EO messages instead, by choice).
+- **QoS** beyond the default flow (the PCF's PCC rules are not set up yet);
+  the UE-AMBR enforced by the UPF (the gNB gets it); N4 as PFCP (EO messages
+  instead, by choice).
 - **Subscription data** (Nudm_SDM, Nudm_UECM): the allowed NSSAI is the
-  requested slices the AMF serves, else all of them; the SMF's DNN, pool
-  and QoS apply to every UE.
+  requested slices the AMF serves, else all of them; the SMF's DNNs and
+  pools apply to every UE (the QoS comes from the PCF).
 - **SUCI protection scheme** B (ECIES, P-256: UERANSIM does not support it); EAP-AKA' resynchronisation (the UE's AUTS in an EAP-Response gets EAP-Failure); NIA1/NIA3,
   NEA1/NEA3, the AUSF's result confirmation to the UDM.

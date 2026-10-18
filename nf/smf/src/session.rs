@@ -7,6 +7,8 @@ use std::net::Ipv4Addr;
 use librecn_nas::Snssai;
 use librecn_nas::sm::{QosFlow, SmDownlink, SmUplink, cause, session_type};
 
+use librecn_sbi::policy::SessionRule;
+
 use crate::config::SmfConfig;
 
 /// The default QoS flow's identifier.
@@ -63,8 +65,14 @@ pub fn decide(
     Ok(Accepted { pti: header.pti, dnn })
 }
 
+/// A bit rate in Mbit/s as NAS carries it (16 bits, 1 at least).
+fn mbps(bps: u64) -> u16 {
+    (bps / 1_000_000).clamp(1, u64::from(u16::MAX)) as u16
+}
+
 /// PDU Session Establishment Accept: IPv4 `address` on DNN `dnn` (an index
-/// in the configuration's), SSC mode 1, the default flow, the configured AMBR.
+/// in the configuration's), SSC mode 1, the default flow and the session
+/// AMBR of the PCF's `rule`.
 pub fn accept(
     config: &SmfConfig,
     pdu_session_id: u8,
@@ -72,13 +80,14 @@ pub fn accept(
     slice: Snssai,
     dnn: usize,
     address: Ipv4Addr,
+    rule: &SessionRule,
 ) -> Vec<u8> {
     let mut out = [0u8; N1_MAX];
     let accept = SmDownlink::EstablishmentAccept {
         address: address.octets(),
         ssc_mode: 1,
-        flow: QosFlow { qfi: DEFAULT_QFI, five_qi: config.five_qi },
-        ambr_mbps: config.ambr_mbps,
+        flow: QosFlow { qfi: DEFAULT_QFI, five_qi: rule.five_qi },
+        ambr_mbps: (mbps(rule.ambr.uplink), mbps(rule.ambr.downlink)),
         snssai: slice,
         dnn: &config.dnns[dnn].dnn,
     };
@@ -123,6 +132,15 @@ mod tests {
 
     const SST1: Snssai = Snssai { sst: 1, sd: None };
 
+    /// The PCF's rule: 5QI 9, 100 Mbit/s up, 1000 down.
+    fn rule() -> SessionRule {
+        use zerocopy::FromZeros;
+        let mut r = SessionRule::new_zeroed();
+        (r.five_qi, r.arp) = (9, 8);
+        r.ambr = librecn_sbi::policy::Rates { uplink: 100_000_000, downlink: 1_000_000_000 };
+        r
+    }
+
     #[test]
     fn requests_are_checked_against_what_the_smf_serves() {
         let params = serde_json::json!({ "dnns": [{ "dnn": "internet", "pool": "10.45.0.0/16" },
@@ -144,8 +162,8 @@ mod tests {
         assert_eq!(reject(1, Refused { pti: 7, cause: 27 }), hex("2e0107c31b"));
         assert_eq!(release_command(1, 0), hex("2e0100d324"));
         assert_eq!(modification_reject(1, 3), hex("2e0103ca1f"));
-        assert_eq!(accept(&c, 1, 7, SST1, 0, Ipv4Addr::new(10, 45, 0, 2))[..5], hex("2e0107c211")[..]);
-        let ims = accept(&c, 1, 7, SST1, 1, Ipv4Addr::new(10, 46, 0, 2));
+        assert_eq!(accept(&c, 1, 7, SST1, 0, Ipv4Addr::new(10, 45, 0, 2), &rule())[..5], hex("2e0107c211")[..]);
+        let ims = accept(&c, 1, 7, SST1, 1, Ipv4Addr::new(10, 46, 0, 2), &rule());
         assert!(ims.ends_with(&hex("25 04 03696d73")), "DNN ims in the accept");
     }
 }

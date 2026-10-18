@@ -49,6 +49,7 @@ use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, ReleaseSmContext, Slice, SmNotify, UpdateSmContext, UpdateSmContextResult,
     update,
 };
+use librecn_sbi::policy::{AmPolicyCreate, AmPolicyResult, AmPolicyUpdate};
 use librecn_sbi::ue_authentication::{AuthInfo, Authenticate, AuthenticateResult, Confirm, ConfirmResult};
 use librecn_sbi::{DnnText, ServingNetwork, SupiOrSuci};
 use librecn_scheduler::{Context, EoConfig, ExecutionObject, Interest, IoToken, Message, MsgBody, TimerId};
@@ -101,6 +102,7 @@ pub struct Amf {
     serving_network: ServingNetwork,
     ausf: Service,
     smf: Service,
+    pcf: Service,
     socket: Option<(SctpSocket, IoToken)>,
     bound: Arc<Mutex<Option<SocketAddr>>>,
     gnbs: HashMap<AssocId, Gnb>,
@@ -128,6 +130,7 @@ impl Amf {
             serving_network: config.serving_network(),
             ausf: Service::named(config.ausf.clone()),
             smf: Service::named(config.smf.clone()),
+            pcf: Service::named(config.pcf.clone()),
             config,
             socket: None,
             bound: Arc::default(),
@@ -402,8 +405,7 @@ impl Amf {
             return;
         };
         let amf_id = ue.amf_id;
-        let ue = self.ues.get_mut(assoc, amf_id, ran_id).expect("just created");
-        (ue.location, ue.ambr) = (location, self.config.ue_ambr);
+        self.ues.get_mut(assoc, amf_id, ran_id).expect("just created").location = location;
         self.check_load(ctx);
         log!(self.log, ctx, Info, "UE {amf_id} (RAN id {ran_id}, association {assoc}): Initial UE Message");
         self.resume(ctx, amf_id, nas);
@@ -427,6 +429,7 @@ impl Amf {
             log: &mut self.log,
             ausf: &mut self.ausf,
             smf: &mut self.smf,
+            pcf: &mut self.pcf,
             config: &self.config,
             serving_network: &self.serving_network,
             sessions: &mut ue.sessions,
@@ -474,6 +477,37 @@ impl Amf {
             self.on_sm_notify(ctx, msg, amf_id, notify);
         } else if let Some(request) = msg.body::<librecn_common::manage::Manage>() {
             self.on_manage(ctx, msg, request);
+        } else if let Some(result) = msg.body::<AmPolicyResult>() {
+            match self.ues.get_mut_by_id(amf_id) {
+                Some(ue) if result.outcome() == librecn_sbi::Outcome::Ok => {
+                    ue.ambr = Some((result.ue_ambr.uplink, result.ue_ambr.downlink));
+                    let (ul, dl) = (result.ue_ambr.uplink / 1_000_000, result.ue_ambr.downlink / 1_000_000);
+                    log!(self.log, ctx, Info, "UE {amf_id}: AM policy, UE-AMBR {ul} / {dl} Mbit/s (up / down)");
+                }
+                Some(_) => log!(self.log, ctx, Error, "UE {amf_id}: no AM policy: {:?}", result.outcome()),
+                None => log!(self.log, ctx, Debug, "UE {amf_id} gone: AM policy dropped"),
+            }
+        } else if let Some(update) = msg.body::<AmPolicyUpdate>() {
+            self.on_policy_update(ctx, update);
+        }
+    }
+
+    /// The PCF changed a UE's AM policy: its new UE-AMBR, to its gNB if it
+    /// is connected (UE Context Modification), kept if it is idle.
+    fn on_policy_update(&mut self, ctx: &mut Context<'_>, update: &AmPolicyUpdate) {
+        let supi = update.supi.as_str();
+        let ambr = (update.ue_ambr.uplink, update.ue_ambr.downlink);
+        let (ul, dl) = (ambr.0 / 1_000_000, ambr.1 / 1_000_000);
+        let connected = self.ues.iter().find(|ue| ue.mm.supi().is_some_and(|s| s.as_str() == supi)).map(|ue| ue.amf_id);
+        if let Some(ue) = connected.and_then(|id| self.ues.get_mut_by_id(id)) {
+            ue.ambr = Some(ambr);
+            let (amf_id, ran_id, assoc, stream) = (ue.amf_id, ue.ran_id, ue.assoc, ue.stream);
+            let request = n2::ue_context_modification_request(amf_id, ran_id, ambr);
+            self.send(ctx, assoc, stream, request, "UE Context Modification Request");
+            return log!(self.log, ctx, Info, "UE {amf_id} ({supi}): new UE-AMBR {ul} / {dl} Mbit/s, to its gNB");
+        }
+        if self.set_idle_ambr(supi, ambr) {
+            log!(self.log, ctx, Info, "{supi}: new UE-AMBR {ul} / {dl} Mbit/s, kept while idle");
         }
     }
 
@@ -638,6 +672,7 @@ struct Port<'a, 'c, 's> {
     log: &'a mut Logger,
     ausf: &'a mut Service,
     smf: &'a mut Service,
+    pcf: &'a mut Service,
     config: &'a AmfConfig,
     serving_network: &'a ServingNetwork,
     sessions: &'a mut [Option<PduSession>; 16],
@@ -776,6 +811,10 @@ impl Effects for Port<'_, '_, '_> {
 
     fn release(&mut self, why: Release) {
         self.release = Some(why);
+    }
+
+    fn am_policy(&mut self, supi: &librecn_sbi::Supi) {
+        request::<AmPolicyCreate>(self.ctx, self.pcf, self.log, self.ids.0, |m| m.supi = *supi);
     }
 
     fn tmsi(&mut self) -> u32 {

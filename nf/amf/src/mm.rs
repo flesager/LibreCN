@@ -105,6 +105,8 @@ pub trait Effects {
     fn confirm(&mut self, auth_ctx: u32, res_star: &[u8; 16]) -> bool;
     /// Confirms EAP-AKA' with the UE's EAP-Response. False if the AUSF cannot be reached.
     fn confirm_eap(&mut self, auth_ctx: u32, eap: &[u8]) -> bool;
+    /// Asks the PCF for the UE's AM policy (its UE-AMBR), the UE authenticated.
+    fn am_policy(&mut self, supi: &Supi);
     /// Releases the UE's N2 context, after the PDUs already sent.
     fn release(&mut self, why: Release);
     /// A fresh, unpredictable 5G-TMSI.
@@ -575,6 +577,7 @@ impl Mm {
         self.security = Some(SecurityContext::new(&kamf, self.ngksi, ciphering, NIA2));
         self.kamf = Some(kamf);
         self.supi = Some(result.supi);
+        fx.am_policy(&result.supi);
         self.state = State::SecurityMode;
         fx.log(Level::Info, format_args!("{} authenticated, NEA{ciphering} NIA{NIA2}", result.supi));
         let command = Downlink::SecurityModeCommand {
@@ -871,6 +874,8 @@ mod tests {
         /// Whether the NAS timer runs.
         timer: bool,
         released: Option<Release>,
+        /// SUPIs whose AM policy was asked.
+        am_policies: Vec<String>,
         logs: Vec<String>,
     }
 
@@ -910,6 +915,9 @@ mod tests {
         }
         fn release(&mut self, why: Release) {
             self.released = Some(why);
+        }
+        fn am_policy(&mut self, supi: &Supi) {
+            self.am_policies.push(supi.as_str().to_string());
         }
         fn tmsi(&mut self) -> u32 {
             0xc0ffee
@@ -1059,6 +1067,7 @@ mod tests {
         mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
         assert_eq!(mm.state(), State::Registered);
         assert_eq!(mm.supi().unwrap().as_str(), "imsi-999700000000001");
+        assert_eq!(fx.am_policies, ["imsi-999700000000001"], "its AM policy asked once authenticated");
         assert!(
             fx.logs.iter().any(|l| l.starts_with("registered: imsi-999700000000001, 5G-GUTI 999/70 1:1:0 00c0ffee"))
         );

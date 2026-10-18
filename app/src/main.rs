@@ -69,6 +69,7 @@ fn run() -> Result<(), String> {
         .kind("amf", factory(librecn_amf::Amf::from_params))
         .kind("ausf", factory(librecn_ausf::Ausf::from_params))
         .kind("udm", factory(librecn_udm::Udm::from_params))
+        .kind("pcf", factory(librecn_pcf::Pcf::from_params))
         .kind("smf", factory(librecn_smf::Smf::from_params))
         .kind("upf", factory(librecn_upf::Upf::from_params));
     let control = runtime.add(Control::config(), control).map_err(add_failed)?;

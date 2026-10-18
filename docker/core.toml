@@ -32,6 +32,10 @@ n3 = "10.210.0.10"
 n6 = "upf0"
 
 [[nf]]
+kind = "pcf"
+name = "pcf"
+
+[[nf]]
 kind = "smf"
 name = "smf"
 [nf.params]

@@ -32,6 +32,16 @@ id = 1
 private_key = "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d"
 
 [[nf]]
+kind = "pcf"
+name = "pcf"
+[[nf.params.policies]]           # registration.sh changes it through the web API
+supi = "imsi-999700000000001"
+ue_ambr_mbps = { uplink = 100, downlink = 500 }
+[[nf.params.policies.sessions]]
+dnn = "internet"
+ambr_mbps = { uplink = 50, downlink = 200 }
+
+[[nf]]
 kind = "smf"
 name = "smf"
 [nf.params]

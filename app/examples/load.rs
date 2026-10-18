@@ -35,6 +35,7 @@ use librecn_amf::sctp::{NGAP_PPID, Received, SctpSocket};
 use librecn_ausf::Ausf;
 use librecn_ngap::*;
 use librecn_oam::{AlarmManager, LogSink};
+use librecn_pcf::Pcf;
 use librecn_scheduler::runtime::{PoolConfig, Runtime, RuntimeConfig};
 use librecn_security::milenage::Milenage;
 use librecn_security::{Direction, kdf, nea2, nia2};
@@ -597,6 +598,8 @@ fn main() {
     let mut nfs = vec![("udm", runtime.add(cfg.pool("core"), udm).unwrap())];
     let (cfg, ausf) = Ausf::from_params("ausf", &serde_json::json!({ "max_contexts": 4096 })).unwrap();
     nfs.push(("ausf", runtime.add(cfg.pool("core"), ausf).unwrap()));
+    let (cfg, pcf) = Pcf::from_params("pcf", &serde_json::Value::Null).unwrap();
+    nfs.push(("pcf", runtime.add(cfg.pool("core"), pcf).unwrap()));
     let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
     nfs.push(("smf", runtime.add(cfg.pool("core"), smf).unwrap()));
     let upf_params = serde_json::json!({ "max_sessions": rounds * total, "n3": "127.0.0.2" });

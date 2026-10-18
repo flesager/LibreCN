@@ -7,9 +7,6 @@
 //!   (Deregistration Request); an idle one is deregistered locally;
 //! - `POST ues/{supi}/guti`: a new 5G-GUTI for the connected UE
 //!   (Configuration Update Command, TS 24.501 §5.4.4);
-//! - `POST ues/{supi}/ambr`, body `{"uplink_mbps", "downlink_mbps"}`: the
-//!   UE's UE-AMBR, to its gNB now (UE Context Modification) and later with
-//!   its sessions;
 //! - `POST capacity`, body `{"relative_capacity"}`: the AMF's relative
 //!   capacity, announced to every gNB (AMF Configuration Update).
 
@@ -60,14 +57,6 @@ impl Amf {
             (Some(Method::Post), ("ues", rest)) if rest.ends_with("/guti") => {
                 self.reallocate_guti(ctx, &rest[..rest.len() - "/guti".len()])
             }
-            (Some(Method::Post), ("ues", rest)) if rest.ends_with("/ambr") => {
-                let body: Value = serde_json::from_str(request.body()).unwrap_or(Value::Null);
-                let mbps = |k: &str| body.get(k).and_then(Value::as_u64).filter(|v| *v > 0);
-                match (mbps("uplink_mbps"), mbps("downlink_mbps")) {
-                    (Some(ul), Some(dl)) => self.set_ambr(ctx, &rest[..rest.len() - "/ambr".len()], (ul, dl)),
-                    _ => (400, json!({ "error": "uplink_mbps and downlink_mbps, above 0" })),
-                }
-            }
             (Some(Method::Post), ("capacity", "")) => {
                 let body: Value = serde_json::from_str(request.body()).unwrap_or(Value::Null);
                 match body.get("relative_capacity").and_then(Value::as_u64).and_then(|c| u8::try_from(c).ok()) {
@@ -85,21 +74,6 @@ impl Amf {
         if let Err(e) = send_reply(ctx, msg, status, &answer.to_string()) {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
         }
-    }
-
-    /// UE-AMBR `mbps` (uplink, downlink) for connected UE `supi`, to its gNB.
-    fn set_ambr(&mut self, ctx: &mut Context<'_>, supi: &str, mbps: (u64, u64)) -> (u16, Value) {
-        let found = self.ues.iter().find(|ue| ue.mm.supi().is_some_and(|s| s.as_str() == supi)).map(|ue| ue.amf_id);
-        let Some(ue) = found.and_then(|id| self.ues.get_mut_by_id(id)) else {
-            return (404, json!({ "error": format!("{supi} is not connected") }));
-        };
-        let ambr = (mbps.0 * 1_000_000, mbps.1 * 1_000_000);
-        ue.ambr = Some(ambr);
-        let (amf_id, ran_id, assoc, stream) = (ue.amf_id, ue.ran_id, ue.assoc, ue.stream);
-        let request = n2::ue_context_modification_request(amf_id, ran_id, ambr);
-        self.send(ctx, assoc, stream, request, "UE Context Modification Request");
-        log!(self.log, ctx, Info, "UE {amf_id}: UE-AMBR {} / {} Mbit/s (up / down)", mbps.0, mbps.1);
-        (202, json!({ "modifying": supi }))
     }
 
     /// The AMF's new relative capacity, announced to every gNB set up.

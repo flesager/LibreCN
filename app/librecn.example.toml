@@ -54,17 +54,44 @@ mode = "event"                # or "poll", "hybrid": see nf/upf/README.md
 max_sessions = 1024
 
 [[nf]]
+kind = "pcf"
+name = "pcf"
+pool = "cp"
+# Policies per subscriber; what an entry leaves out comes from `default`, then
+# from the built-in values (5QI 9, ARP 8, 1000 Mbit/s each way). The web API
+# changes them (/api/nfs/pcf/policies), kept in [oam] state_dir if set.
+[nf.params.default]           # optional: subscribers without their own entry
+ue_ambr_mbps = { uplink = 1000, downlink = 1000 }
+[[nf.params.default.sessions]]  # by DNN; no `dnn`: any DNN
+five_qi = 9
+arp = 8
+ambr_mbps = { uplink = 1000, downlink = 1000 }
+[[nf.params.policies]]        # optional
+supi = "imsi-999700000000001"
+count = 1                     # optional: this many SUPIs from this one on
+ue_ambr_mbps = { uplink = 100, downlink = 500 }
+[[nf.params.policies.sessions]]
+dnn = "internet"
+ambr_mbps = { uplink = 50, downlink = 200 }
+[[nf.params.policies.sessions.flows]]   # PCC rules: extra QoS flows, 4 at most
+five_qi = 1                   # GBR: `gbr_mbps` required
+arp = 2
+precedence = 10               # lowest first
+mbr_mbps = { uplink = 1, downlink = 1 }
+gbr_mbps = { uplink = 1, downlink = 1 }
+filters = [{ direction = "both", remote = "10.10.0.0/16", protocol = 17, remote_ports = "5060-5061" }]
+
+[[nf]]
 kind = "smf"
 name = "smf"
 pool = "cp"
 [nf.params]                   # all optional: these are the defaults
 upf = "upf"
+pcf = "pcf"                   # each session's QoS and AMBR
 # Data networks, the first by default, each with its UE addresses (the first
 # address is the UPF's N6 side: 10.45.0.1); pools must not overlap.
 dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]
 slices = [{ sst = 1 }]
-five_qi = 9
-ambr_mbps = { uplink = 1000, downlink = 1000 }
 
 [[nf]]
 kind = "amf"
@@ -81,10 +108,10 @@ slices = [{ sst = 1 }]
 max_ues = 1024
 ausf = "ausf"
 smf = "smf"
+pcf = "pcf"                   # each UE's UE-AMBR
 ciphering = ["NEA2", "NEA0"]
 t3512_s = 3240                # periodic registration timer (54 min, sent as 1 h)
 # network_name = { full = "LibreCN", short = "LibreCN" }   # optional: sent to each UE once registered
-# ue_ambr_mbps = { uplink = 100, downlink = 500 }         # optional: the UE-AMBR given to the gNBs
 
 [[nf]]
 kind = "demo"

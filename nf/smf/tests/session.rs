@@ -1,9 +1,10 @@
-//! PDU session establishment through the SMF and UPF EOs, an AMF probe
+//! PDU session establishment through the PCF, SMF and UPF EOs, an AMF probe
 //! carrying the N1 and N2 containers.
 
 use librecn_common::manage::{Manage, Method};
 use librecn_ngap::*;
 use librecn_oam::{CapturedLog, LogSink};
+use librecn_pcf::Pcf;
 use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Report, ReleaseSmContext, Slice, SmNotify, SmNotifyResult,
     UpdateSmContext, UpdateSmContextResult, n2, update,
@@ -41,12 +42,21 @@ fn core_with(params: &serde_json::Value) -> Core {
     tb.add(LogSink::config(), sink).unwrap();
     let (cfg, upf) = Upf::from_params("upf", &serde_json::Value::Null).unwrap();
     let upf = tb.add(cfg, upf).unwrap();
+    add_pcf(&mut tb);
     let (cfg, smf) = Smf::from_params("smf", params).unwrap();
     let smf = tb.add(cfg, smf).unwrap();
     let (probe, seen) = Probe::new();
     let amf = tb.add(EoConfig::new("amf").buffers(&[(256, 8), (2048, 8), (16 * 1024, 2)]), probe).unwrap();
     tb.run_until_idle();
     Core { tb, log, amf, smf, upf, seen }
+}
+
+/// The PCF: the subscriber's sessions to `internet` get 20 Mbit/s up, 100 down.
+fn add_pcf(tb: &mut TestBed) {
+    let params = serde_json::json!({ "policies": [{ "supi": "imsi-999700000000001",
+        "sessions": [{ "dnn": "internet", "ambr_mbps": { "uplink": 20, "downlink": 100 } }] }] });
+    let (cfg, pcf) = Pcf::from_params("pcf", &params).unwrap();
+    tb.add(cfg, pcf).unwrap();
 }
 
 impl Core {
@@ -99,6 +109,9 @@ fn a_session_is_established_set_up_on_the_gnb_and_released() {
     assert_eq!(result.pdu_session_id, 1);
     assert_eq!(result.n1.get()[..4], hex("2e0101c2"), "PDU Session Establishment Accept");
     assert!(result.n1.get().windows(5).any(|w| w == [0x01, 10, 45, 0, 2]), "the first UE address");
+    let ambr = [6, 6, 0, 100, 6, 0, 20];
+    assert!(result.n1.get().windows(7).any(|w| w == ambr), "the PCF's session AMBR, in Mbit/s");
+    assert!(c.logged("pcf", "SM policy for PDU session 1 to internet: 5QI 9, ARP 8, AMBR 20 / 100 Mbit/s"));
     let transfer: PDUSessionResourceSetupRequestTransfer = open(&Any::new(result.n2.get().to_vec())).unwrap();
     assert_eq!(transfer.protocol_ies.0.len(), 4);
     assert!(c.logged("upf", "UE 10.45.0.2, uplink TEID 0x1"));
@@ -242,7 +255,7 @@ fn a_refused_request_gets_a_reject_without_n2() {
 }
 
 #[test]
-fn without_a_upf_the_request_is_refused_for_resources() {
+fn without_a_pcf_or_a_upf_the_request_is_refused_for_resources() {
     let mut tb = TestBed::new();
     let (cfg, smf) = Smf::from_params("smf", &serde_json::Value::Null).unwrap();
     let smf = tb.add(cfg, smf).unwrap();
@@ -251,10 +264,15 @@ fn without_a_upf_the_request_is_refused_for_resources() {
     let mut request = CreateSmContext::new_zeroed();
     (request.pdu_session_id, request.slice.sst) = (1, 1);
     request.n1.set(&hex("2e 01 01 c1 ffff 91"));
-    tb.inject_from(amf, smf, 1, &request).unwrap();
-    tb.run_until_idle();
-    let result: CreateSmContextResult = seen.take()[0].body().unwrap();
-    assert_eq!(result.n1.get(), hex("2e0101c31a"), "Reject, #26 insufficient resources");
+    for pcf in [false, true] {
+        if pcf {
+            add_pcf(&mut tb);
+        }
+        tb.inject_from(amf, smf, 1, &request).unwrap();
+        tb.run_until_idle();
+        let result: CreateSmContextResult = seen.take()[0].body().unwrap();
+        assert_eq!(result.n1.get(), hex("2e0101c31a"), "Reject, #26 insufficient resources (PCF {pcf})");
+    }
 }
 
 #[test]

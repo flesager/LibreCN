@@ -40,7 +40,7 @@ listen = "0.0.0.0:8080"   # web GUI, REST API, Prometheus /metrics
 log_level = "info"        # vip, fatal, error, info, debug
 
 [[nf]]                    # one network function
-kind = "amf"              # amf, ausf, udm, smf, upf
+kind = "amf"              # amf, ausf, udm, pcf, smf, upf
 name = "amf-1"            # its name, used by the others to find it
 pool = "cp"               # optional: the first pool by default
 [nf.params]               # its parameters (below)
@@ -51,17 +51,21 @@ n2 = "192.168.1.10:38412"
 
 ```
 gNB ──N2──► amf-1 ──► ausf ──► udm      (authentication, subscribers)
-              │
-              └─────► smf ──► upf ◄──N3── gNB
+              │  └──────► pcf ◄──┐      (policies: UE-AMBR, sessions' QoS)
+              │                  │
+              └─────► smf ───────┘
+                       └────► upf ◄──N3── gNB
                                 │
                                 N6 (TUN) ──► data network
 ```
 
 | Function | Points to | Parameters, default |
 |---|---|---|
-| AMF | the AUSF and the SMF | `ausf = "ausf"`, `smf = "smf"` |
+| AMF | the AUSF, the SMF and the PCF | `ausf = "ausf"`, `smf = "smf"`, `pcf = "pcf"` |
 | AUSF | the UDM | `udm = "udm"` |
-| SMF | the UPF | `upf = "upf"` |
+| SMF | the UPF and the PCF | `upf = "upf"`, `pcf = "pcf"` |
+
+The PCF is required: without it, registrations go on with no UE-AMBR, but every PDU session is refused.
 
 **Pools and cores**: put every function in one pool pinned to the cores you give LibreCN. The [README](README.md#capacity) tells how many: 2 for the full capacity. The OAM functions always run in a pool named `oam`, added with one worker if the file has none. They are light, so they can share one of these cores:
 
@@ -121,10 +125,13 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
 
+**QoS and bit rates** come from the PCF, per subscriber, with a `default` entry for the others (see `app/librecn.example.toml`): the UE-AMBR, and for each DNN the session AMBR, the default flow's 5QI and ARP, and extra QoS flows with their packet filters. What an entry leaves out comes from `default`, then from the built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way.
+
 Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. With `[oam] state_dir` set (for example `/var/lib/librecn`), they survive restarts:
 - the UDM keeps what the web API changed (subscribers added and removed) and every subscriber's SQN in `<state_dir>/udm.json`, readable by its owner only (it holds keys);
 - it is written at most every 5 s when something changed, and at stop;
-- at start, the configuration is read first, then the state file on top of it; each SQN moves 1024 steps ahead, so none is used twice.
+- at start, the configuration is read first, then the state file on top of it; each SQN moves 1024 steps ahead, so none is used twice;
+- the PCF does the same for policies (`POST /api/nfs/pcf/policies`) in `<state_dir>/pcf.json`.
 
 Without `state_dir`, they live in memory only and are gone at the next start. A database will come later.
 
@@ -163,6 +170,14 @@ name = "upf"
 [nf.params]
 n3 = "192.168.1.10"
 n6 = "upf0"
+
+[[nf]]
+kind = "pcf"
+name = "pcf"
+[nf.params.default]
+ue_ambr_mbps = { uplink = 100, downlink = 500 }
+[[nf.params.default.sessions]]
+ambr_mbps = { uplink = 50, downlink = 200 }
 
 [[nf]]
 kind = "smf"

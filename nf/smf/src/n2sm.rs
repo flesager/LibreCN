@@ -13,6 +13,8 @@ pub struct Setup {
     pub teid: u32,
     pub qfi: u8,
     pub five_qi: u8,
+    /// ARP priority level (1 to 15).
+    pub arp: u8,
     /// Session AMBR in bit/s: uplink, downlink.
     pub ambr_bps: (u64, u64),
 }
@@ -39,7 +41,7 @@ pub fn setup_request_transfer(s: &Setup) -> Result<Vec<u8>, String> {
             None,
         )),
         AllocationAndRetentionPriority::new(
-            PriorityLevelARP(8),
+            PriorityLevelARP(s.arp),
             PreEmptionCapability::shall_not_trigger_pre_emption,
             PreEmptionVulnerability::not_pre_emptable,
             None,
@@ -115,6 +117,7 @@ mod tests {
             teid: 0x1234,
             qfi: 1,
             five_qi: 9,
+            arp: 8,
             ambr_bps: (1_000_000, 2_000_000),
         };
         let bytes = setup_request_transfer(&setup).unwrap();

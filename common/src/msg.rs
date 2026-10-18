@@ -11,6 +11,8 @@ pub mod family {
     pub const UE_AUTHENTICATION: u16 = 0x0001;
     /// PDU sessions: AMF and SMF (Nsmf), SMF and UPF (N4) (`librecn-sbi`).
     pub const PDU_SESSION: u16 = 0x0002;
+    /// Policy control: AMF and SMF with the PCF (Npcf) (`librecn-sbi`).
+    pub const POLICY: u16 = 0x0003;
 
     /// Log records.
     pub const OAM_LOG: u16 = 0xFF01;
@@ -20,7 +22,7 @@ pub mod family {
     pub const OAM_CONTROL: u16 = 0xFF03;
 
     /// Every family, for the uniqueness test.
-    pub const ALL: [u16; 5] = [UE_AUTHENTICATION, PDU_SESSION, OAM_LOG, OAM_ALARM, OAM_CONTROL];
+    pub const ALL: [u16; 6] = [UE_AUTHENTICATION, PDU_SESSION, POLICY, OAM_LOG, OAM_ALARM, OAM_CONTROL];
 }
 
 /// Message id of `message` in `family`.

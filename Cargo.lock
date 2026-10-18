@@ -496,6 +496,7 @@ dependencies = [
  "librecn-common",
  "librecn-ngap",
  "librecn-oam",
+ "librecn-pcf",
  "librecn-scheduler",
  "librecn-security",
  "librecn-smf",
@@ -519,6 +520,7 @@ dependencies = [
  "librecn-nas",
  "librecn-ngap",
  "librecn-oam",
+ "librecn-pcf",
  "librecn-sbi",
  "librecn-scheduler",
  "librecn-security",
@@ -591,6 +593,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "librecn-pcf"
+version = "0.1.0"
+dependencies = [
+ "librecn-common",
+ "librecn-sbi",
+ "librecn-scheduler",
+ "serde",
+ "serde_json",
+ "zerocopy",
+]
+
+[[package]]
 name = "librecn-sbi"
 version = "0.1.0"
 dependencies = [
@@ -632,6 +646,7 @@ dependencies = [
  "librecn-nas",
  "librecn-ngap",
  "librecn-oam",
+ "librecn-pcf",
  "librecn-sbi",
  "librecn-scheduler",
  "librecn-upf",
