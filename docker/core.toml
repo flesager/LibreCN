@@ -38,6 +38,7 @@ name = "pcf"
 supi = "imsi-999700000000001"
 [[nf.params.policies.sessions]]
 dnn = "internet"
+ambr_mbps = { uplink = 10, downlink = 20 }   # user-plane.sh measures it with iperf3
 [[nf.params.policies.sessions.flows]]  # user-plane.sh: the pings' answers on their own QoS flow
 five_qi = 7
 filters = [{ direction = "downlink", remote = "10.45.0.1", protocol = 1 }]

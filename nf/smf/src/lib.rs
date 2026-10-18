@@ -37,7 +37,7 @@ use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult,
     N4Report, ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult, n2, update,
 };
-use librecn_sbi::policy::{SessionRule, SmPolicyCreate, SmPolicyResult};
+use librecn_sbi::policy::{Rates, SessionRule, SmPolicyCreate, SmPolicyResult};
 use librecn_sbi::{Outcome, Supi};
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Message};
 use serde_json::json;
@@ -62,6 +62,33 @@ impl Answer<'_> {
     }
 }
 
+/// The PCF's rule of a session, kept small: whole (boxed) only with PCC
+/// rules, which most sessions lack (the rule takes 440 bytes).
+enum Policy {
+    Plain { ambr: Rates, five_qi: u8, arp: u8 },
+    Rules(Box<SessionRule>),
+}
+
+impl Policy {
+    fn new(rule: &SessionRule) -> Self {
+        match rule.rules() {
+            [] => Policy::Plain { ambr: rule.ambr, five_qi: rule.five_qi, arp: rule.arp },
+            _ => Policy::Rules(Box::new(*rule)),
+        }
+    }
+
+    fn rule(&self) -> SessionRule {
+        match self {
+            Policy::Rules(rule) => **rule,
+            Policy::Plain { ambr, five_qi, arp } => {
+                let mut rule = SessionRule::default();
+                (rule.ambr, rule.five_qi, rule.arp) = (*ambr, *five_qi, *arp);
+                rule
+            }
+        }
+    }
+}
+
 /// One PDU session.
 struct SmContext {
     supi: Supi,
@@ -79,7 +106,7 @@ struct SmContext {
     /// The AMF's request waiting for the PCF or the UPF (its `corr_id`).
     waiting: Option<u32>,
     /// The PCF's policy, once it answered.
-    rule: Option<SessionRule>,
+    rule: Option<Policy>,
     /// The UPF's uplink tunnel endpoint, once it answered N4Establish.
     n3: Option<(Ipv4Addr, u32)>,
     /// The downlink tunnel is set on the UPF (false while the UE is idle).
@@ -209,7 +236,7 @@ impl Smf {
             self.remove(ctx, id);
             return self.refuse(ctx, to, &supi, psi, insufficient);
         }
-        c.rule = Some(result.rule);
+        c.rule = Some(Policy::new(&result.rule));
         let sent = self.upf.get(ctx).ok_or(librecn_scheduler::Error::UnknownEo).and_then(|upf| {
             let mut m = ctx.alloc::<N4Establish>(upf)?.with_corr_id(id).with_flags(flags::REQUEST);
             *m = N4Establish::new(u64::from(id), ue_ip.octets(), result.rule);
@@ -228,7 +255,7 @@ impl Smf {
     fn on_established(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, result: &N4EstablishResult) {
         let id = msg.corr_id();
         let Some(c) = self.contexts.get_mut(&id) else { return };
-        let Some(rule) = c.rule else { return };
+        let Some(rule) = c.rule.as_ref().map(Policy::rule) else { return };
         let Some(corr) = c.waiting.take() else { return };
         let (to, psi, supi) = ((c.amf, corr), c.pdu_session_id, c.supi);
         if result.outcome() != Outcome::Ok {
@@ -286,7 +313,7 @@ impl Smf {
             return self.update_result(ctx, to, 0, Answer::outcome(Outcome::ContextNotFound));
         };
         (c.amf, c.amf_ue) = to;
-        let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3.zip(c.rule));
+        let (psi, supi, n3) = (c.pdu_session_id, c.supi, c.n3.zip(c.rule.as_ref().map(Policy::rule)));
         let container = request.container.get();
         match (request.kind, n3) {
             (update::DEACTIVATE, _) => {
@@ -418,7 +445,7 @@ impl Smf {
     fn on_report(&mut self, ctx: &mut Context<'_>, id: u32) {
         let Some(c) = self.contexts.get(&id).filter(|c| !c.active && !c.releasing) else { return };
         let (amf, amf_ue, psi, supi) = (c.amf, c.amf_ue, c.pdu_session_id, c.supi);
-        let Some((n3, rule)) = c.n3.zip(c.rule) else { return };
+        let Some((n3, rule)) = c.n3.zip(c.rule.as_ref().map(Policy::rule)) else { return };
         let transfer = match setup_transfer(n3, &rule) {
             Ok(transfer) => transfer,
             Err(e) => return log!(self.log, ctx, Error, "{supi}: {e}"),

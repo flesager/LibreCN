@@ -4,7 +4,12 @@
 # another. The UE registers, gets its two PDU sessions (DNNs internet and
 # ims), then pings the UPF's N6 addresses (10.45.0.1 through uesimtun0,
 # 10.46.0.1 through uesimtun1): GTP-U on N3, upf0 on N6; the PCF puts the
-# answers from 10.45.0.1 on an extra QoS flow (docker/core.toml). The gNB
+# answers from 10.45.0.1 on an extra QoS flow (docker/core.toml). iperf3
+# then measures the session AMBR the PCF gives (10 Mbit/s up, 20 down, the
+# UE-AMBR 1000), offering UDP at 3/2 of it: the UPF holds the downlink to it
+# (UERANSIM's gNB limits the downlink to the UE-AMBR only), the uplink both
+# do. (UDP: the rates are policed, and TCP over this sub-millisecond RTT
+# gets about half of them, see nf/README.md.) The gNB
 # then releases the UE (idle): the next ping brings it back with a Service
 # Request, its session reactivated (UERANSIM may drop the packet that woke
 # it: one answer at least is expected). Released again, the UE is then
@@ -28,6 +33,13 @@ sleep 1 # UERANSIM logs the interface up before it reads from it
 ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
 # The second session, on the second DNN (ims).
 ims_ping=$(docker exec librecn-ran ping -I uesimtun1 -c 3 -W 2 10.46.0.1 2>&1 || true)
+# The session AMBR, measured: UDP for 4 s each way, the receiver's rate in Mbit/s.
+mbps() {
+  docker exec librecn-ran iperf3 -c 10.45.0.1 -B 10.45.0.2 -t 4 -f m -u "$@" 2>&1 \
+    | awk '/receiver/ { for (i = 2; i <= NF; i++) if ($i == "Mbits/sec") print $(i - 1) }'
+}
+uplink=$(mbps -b 15M)
+downlink=$(mbps -b 30M -R)
 release
 wait_for librecn-core "deactivated (the UE is idle)" || true
 idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
@@ -49,7 +61,11 @@ echo "--- ping"; echo "$ping"
 echo "--- ping on the second DNN"; echo "$ims_ping"
 echo "--- ping after idle"; echo "$idle_ping"
 echo "--- ping of the idle UE (paging)"; echo "$paged_ping"
+echo "--- iperf3, UDP at 15 up and 30 down (Mbit/s; session AMBR 10 up, 20 down)"; echo "uplink ${uplink:-none}, downlink ${downlink:-none}"
 echo "--- UPF counters"; echo "$metrics"
+# within RATE AMBR FLOOR: at most the AMBR, 5 % for the 100 ms bursts, at
+# least FLOOR of it. The uplink is policed by UERANSIM's gNB too, its own way.
+within() { awk -v v="$1" -v max="$2" -v floor="$3" 'BEGIN { exit !(v != "" && v >= max * floor && v <= max * 1.05) }'; }
 core=$(docker logs librecn-core 2>&1)
 echo "$ping" | grep -q " 0% packet loss" \
   && echo "$ims_ping" | grep -q " 0% packet loss" \
@@ -62,6 +78,8 @@ echo "$ping" | grep -q " 0% packet loss" \
   && [ "$(echo "$core" | grep -c "registered: imsi-999700000000001")" -ge 2 ] \
   && echo "$metrics" | grep -Eq 'counter="downlink_packets"} [1-9]' \
   && echo "$metrics" | grep -Eq 'counter="extra_flow_packets"} [1-9]' \
+  && within "$uplink" 10 0.8 && within "$downlink" 20 0.95 \
+  && echo "$metrics" | grep -Eq 'counter="rate_limited_packets"} [1-9]' \
   && echo "$core" | grep -q "1 extra flow(s)" \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow), before and after idle; pinged while idle: paged; periodic registration" \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s), before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

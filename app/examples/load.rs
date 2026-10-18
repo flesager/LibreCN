@@ -181,8 +181,9 @@ enum Down {
     SessionSetup(Vec<u8>, Vec<u8>),
 }
 
-/// The UE ids and what came, from a downlink NGAP PDU.
-fn downlink(bytes: &[u8]) -> (u64, u32, Down) {
+/// The UE ids and what came, from a downlink NGAP PDU; none for Overload
+/// Start and Stop (the AMF's `max_ues` is the number of UEs: it reaches 90 %).
+fn downlink(bytes: &[u8]) -> Option<(u64, u32, Down)> {
     let NGAPPDU::initiatingMessage(m) = decode(bytes).unwrap() else { panic!("not an initiating message") };
     fn ids(ies: impl Iterator<Item = (u16, Any)>) -> (u64, u32, Option<Any>) {
         let (mut amf_id, mut ran_id, mut payload) = (0, 0, None);
@@ -201,20 +202,21 @@ fn downlink(bytes: &[u8]) -> (u64, u32, Down) {
         ID_DOWNLINK_NASTRANSPORT => {
             let msg: DownlinkNASTransport = open(&m.value).unwrap();
             let (a, r, nas) = ids(msg.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)));
-            (a, r, Down::Nas(open::<NASPDU>(&nas.unwrap()).unwrap().0.to_vec()))
+            Some((a, r, Down::Nas(open::<NASPDU>(&nas.unwrap()).unwrap().0.to_vec())))
         }
         ID_INITIAL_CONTEXT_SETUP => {
             let msg: InitialContextSetupRequest = open(&m.value).unwrap();
             let (a, r, _) = ids(msg.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)));
-            (a, r, Down::ContextSetup)
+            Some((a, r, Down::ContextSetup))
         }
         ID_PDUSESSION_RESOURCE_SETUP => {
             let msg: PDUSessionResourceSetupRequest = open(&m.value).unwrap();
             let (a, r, list) = ids(msg.protocol_ies.0.into_iter().map(|ie| (ie.id, ie.value)));
             let item = open::<PDUSessionResourceSetupListSUReq>(&list.unwrap()).unwrap().0.remove(0);
             let nas = item.p_dusession_nas_pdu.unwrap().0.to_vec();
-            (a, r, Down::SessionSetup(nas, item.p_dusession_resource_setup_request_transfer.to_vec()))
+            Some((a, r, Down::SessionSetup(nas, item.p_dusession_resource_setup_request_transfer.to_vec())))
         }
+        ID_OVERLOAD_START | ID_OVERLOAD_STOP => None,
         ref other => panic!("unexpected procedure {other:?}"),
     }
 }
@@ -337,7 +339,7 @@ impl Gnb {
                 );
             }
             let Some(Received::Data { data, .. }) = socket.recv(&mut buf).unwrap() else { continue };
-            let (amf_id, ran_id, down) = downlink(data);
+            let Some((amf_id, ran_id, down)) = downlink(data) else { continue };
             let ue = ues.get_mut(&ran_id).expect("a UE of this gNB");
             let replies: Vec<Vec<u8>> = match down {
                 Down::Nas(nas) if nas[1] == 0 && nas[2] == 0x56 => {

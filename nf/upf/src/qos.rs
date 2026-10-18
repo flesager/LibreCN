@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use librecn_sbi::policy::{DEFAULT_QFI, MAX_RULES, PacketFilter, Rates, SessionRule, direction, rule_qfi};
+use librecn_sbi::policy::{DEFAULT_QFI, MAX_RULES, PacketFilter, PccRule, Rates, SessionRule, direction, rule_qfi};
 use librecn_scheduler::Time;
 
 /// How much traffic, in time at the limit's rate, may go in one burst.
@@ -57,24 +57,6 @@ fn matches(f: &PacketFilter, fields: &Fields) -> bool {
         && in_range(f.local_ports, fields.ports.map(|p| p.1))
 }
 
-/// The QoS flow of downlink `packet` (IPv4): its QFI.
-pub fn downlink(rule: &SessionRule, packet: &[u8]) -> u8 {
-    if rule.rules().is_empty() {
-        return DEFAULT_QFI;
-    }
-    let Some(fields) = fields(packet) else { return DEFAULT_QFI };
-    match rule.rules().iter().position(|r| r.filters().iter().any(|f| matches(f, &fields))) {
-        Some(i) => rule_qfi(i),
-        None => DEFAULT_QFI,
-    }
-}
-
-/// Whether an uplink packet's `qfi` is one of the session's flows (none:
-/// no PDU Session Container, the default flow).
-pub fn uplink_known(rule: &SessionRule, qfi: Option<u8>) -> bool {
-    qfi.is_none_or(|q| q == DEFAULT_QFI || (rule_qfi(0)..rule_qfi(rule.rules().len())).contains(&q))
-}
-
 /// One rate limit (GCRA): a packet conforms unless the traffic let through
 /// would take more than [`BURST`] beyond now at the rate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,36 +80,73 @@ impl Limit {
     }
 }
 
-/// The rate limits of a session, uplink and downlink: its AMBR and each
-/// PCC rule's MBR.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Limits {
-    ambr: [Limit; 2],
-    flows: [[Limit; 2]; MAX_RULES],
-    /// The GBR flows, outside the session AMBR.
-    gbr: [bool; MAX_RULES],
+/// Uplink and downlink limits of `rates`.
+fn limits(rates: Rates) -> [Limit; 2] {
+    [rates.uplink, rates.downlink].map(|rate| Limit { rate, done: 0 })
 }
 
-impl Limits {
+/// A session's PCC rules and their MBRs.
+#[derive(Debug, PartialEq, Eq)]
+struct Flows {
+    rule: SessionRule,
+    mbr: [[Limit; 2]; MAX_RULES],
+}
+
+/// A session's QoS: its AMBR, and its PCC rules if it has any (boxed: most
+/// sessions have none, and the rules are 440 bytes).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Qos {
+    ambr: [Limit; 2],
+    flows: Option<Box<Flows>>,
+}
+
+impl Qos {
     pub fn new(rule: &SessionRule) -> Self {
-        let limits = |r: Rates| [r.uplink, r.downlink].map(|rate| Limit { rate, done: 0 });
-        let mut l = Limits { ambr: limits(rule.ambr), ..Limits::default() };
-        for (i, r) in rule.rules().iter().enumerate() {
-            (l.flows[i], l.gbr[i]) = (limits(r.mbr), !r.gbr.is_zero());
+        let flows = (!rule.rules().is_empty()).then(|| {
+            let mut mbr = [[Limit::default(); 2]; MAX_RULES];
+            for (m, r) in mbr.iter_mut().zip(rule.rules()) {
+                *m = limits(r.mbr);
+            }
+            Box::new(Flows { rule: *rule, mbr })
+        });
+        Qos { ambr: limits(rule.ambr), flows }
+    }
+
+    /// The session's PCC rules.
+    pub fn rules(&self) -> &[PccRule] {
+        self.flows.as_ref().map_or(&[], |f| f.rule.rules())
+    }
+
+    /// The QoS flow of downlink `packet` (IPv4): its QFI.
+    pub fn downlink(&self, packet: &[u8]) -> u8 {
+        if self.rules().is_empty() {
+            return DEFAULT_QFI;
         }
-        l
+        let Some(fields) = fields(packet) else { return DEFAULT_QFI };
+        match self.rules().iter().position(|r| r.filters().iter().any(|f| matches(f, &fields))) {
+            Some(i) => rule_qfi(i),
+            None => DEFAULT_QFI,
+        }
+    }
+
+    /// Whether an uplink packet's `qfi` is one of the session's flows
+    /// (none: no PDU Session Container, the default flow).
+    pub fn uplink_known(&self, qfi: Option<u8>) -> bool {
+        qfi.is_none_or(|q| q == DEFAULT_QFI || (rule_qfi(0)..rule_qfi(self.rules().len())).contains(&q))
     }
 
     /// Whether a packet of `bytes` on flow `qfi` (one of the session's),
     /// `downlink` or up, may go at `now`; if so, its share is taken.
     pub fn allow(&mut self, qfi: u8, downlink: bool, now: Time, bytes: usize) -> bool {
         let (way, now) = (usize::from(downlink), now.as_nanos());
-        let rule = usize::from(qfi).checked_sub(usize::from(rule_qfi(0))).filter(|i| *i < MAX_RULES);
-        let gbr = rule.is_some_and(|i| self.gbr[i]);
-        let (flow, ambr) = match rule {
-            Some(i) => (Some(&mut self.flows[i][way]), (!gbr).then_some(&mut self.ambr[way])),
-            None => (None, Some(&mut self.ambr[way])),
+        let i = usize::from(qfi).wrapping_sub(usize::from(rule_qfi(0)));
+        let flow = self.flows.as_deref_mut().filter(|f| i < f.rule.rules().len());
+        // A GBR flow is held to its MBR only, outside the session AMBR.
+        let (flow, gbr) = match flow {
+            Some(f) => (Some(&mut f.mbr[i][way]), !f.rule.rules()[i].gbr.is_zero()),
+            None => (None, false),
         };
+        let ambr = (!gbr).then_some(&mut self.ambr[way]);
         let conforms = |l: &Option<&mut Limit>| l.as_ref().is_none_or(|l| l.conforms(now));
         if !conforms(&flow) || !conforms(&ambr) {
             return false;
@@ -142,7 +161,6 @@ impl Limits {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use librecn_sbi::policy::PccRule;
     use zerocopy::FromZeros;
 
     /// An IPv4 packet from `src` to `dst`, its protocol and ports.
@@ -180,27 +198,27 @@ mod tests {
         let up_only = PacketFilter::new(direction::UPLINK, 0, ([0; 4], 0), [0, 0], [0, 0]);
         let r = rule(&[&[up_only, sip], &[pings], &[web]]);
 
-        assert_eq!(downlink(&r, &packet(17, [10, 10, 3, 4], UE, (5061, 40000))), 2, "SIP");
-        assert_eq!(downlink(&r, &packet(17, [10, 11, 3, 4], UE, (5061, 40000))), 1, "another network");
-        assert_eq!(downlink(&r, &packet(17, [10, 10, 3, 4], UE, (5062, 40000))), 1, "another port");
-        assert_eq!(downlink(&r, &packet(1, [10, 45, 0, 1], UE, (0, 0))), 3, "ICMP, no ports");
-        assert_eq!(downlink(&r, &packet(6, [1, 2, 3, 4], UE, (443, 8080))), 4, "local port");
-        assert_eq!(downlink(&r, &packet(6, [1, 2, 3, 4], UE, (8080, 443))), 1, "a remote port");
-        assert_eq!(downlink(&r, &[0x60, 0, 0, 0]), 1, "not IPv4");
+        assert_eq!(Qos::new(&r).downlink(&packet(17, [10, 10, 3, 4], UE, (5061, 40000))), 2, "SIP");
+        assert_eq!(Qos::new(&r).downlink(&packet(17, [10, 11, 3, 4], UE, (5061, 40000))), 1, "another network");
+        assert_eq!(Qos::new(&r).downlink(&packet(17, [10, 10, 3, 4], UE, (5062, 40000))), 1, "another port");
+        assert_eq!(Qos::new(&r).downlink(&packet(1, [10, 45, 0, 1], UE, (0, 0))), 3, "ICMP, no ports");
+        assert_eq!(Qos::new(&r).downlink(&packet(6, [1, 2, 3, 4], UE, (443, 8080))), 4, "local port");
+        assert_eq!(Qos::new(&r).downlink(&packet(6, [1, 2, 3, 4], UE, (8080, 443))), 1, "a remote port");
+        assert_eq!(Qos::new(&r).downlink(&[0x60, 0, 0, 0]), 1, "not IPv4");
 
         let mut fragment = packet(17, [10, 10, 3, 4], UE, (5061, 40000));
         fragment[7] = 1;
-        assert_eq!(downlink(&r, &fragment), 1, "a later fragment has no ports");
-        assert_eq!(downlink(&rule(&[]), &packet(1, [10, 45, 0, 1], UE, (0, 0))), 1, "no rules");
+        assert_eq!(Qos::new(&r).downlink(&fragment), 1, "a later fragment has no ports");
+        assert_eq!(Qos::new(&rule(&[])).downlink(&packet(1, [10, 45, 0, 1], UE, (0, 0))), 1, "no rules");
     }
 
     /// Bytes let through in `seconds`, downlink: 1250-byte packets (10 kbit)
     /// offered every millisecond (10 Mbit/s), on the flows `qfis` in turn.
-    fn through(limits: &mut Limits, qfis: &[u8], seconds: u64) -> u64 {
+    fn through(qos: &mut Qos, qfis: &[u8], seconds: u64) -> u64 {
         let mut bytes = 0;
         for ms in 0..seconds * 1000 {
             let qfi = qfis[ms as usize % qfis.len()];
-            if limits.allow(qfi, true, Time::from_nanos(ms * 1_000_000 + 1), 1250) {
+            if qos.allow(qfi, true, Time::from_nanos(ms * 1_000_000 + 1), 1250) {
                 bytes += 1250;
             }
         }
@@ -219,32 +237,32 @@ mod tests {
         r.set_rules(&flows);
 
         // 2 Mbit/s for 10 s is 2.5 MB, plus the first burst (100 ms: 25 kB).
-        let ambr = through(&mut Limits::new(&r), &[1], 10);
+        let ambr = through(&mut Qos::new(&r), &[1], 10);
         assert!((2_500_000..=2_530_000).contains(&ambr), "AMBR 2 Mbit/s: {ambr} bytes");
-        let flow = through(&mut Limits::new(&r), &[2], 10);
+        let flow = through(&mut Qos::new(&r), &[2], 10);
         assert!((1_250_000..=1_270_000).contains(&flow), "MBR 1 Mbit/s: {flow} bytes");
-        let gbr = through(&mut Limits::new(&r), &[3], 10);
+        let gbr = through(&mut Qos::new(&r), &[3], 10);
         assert!((5_000_000..=5_060_000).contains(&gbr), "GBR, MBR 4 Mbit/s: {gbr} bytes");
 
         // A non-GBR flow shares the AMBR with the default flow; a GBR one does not.
-        let both = through(&mut Limits::new(&r), &[1, 2], 10);
+        let both = through(&mut Qos::new(&r), &[1, 2], 10);
         assert!((2_500_000..=2_530_000).contains(&both), "AMBR shared: {both} bytes");
-        let apart = through(&mut Limits::new(&r), &[1, 3], 10);
+        let apart = through(&mut Qos::new(&r), &[1, 3], 10);
         assert!((7_500_000..=7_580_000).contains(&apart), "2.5 MB and 5 MB, and both bursts: {apart} bytes");
 
         // Uplink is another limit; no rate, no limit.
-        let mut l = Limits::new(&r);
+        let mut l = Qos::new(&r);
         through(&mut l, &[1], 1);
         assert!(l.allow(1, false, Time::from_nanos(1_000_000_000), 1250), "uplink untouched");
-        assert_eq!(through(&mut Limits::new(&rule(&[])), &[1], 1), 1_250_000, "no AMBR: all of it");
+        assert_eq!(through(&mut Qos::new(&rule(&[])), &[1], 1), 1_250_000, "no AMBR: all of it");
     }
 
     #[test]
     fn uplink_qfis_must_be_the_sessions() {
         let any = PacketFilter::new(direction::BOTH, 0, ([0; 4], 0), [0, 0], [0, 0]);
-        let r = rule(&[&[any], &[any]]);
-        assert!(uplink_known(&r, None) && uplink_known(&r, Some(1)) && uplink_known(&r, Some(3)));
-        assert!(!uplink_known(&r, Some(4)) && !uplink_known(&r, Some(0)));
-        assert!(!uplink_known(&rule(&[]), Some(2)));
+        let q = Qos::new(&rule(&[&[any], &[any]]));
+        assert!(q.uplink_known(None) && q.uplink_known(Some(1)) && q.uplink_known(Some(3)));
+        assert!(!q.uplink_known(Some(4)) && !q.uplink_known(Some(0)));
+        assert!(!Qos::new(&rule(&[])).uplink_known(Some(2)));
     }
 }

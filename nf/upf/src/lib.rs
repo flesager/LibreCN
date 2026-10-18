@@ -216,13 +216,12 @@ impl Upf {
                 Ok(Gtp::GPdu { teid, qfi, payload }) => {
                     // The inner source must be the session's UE (no spoofing).
                     let session = self.sessions.by_teid(teid);
-                    let Some(s) =
-                        session.filter(|s| ipv4_src(payload) == Some(s.ue_ip) && qos::uplink_known(&s.rule, qfi))
+                    let Some(s) = session.filter(|s| ipv4_src(payload) == Some(s.ue_ip) && s.qos.uplink_known(qfi))
                     else {
                         ctx.count(DROPPED, 1);
                         continue;
                     };
-                    if !s.limits.allow(qfi.unwrap_or(DEFAULT_QFI), false, now, payload.len()) {
+                    if !s.qos.allow(qfi.unwrap_or(DEFAULT_QFI), false, now, payload.len()) {
                         ctx.count(RATE_LIMITED, 1);
                     } else if device.write(payload).is_ok() {
                         ctx.count(UPLINK_PACKETS, 1);
@@ -280,8 +279,8 @@ impl Upf {
                 }
                 continue;
             };
-            let qfi = qos::downlink(&session.rule, packet);
-            if !session.limits.allow(qfi, true, now, n) {
+            let qfi = session.qos.downlink(packet);
+            if !session.qos.allow(qfi, true, now, n) {
                 ctx.count(RATE_LIMITED, 1);
                 continue;
             }
@@ -367,12 +366,12 @@ impl Upf {
     /// (64 at most in all: outside the session's rates).
     fn send_parked(&mut self, ctx: &mut Context<'_>, seid: u64, gnb: SocketAddrV4, teid: u32) {
         let (buffer, socket) = (&mut self.buffer, &self.n3_socket);
-        let Some(rule) = self.sessions.get(seid).map(|s| &s.rule) else { return };
+        let Some(qos) = self.sessions.get(seid).map(|s| &s.qos) else { return };
         let mut sent = 0;
         self.parked.release(seid, |packet| {
             let n = packet.len();
             buffer[G_PDU_HEADER..G_PDU_HEADER + n].copy_from_slice(packet);
-            let qfi = qos::downlink(rule, packet);
+            let qfi = qos.downlink(packet);
             let header: &mut [u8; G_PDU_HEADER] = (&mut buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
             librecn_gtpu::write_g_pdu_header(header, teid, qfi, n);
             let delivered = socket.as_ref().is_some_and(|(s, _)| s.send_to(&buffer[..G_PDU_HEADER + n], gnb).is_ok());

@@ -6,17 +6,15 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use librecn_sbi::policy::SessionRule;
 use librecn_scheduler::Time;
 
-use crate::qos::Limits;
+use crate::qos::Qos;
 
 /// One PDU session's forwarding state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Session {
     pub ue_ip: Ipv4Addr,
     pub ul_teid: u32,
-    /// The PCF's policy: the extra QoS flows' filters.
-    pub rule: SessionRule,
-    /// Its rates: the session AMBR, the flows' MBRs.
-    pub limits: Limits,
+    /// The PCF's policy: the extra QoS flows, the rates.
+    pub qos: Qos,
     /// The gNB's GTP-U endpoint and TEID, once known.
     pub dl: Option<(SocketAddrV4, u32)>,
     /// When downlink data without a tunnel was last reported to the SMF.
@@ -83,8 +81,7 @@ impl Sessions {
         Ok(self.by_seid.entry(seid).or_insert(Session {
             ue_ip,
             ul_teid,
-            rule: *rule,
-            limits: Limits::new(rule),
+            qos: Qos::new(rule),
             dl: None,
             reported: None,
         }))
@@ -129,19 +126,19 @@ mod tests {
         let mut s = Sessions::new(2);
         let rule = SessionRule::new_zeroed();
         let ue = Ipv4Addr::new(10, 45, 0, 2);
-        let a = *s.establish(1, ue, &rule).unwrap();
-        assert_eq!(s.establish(1, ue, &rule), Ok(&a), "retransmission");
+        let a = s.establish(1, ue, &rule).unwrap().ul_teid;
+        assert_eq!(s.establish(1, ue, &rule).unwrap().ul_teid, a, "retransmission");
         assert_eq!(s.establish(2, ue, &rule), Err(Refusal::AddressInUse));
-        let b = *s.establish(2, Ipv4Addr::new(10, 45, 0, 3), &rule).unwrap();
-        assert_ne!(a.ul_teid, b.ul_teid);
+        let b = s.establish(2, Ipv4Addr::new(10, 45, 0, 3), &rule).unwrap().ul_teid;
+        assert_ne!(a, b);
         assert_eq!(s.establish(3, Ipv4Addr::new(10, 45, 0, 4), &rule), Err(Refusal::Full));
         let gnb = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2152);
         assert!(s.modify(1, Some((gnb, 9))) && !s.modify(7, Some((gnb, 9))));
-        assert_eq!(s.by_teid(a.ul_teid).unwrap().dl, Some((gnb, 9)));
+        assert_eq!(s.by_teid(a).unwrap().dl, Some((gnb, 9)));
         assert!(s.modify(1, None) && s.by_ue(ue).unwrap().1.dl.is_none());
         s.modify(1, Some((gnb, 9)));
-        assert_eq!(s.by_ue(ue).unwrap().1.ul_teid, a.ul_teid);
+        assert_eq!(s.by_ue(ue).unwrap().1.ul_teid, a);
         assert!(s.delete(1).is_some());
-        assert!(s.by_teid(a.ul_teid).is_none() && s.by_ue(ue).is_none() && s.len() == 1);
+        assert!(s.by_teid(a).is_none() && s.by_ue(ue).is_none() && s.len() == 1);
     }
 }

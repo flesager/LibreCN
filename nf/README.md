@@ -45,6 +45,13 @@ Deliberately left out of this release, to be added when a step needs them:
   fits in 512 bytes: four GBR flows of four filters with every field do
   not, and such a session is refused (#26). The UE-AMBR is not enforced by
   the UPF (the gNB gets it); N4 as PFCP (EO messages instead, by choice).
+- **Rate shaping**: the UPF polices (drops beyond the rate, no queue), as a
+  QER's MBR does. Measured through UERANSIM in Docker (`user-plane.sh`), UDP
+  gets the session AMBR exactly, but one TCP flow over that sub-millisecond
+  round trip gets about half of it (10 of 20 Mbit/s): a window of one or two
+  packets cannot raise three duplicate ACKs, so each loss waits for the
+  retransmission timeout. Over real round trips (tens of ms) the 100 ms burst
+  covers the window.
 - **Subscription data** (Nudm_SDM, Nudm_UECM): the allowed NSSAI is the
   requested slices the AMF serves, else all of them; the SMF's DNNs and
   pools apply to every UE (the QoS comes from the PCF).
