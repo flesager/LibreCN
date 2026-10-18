@@ -4,98 +4,87 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LibreCN</title>
-<style>
-  :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #667085; --line: #e3e6ec;
-          --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --accent: #2457c5; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1218; --card: #171b23; --ink: #e6e9ef; --muted: #98a2b3; --line: #2a303c;
-            --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #6ea8fe; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
-         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-  h1 { font-size: 20px; margin: 0; }
-  h2 { font-size: 15px; margin: 0 0 8px; }
-  .muted { color: var(--muted); }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-  .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 600; }
-  td.num, th.num { text-align: right; }
-  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
-  button { font: inherit; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
-           background: var(--card); color: var(--ink); cursor: pointer; }
-  button:hover { border-color: var(--accent); }
-  textarea { width: 100%; min-height: 110px; font: 13px ui-monospace, monospace; padding: 8px;
-             border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
-  pre { margin: 8px 0 0; white-space: pre-wrap; font-size: 13px; }
-  input { font: 13px ui-monospace, monospace; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
-          background: var(--bg); color: var(--ink); min-width: 0; }
-  input:invalid:not(:placeholder-shown) { border-color: var(--bad); }
-  .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .row input { flex: 1 1 150px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <h1>LibreCN</h1>
+  <nav id="tabs">
+    <a href="#overview">Overview</a>
+    <a href="#ues">UEs</a>
+    <a href="#provisioning">Provisioning</a>
+    <a href="#system">System</a>
+  </nav>
+  <a id="alarm-badge" class="badge" href="#system" hidden></a>
   <span class="muted" id="status">connecting…</span>
 </header>
 
-<section>
-  <h2>Active alarms</h2>
-  <div class="scroll"><table id="alarms"></table></div>
-</section>
+<div class="panel" id="overview">
+  <section>
+    <h2>Your core</h2>
+    <p class="muted">As in TS 23.501 (§4.2.3): the service-based NFs on top, the reference points below.
+      Grey: 3GPP NFs LibreCN does not have. Click an NF for its details.</p>
+    <svg id="diagram" viewBox="0 0 1000 560" role="img" aria-label="The core's network functions"></svg>
+  </section>
+  <section id="nf-detail" hidden>
+    <h2 id="nf-title"></h2>
+    <p class="muted" id="nf-text"></p>
+    <div class="scroll"><table id="nf-table"></table></div>
+  </section>
+</div>
 
-<section>
-  <h2>Execution objects</h2>
-  <div class="scroll"><table id="eos"></table></div>
-</section>
+<div class="panel" id="ues" hidden>
+  <section>
+    <h2>gNBs</h2>
+    <p class="muted" id="ue-counts"></p>
+    <div class="scroll"><table id="gnbs"></table></div>
+  </section>
+  <section>
+    <h2>UEs</h2>
+    <form id="ue-search" class="row">
+      <input name="supi" placeholder="imsi-999700000000001: a UE's details" required pattern="imsi-[0-9]{5,15}" aria-label="SUPI">
+      <button>Show</button>
+    </form>
+    <div class="scroll"><table id="ue-list"></table></div>
+  </section>
+  <section id="ue-detail" hidden>
+    <h2 id="ue-title"></h2>
+    <div class="facts" id="ue-facts"></div>
+    <div class="scroll"><table id="ue-sessions"></table></div>
+    <p class="row">
+      <button id="ue-guti">New 5G-GUTI</button>
+      <button id="ue-deregister">Deregister</button>
+      <label class="muted"><input type="checkbox" id="ue-reregister" checked> and ask it to register again</label>
+      <button id="ue-close">Close</button>
+    </p>
+  </section>
+  <section>
+    <h2>PDU sessions</h2>
+    <p class="muted">User plane: <span id="throughput">…</span></p>
+    <div class="scroll"><table id="sessions"></table></div>
+  </section>
+</div>
 
-<section>
-  <h2>Workers</h2>
-  <div class="scroll"><table id="workers"></table></div>
-</section>
-
-<section>
-  <h2>gNBs and UEs</h2>
-  <p class="muted">Seen by the AMF <input id="amf" value="amf-1" size="8" aria-label="AMF name">.
-    <span id="ue-counts"></span></p>
-  <div class="scroll"><table id="gnbs"></table></div>
-  <div class="scroll"><table id="ues"></table></div>
-</section>
-
-<section>
-  <h2>PDU sessions</h2>
-  <p class="muted">Held by the SMF <input id="smf" value="smf" size="8" aria-label="SMF name">.
-    User plane: <span id="throughput">…</span></p>
-  <div class="scroll"><table id="sessions"></table></div>
-</section>
-
-<section>
-  <h2>Subscribers</h2>
-  <p class="muted">Held by the UDM <input id="udm" value="udm" size="8" aria-label="UDM name">.
-    Keys are write-only: they never leave the UDM.</p>
-  <div class="scroll"><table id="subscribers"></table></div>
-  <form id="add-subscriber" class="row">
-    <input name="supi" placeholder="imsi-999700000000001" required pattern="imsi-[0-9]{5,15}" aria-label="SUPI">
-    <input name="k" placeholder="K: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="K">
-    <input name="opc" placeholder="OPc: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="OPc">
-    <input name="amf" placeholder="AMF field: 8000" pattern="[0-9A-Fa-f]{4}" aria-label="AMF field">
-    <input name="sqn" placeholder="SQN: 000000000000" pattern="[0-9A-Fa-f]{12}" aria-label="SQN">
-    <button>Add</button>
-  </form>
-</section>
-
-<section>
-  <h2>Policies</h2>
-  <p class="muted">Held by the PCF <input id="pcf" value="pcf" size="8" aria-label="PCF name">, per subscriber;
-    the others get the default. Bit rates in Mbit/s, uplink / downlink. A new UE-AMBR reaches the UE at once,
-    session policies apply to new sessions.</p>
-  <div class="scroll"><table id="policies"></table></div>
-  <textarea id="policy" aria-label="Policy (JSON)" style="min-height: 260px">{
+<div class="panel" id="provisioning" hidden>
+  <section>
+    <h2>Subscribers</h2>
+    <p class="muted">Held by the UDM. Keys are write-only: they never leave the UDM.</p>
+    <div class="scroll"><table id="subscribers"></table></div>
+    <form id="add-subscriber" class="row">
+      <input name="supi" placeholder="imsi-999700000000001" required pattern="imsi-[0-9]{5,15}" aria-label="SUPI">
+      <input name="k" placeholder="K: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="K">
+      <input name="opc" placeholder="OPc: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="OPc">
+      <input name="amf" placeholder="AMF field: 8000" pattern="[0-9A-Fa-f]{4}" aria-label="AMF field">
+      <input name="sqn" placeholder="SQN: 000000000000" pattern="[0-9A-Fa-f]{12}" aria-label="SQN">
+      <button>Add</button>
+    </form>
+  </section>
+  <section>
+    <h2>Policies</h2>
+    <p class="muted">Held by the PCF, per subscriber; the others get the default. Bit rates in Mbit/s, uplink / downlink.
+      A new UE-AMBR reaches the UE at once, session policies apply to new sessions.</p>
+    <div class="scroll"><table id="policies"></table></div>
+    <textarea id="policy" class="tall" aria-label="Policy (JSON)">{
   "supi": "imsi-999700000000001",
   "ue_ambr_mbps": { "uplink": 100, "downlink": 500 },
   "sessions": [{
@@ -106,256 +95,48 @@
                 "filters": [{ "remote": "10.10.0.0/16", "protocol": 17, "remote_ports": "5060-5061" }] }]
   }]
 }</textarea>
-  <p><button id="set-policy">Set</button></p>
-</section>
+    <p><button id="set-policy">Set</button></p>
+  </section>
+</div>
 
-<section>
-  <h2>Start NFs</h2>
-  <p class="muted">Deployment in TOML or JSON. Kinds: <span id="kinds">…</span></p>
-  <textarea id="deployment">[[nf]]
+<div class="panel" id="system" hidden>
+  <section>
+    <h2>Active alarms</h2>
+    <div class="scroll"><table id="alarms"></table></div>
+  </section>
+  <section>
+    <h2>Execution objects</h2>
+    <div class="scroll"><table id="eos"></table></div>
+  </section>
+  <section>
+    <h2>Workers</h2>
+    <div class="scroll"><table id="workers"></table></div>
+  </section>
+  <section>
+    <h2>AMF capacity</h2>
+    <p class="muted">The relative capacity the gNBs weigh AMFs by (0 to 255), announced to each (AMF Configuration Update).</p>
+    <form id="capacity" class="row">
+      <input name="relative_capacity" type="number" min="0" max="255" required placeholder="255" aria-label="Relative capacity">
+      <button>Announce</button>
+    </form>
+  </section>
+  <section>
+    <h2>Start NFs</h2>
+    <p class="muted">Deployment in TOML or JSON. Kinds: <span id="kinds">…</span></p>
+    <textarea id="deployment">[[nf]]
 kind = "demo"
 name = "demo-1"
 pool = "cp"
 </textarea>
-  <p><button id="deploy">Start</button></p>
+    <p><button id="deploy">Start</button></p>
+  </section>
+</div>
+
+<section id="result-box" hidden>
+  <h2>Last action</h2>
   <pre id="result"></pre>
 </section>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const num = (v, digits = 0) => v === undefined || v === null ? "" : Number(v).toFixed(digits);
-const PROTECTED = ["log", "alarm", "control", "server"];
-let previous = { at: 0, busy: {} };
-
-function table(el, head, rows) {
-  el.innerHTML = "<tr>" + head.map(([h, cls]) => `<th class="${cls || ""}">${h}</th>`).join("") + "</tr>" +
-    (rows.length ? rows.join("") : `<tr><td class="muted" colspan="${head.length}">none</td></tr>`);
-}
-
-function renderAlarms(alarms) {
-  const sev = { CRITICAL: "bad", MAJOR: "bad", MINOR: "warn", WARNING: "warn" };
-  table($("alarms"), [["Severity"], ["Source"], ["Id", "num"], ["Text"], ["Raised"]], alarms.map((a) =>
-    `<tr><td class="${sev[a.severity] || ""}">${esc(a.severity)}</td><td>${esc(a.source)}</td>` +
-    `<td class="num">${a.alarm_id}</td><td>${esc(a.text)}</td>` +
-    `<td>${new Date(a.raised_unix_ms).toLocaleTimeString()}</td></tr>`));
-}
-
-function renderEos(eos) {
-  table($("eos"), [["Name"], ["Pool"], ["State"], ["Messages", "num"], ["Mean µs", "num"], ["Max µs", "num"],
-    ["Queue", "num"], ["Queue peak", "num"], ["Rejected", "num"], ["Buffers peak/count"], ["Counters"], [""]], eos.map((e) => {
-    const s = e.stats || {};
-    const buffers = (s.buffers || []).map((b) =>
-      `<span class="${b.failures ? "bad" : b.high_water >= b.count ? "warn" : ""}">${b.size}B ${b.high_water}/${b.count}</span>`).join(" ");
-    const counters = Object.entries(s.counters || {}).map(([k, v]) => `${esc(k)} ${v}`).join(", ");
-    const stop = e.alive && !PROTECTED.includes(e.name) ? `<button data-stop="${e.id}">Stop</button>` : "";
-    return `<tr><td>${esc(e.name)}</td><td>${esc(e.pool)}</td>` +
-      `<td class="${e.alive ? "ok" : "bad"}">${e.alive ? "running" : "faulted"}</td>` +
-      `<td class="num">${num(s.messages)}</td><td class="num">${num(s.mean_us, 1)}</td><td class="num">${num(s.max_us, 1)}</td>` +
-      `<td class="num">${num(s.data_depth)}</td><td class="num">${num(s.data_high_water)}</td>` +
-      `<td class="num ${s.data_rejected ? "bad" : ""}">${num(s.data_rejected)}</td><td>${buffers}</td>` +
-      `<td class="muted">${counters}</td><td>${stop}</td></tr>`;
-  }));
-}
-
-function renderWorkers(workers, now) {
-  const dt = previous.at ? now - previous.at : 0;
-  table($("workers"), [["Pool"], ["Worker", "num"], ["Core", "num"], ["Load", "num"], ["Messages", "num"], ["Wake-ups", "num"]],
-    workers.map((w) => {
-      const key = w.pool + "/" + w.index;
-      const load = dt && previous.busy[key] !== undefined ? (100 * (w.busy_ms - previous.busy[key]) / dt) : null;
-      previous.busy[key] = w.busy_ms;
-      return `<tr><td>${esc(w.pool)}</td><td class="num">${w.index}</td><td class="num">${w.core ?? ""}</td>` +
-        `<td class="num">${load === null ? "" : num(Math.min(load, 100), 0) + " %"}</td>` +
-        `<td class="num">${w.messages}</td><td class="num">${w.wakeups}</td></tr>`;
-    }));
-  previous.at = now;
-}
-
-async function get(path) {
-  const r = await fetch(path);
-  if (!r.ok) throw new Error(path + ": " + r.status);
-  return r.json();
-}
-
-// Resource `path` of the NF named in input `nf`: its JSON, or an error.
-async function nfGet(nf, path) {
-  const r = await fetch(`/api/nfs/${encodeURIComponent($(nf).value.trim())}/${path}`);
-  const body = await r.json();
-  if (!r.ok) throw new Error(body.error || r.status);
-  return body;
-}
-
-// Refreshes view `id` with `render`, one request at a time; an error shows in its table.
-const pending = {};
-async function view(id, render) {
-  if (pending[id]) return;
-  pending[id] = true;
-  try {
-    await render();
-  } catch (e) {
-    $(id).innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
-  } finally {
-    pending[id] = false;
-  }
-}
-
-const refreshSubscribers = () => view("subscribers", async () => {
-  const body = await nfGet("udm", "subscribers");
-  table($("subscribers"), [["SUPI"], ["AMF field"], ["SQN"], [""]], body.map((s) =>
-    `<tr><td>${esc(s.supi)}</td><td>${esc(s.amf)}</td><td>${esc(s.sqn)}</td>` +
-    `<td><button data-remove="${esc(s.supi)}">Remove</button></td></tr>`));
-});
-
-// A "N more" row when `shown` of `count` are listed.
-const more = (count, shown, cols) =>
-  count > shown ? [`<tr><td class="muted" colspan="${cols}">${count - shown} more</td></tr>`] : [];
-
-const refreshRan = () => view("ues", async () => {
-  const [gnbs, ues] = await Promise.all([nfGet("amf", "gnbs"), nfGet("amf", "ues")]);
-  const names = Object.fromEntries(gnbs.map((g) => [g.assoc, g.name || g.id || `association ${g.assoc}`]));
-  table($("gnbs"), [["gNB"], ["Name"], ["Tracking areas"], ["UEs connected", "num"]], gnbs.map((g) =>
-    `<tr><td class="${g.id ? "" : "warn"}">${esc(g.id ?? "not set up")}</td><td>${esc(g.name ?? "")}</td>` +
-    `<td>${esc(g.tas.join(", "))}</td><td class="num">${g.ues}</td></tr>`));
-  $("ue-counts").textContent = `${ues.connected} UE(s) connected (${ues.registered} registered), ${ues.idle} idle.`;
-  table($("ues"), [["SUPI"], ["CM"], ["5GMM"], ["5G-TMSI"], ["gNB"], ["Sessions"], ["Idle for", "num"]],
-    ues.ues.map((u) => {
-      const connected = u.cm === "connected";
-      return `<tr><td>${esc(u.supi ?? "unknown yet")}</td><td class="${connected ? "ok" : "muted"}">${u.cm}</td>` +
-        `<td>${esc(u.state ?? "registered")}</td><td>${esc(u.tmsi ?? "")}</td>` +
-        `<td>${connected ? esc(names[u.assoc] ?? "") : ""}</td><td>${esc(u.sessions.join(", "))}</td>` +
-        `<td class="num">${connected ? "" : u.idle_s + " s"}</td></tr>`;
-    }).concat(more(ues.connected + ues.idle, ues.ues.length, 7)));
-});
-
-const refreshSessions = () => view("sessions", async () => {
-  const body = await nfGet("smf", "sessions");
-  const state = { active: "ok", releasing: "warn" };
-  table($("sessions"), [["Id", "num"], ["SUPI"], ["PSI", "num"], ["DNN"], ["UE address"], ["State"]],
-    body.sessions.map((s) =>
-      `<tr><td class="num">${s.id}</td><td>${esc(s.supi)}</td><td class="num">${s.pdu_session_id}</td>` +
-      `<td>${esc(s.dnn)}</td><td>${esc(s.ue_ip)}</td><td class="${state[s.state] || "muted"}">${esc(s.state)}</td></tr>`)
-      .concat(more(body.count, body.sessions.length, 6)));
-});
-
-// The UPF's rates per second, from its counters' last two readings.
-let upf = null;
-function renderUserPlane(eos, now) {
-  const found = eos.find((e) => e.stats && e.stats.counters && "downlink_bytes" in e.stats.counters);
-  if (!found) {
-    $("throughput").textContent = "no UPF";
-    return;
-  }
-  const c = found.stats.counters;
-  if (upf && now > upf.at) {
-    const rate = (k) => Math.max(0, (c[k] - upf.c[k]) * 1000 / (now - upf.at));
-    const way = (w) => `${num(rate(w + "_bytes") * 8 / 1e6, 2)} Mbit/s (${num(rate(w + "_packets"))} packets/s)`;
-    $("throughput").textContent = `uplink ${way("uplink")}, downlink ${way("downlink")}; ` +
-      `per second ${num(rate("dropped_packets"))} dropped, ${num(rate("rate_limited_packets") || 0)} beyond the rates.`;
-  }
-  upf = { at: now, c };
-}
-
-// A policy's sessions in one line: "internet: 50 / 200, 5QI 9, 1 flow".
-function sessions(p) {
-  return (p.sessions || []).map((s) => {
-    const flows = s.flows.length ? `, ${s.flows.length} flow${s.flows.length > 1 ? "s" : ""}` : "";
-    return `${esc(s.dnn ?? "any DNN")}: ${s.ambr_mbps.uplink} / ${s.ambr_mbps.downlink}, 5QI ${s.five_qi}${flows}`;
-  }).join("; ");
-}
-
-let policies = {};
-const refreshPolicies = () => view("policies", async () => {
-  const body = await nfGet("pcf", "policies");
-  policies = Object.fromEntries(body.policies.map((p) => [p.supi, p]));
-  const row = (p, supi, source, remove) =>
-    `<tr><td>${supi}</td><td class="muted">${source}</td>` +
-    `<td class="num">${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}</td><td>${sessions(p)}</td>` +
-    `<td>${remove ? `<button data-edit="${esc(p.supi)}">Edit</button> <button data-remove="${esc(p.supi)}">Remove</button>` : ""}</td></tr>`;
-  table($("policies"), [["SUPI"], ["From"], ["UE-AMBR", "num"], ["Sessions"], [""]],
-    [row(body.default, "<i>default</i>", "configuration", false)]
-      .concat(body.policies.map((p) => row(p, esc(p.supi), p.provisioned ? "web API" : "configuration", true)),
-        more(body.count, body.policies.length, 5)));
-});
-
-async function refresh() {
-  try {
-    const [eos, workers, alarms] = await Promise.all([get("/api/eos"), get("/api/workers"), get("/api/alarms").catch(() => [])]);
-    renderAlarms(alarms);
-    renderEos(eos);
-    const now = performance.now();
-    renderWorkers(workers, now);
-    renderUserPlane(eos, now);
-    refreshRan();
-    refreshSessions();
-    refreshSubscribers();
-    refreshPolicies();
-    $("status").textContent = "updated " + new Date().toLocaleTimeString();
-    $("status").className = "muted";
-  } catch (e) {
-    $("status").textContent = "unreachable (" + e.message + ")";
-    $("status").className = "bad";
-  }
-}
-
-$("eos").addEventListener("click", async (ev) => {
-  const id = ev.target.dataset.stop;
-  if (!id) return;
-  ev.target.disabled = true;
-  const r = await fetch(`/api/eos/${id}/stop`, { method: "POST" });
-  $("result").textContent = JSON.stringify(await r.json(), null, 2);
-  refresh();
-});
-
-$("subscribers").addEventListener("click", async (ev) => {
-  const supi = ev.target.dataset.remove;
-  if (!supi || !confirm(`Remove ${supi}?`)) return;
-  const r = await fetch(`/api/nfs/${encodeURIComponent($("udm").value.trim())}/subscribers/${encodeURIComponent(supi)}`,
-    { method: "DELETE" });
-  $("result").textContent = JSON.stringify(await r.json(), null, 2);
-  refreshSubscribers();
-});
-
-$("add-subscriber").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const fields = Object.fromEntries([...new FormData(ev.target)].filter(([, v]) => v.trim() !== ""));
-  const r = await fetch(`/api/nfs/${encodeURIComponent($("udm").value.trim())}/subscribers`,
-    { method: "POST", body: JSON.stringify(fields) });
-  $("result").textContent = JSON.stringify(await r.json(), null, 2);
-  if (r.ok) ev.target.reset();
-  refreshSubscribers();
-});
-
-$("policies").addEventListener("click", async (ev) => {
-  const { edit, remove } = ev.target.dataset;
-  if (edit && policies[edit]) {
-    const { provisioned, ...policy } = policies[edit];
-    $("policy").value = JSON.stringify(policy, null, 2);
-    return;
-  }
-  if (!remove || !confirm(`Remove the policy of ${remove}? The default applies.`)) return;
-  const r = await fetch(`/api/nfs/${encodeURIComponent($("pcf").value.trim())}/policies/${encodeURIComponent(remove)}`,
-    { method: "DELETE" });
-  $("result").textContent = JSON.stringify(await r.json(), null, 2);
-  refreshPolicies();
-});
-
-$("set-policy").addEventListener("click", async () => {
-  const r = await fetch(`/api/nfs/${encodeURIComponent($("pcf").value.trim())}/policies`,
-    { method: "POST", body: $("policy").value });
-  $("result").textContent = JSON.stringify(await r.json(), null, 2);
-  refreshPolicies();
-});
-
-$("deploy").addEventListener("click", async () => {
-  const r = await fetch("/api/nfs", { method: "POST", body: $("deployment").value });
-  $("result").textContent = JSON.stringify(await r.json(), null, 2);
-  refresh();
-});
-
-get("/api/kinds").then((k) => { $("kinds").textContent = k.join(", ") || "none"; }).catch(() => { $("kinds").textContent = "unknown"; });
-refresh();
-setInterval(refresh, 1000);
-</script>
+<script src="app.js"></script>
 </body>
 </html>

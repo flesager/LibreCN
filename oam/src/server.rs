@@ -2,14 +2,15 @@
 //!
 //! | Request | Answer |
 //! |---|---|
-//! | `GET /` | the GUI |
+//! | `GET /`, `/app.js`, `/style.css` | the GUI |
 //! | `GET /api/eos` | EOs with their stats |
 //! | `GET /api/workers` | workers |
 //! | `GET /api/alarms` | active alarms (from the alarm EO) |
 //! | `GET /api/kinds` | NF kinds (from control) |
+//! | `GET /api/nfs` | the NFs started: name, kind, EO id, alive (control) |
 //! | `POST /api/nfs` | start the NFs of a TOML or JSON deployment (control) |
 //! | `POST /api/eos/{id}/stop` | stop an EO (control) |
-//! | `GET`, `POST`, `DELETE /api/nfs/{name}/{path}` | the NF `name`'s own resources (`Manage`) |
+//! | `GET`, `POST`, `DELETE /api/nfs/{name}/{path}` | the NF `name`'s own resources (`Manage`; the query string goes with the path) |
 //! | `GET /metrics` | Prometheus text |
 //!
 //! One request per connection (`Connection: close`). The server reads what
@@ -30,8 +31,10 @@ use serde_json::json;
 
 use crate::proto::{self, Deploy, Reply, Stop};
 
-/// The GUI: one static page calling the API.
+/// The GUI: a static page, its script and style, calling the API.
 const GUI: &str = include_str!("gui/index.html");
+const GUI_JS: &str = include_str!("gui/app.js");
+const GUI_CSS: &str = include_str!("gui/style.css");
 
 /// Connections served at once (one I/O registration each, plus the listener).
 const MAX_CONNECTIONS: usize = 31;
@@ -156,6 +159,11 @@ impl Server {
         let path = request.path.split('?').next().unwrap_or_default();
         match (request.method.as_str(), path) {
             ("GET", "/" | "/index.html") => self.respond(ctx, i, 200, "text/html; charset=utf-8", GUI.as_bytes()),
+            ("GET", "/app.js") => self.respond(ctx, i, 200, "text/javascript; charset=utf-8", GUI_JS.as_bytes()),
+            ("GET", "/style.css") => self.respond(ctx, i, 200, "text/css; charset=utf-8", GUI_CSS.as_bytes()),
+            ("GET", "/api/nfs") => {
+                self.forward(ctx, i, Target::Control, |ctx, to, corr| ctx.signal(to, proto::NFS, corr));
+            }
             ("GET", "/api/eos") => {
                 let eos = eo_views(ctx);
                 self.respond_json(ctx, i, 200, &eos);
@@ -200,7 +208,11 @@ impl Server {
                 });
             }
             (method, p) if p.starts_with("/api/nfs/") => {
-                let (name, path) = p["/api/nfs/".len()..].split_once('/').unwrap_or((&p["/api/nfs/".len()..], ""));
+                // The NF's path keeps the query string.
+                let full = &request.path["/api/nfs/".len()..];
+                let name = &p["/api/nfs/".len()..];
+                let name = name.split_once('/').map_or(name, |(n, _)| n);
+                let path = full.strip_prefix(name).and_then(|r| r.strip_prefix('/')).unwrap_or_default();
                 let (Some(method), Some(nf)) = (Method::parse(method), ctx.find(name)) else {
                     return self.respond_json(ctx, i, 404, &json!({ "error": format!("no NF {name:?}") }));
                 };

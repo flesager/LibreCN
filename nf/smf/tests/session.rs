@@ -300,4 +300,25 @@ fn a_ue_gets_sessions_on_two_dnns_each_from_its_pool() {
     let dnns: Vec<_> =
         list["sessions"].as_array().unwrap().iter().map(|s| s["dnn"].as_str().unwrap().to_string()).collect();
     assert_eq!(dnns, ["internet", "ims", "internet"]);
+    assert_eq!(
+        (&list["sessions"][0]["five_qi"], &list["sessions"][0]["ambr_mbps"]["downlink"]),
+        (&9.into(), &100.into())
+    );
+
+    // One subscriber's sessions; the data networks.
+    let got: Vec<serde_json::Value> = ["sessions?supi=imsi-999700000000001", "sessions?supi=imsi-2", "dnns"]
+        .iter()
+        .map(|path| {
+            manage.fill(Method::Get, path, "");
+            c.tb.inject_from(c.amf, c.smf, 51, &manage).unwrap();
+            c.tb.run_until_idle();
+            serde_json::from_str(c.seen.take()[0].body::<Reply>().unwrap().text()).unwrap()
+        })
+        .collect();
+    assert_eq!((&got[0]["count"], &got[1]["count"]), (&3.into(), &0.into()));
+    assert_eq!(
+        got[2],
+        serde_json::json!([{ "dnn": "internet", "pool": "10.45.0.0/16", "sessions": 2 },
+                                           { "dnn": "ims", "pool": "10.46.0.0/16", "sessions": 1 }])
+    );
 }

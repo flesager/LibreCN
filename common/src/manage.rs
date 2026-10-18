@@ -1,6 +1,6 @@
 //! Managing an NF from the web API: a [`Manage`] request (method, path and
 //! body, the HTTP request minus `/api/nfs/{name}/`) answered by a [`Reply`]
-//! carrying a status and JSON. The web server forwards without knowing the
+//! carrying a status and JSON. The path may carry a query (`?key=value&...`). The web server forwards without knowing the
 //! NF; each NF serves its own resources (the UDM: `subscribers`).
 
 use librecn_scheduler::{Context, Message, MsgBody, Result};
@@ -65,9 +65,16 @@ impl Manage {
         [Method::Get, Method::Post, Method::Delete].into_iter().find(|m| *m as u8 == self.method)
     }
 
-    /// The path, e.g. `subscribers/imsi-001010000000001`.
+    /// The path without its query, e.g. `subscribers/imsi-001010000000001`.
     pub fn path(&self) -> &str {
-        self.str(0, usize::from(self.path_len))
+        let full = self.str(0, usize::from(self.path_len));
+        full.split_once('?').map_or(full, |(path, _)| path)
+    }
+
+    /// The value of `key` in the query (`sessions?supi=imsi-1`), as sent.
+    pub fn query(&self, key: &str) -> Option<&str> {
+        let (_, query) = self.str(0, usize::from(self.path_len)).split_once('?')?;
+        query.split('&').find_map(|pair| pair.split_once('=').filter(|(k, _)| *k == key).map(|(_, v)| v))
     }
 
     pub fn body(&self) -> &str {
@@ -138,6 +145,11 @@ mod tests {
         assert_eq!((m.method(), m.path(), m.body()), (Some(Method::Delete), "subscribers/imsi-1", "{}"));
         assert!(!m.fill(Method::Post, "x", &"y".repeat(MANAGE_TEXT)));
         assert_eq!(Method::parse("PUT"), None);
+        assert!(m.fill(Method::Get, "sessions?dnn=ims&supi=imsi-1", ""));
+        assert_eq!(
+            (m.path(), m.query("supi"), m.query("dnn"), m.query("x")),
+            ("sessions", Some("imsi-1"), Some("ims"), None)
+        );
 
         let mut r = Reply::new_zeroed();
         r.fill(404, r#"{"error":"no such subscriber"}"#);

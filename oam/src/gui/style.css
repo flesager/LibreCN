@@ -1,0 +1,64 @@
+:root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #667085; --line: #e3e6ec;
+        --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --accent: #2457c5; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1218; --card: #171b23; --ink: #e6e9ef; --muted: #98a2b3; --line: #2a303c;
+          --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #6ea8fe; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
+       font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+.muted { color: var(--muted); }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; }
+td.num, th.num { text-align: right; }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+button { font: inherit; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+         background: var(--card); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--accent); }
+textarea { width: 100%; min-height: 110px; font: 13px ui-monospace, monospace; padding: 8px;
+           border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+pre { margin: 8px 0 0; white-space: pre-wrap; font-size: 13px; }
+input { font: 13px ui-monospace, monospace; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
+        background: var(--bg); color: var(--ink); min-width: 0; }
+input:invalid:not(:placeholder-shown) { border-color: var(--bad); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.row input { flex: 1 1 150px; }
+textarea.tall { min-height: 260px; }
+[hidden] { display: none !important; }
+
+/* Tabs, one panel shown at a time. */
+nav { display: flex; gap: 4px; }
+nav a { padding: 4px 12px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+nav a:hover { background: var(--card); }
+nav a.active { background: var(--card); border: 1px solid var(--line); font-weight: 600; }
+.badge { padding: 2px 10px; border-radius: 10px; background: var(--bad); color: #fff; text-decoration: none; font-weight: 600; }
+tr.pick { cursor: pointer; }
+tr.pick:hover td { background: var(--bg); }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-bottom: 8px; }
+.facts span { color: var(--muted); }
+
+/* The diagram (TS 23.501 §4.2.3). */
+#diagram { width: 100%; max-width: 1100px; display: block; margin: 0 auto; font-family: inherit; }
+#diagram .box rect { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
+#diagram .box text { fill: var(--ink); text-anchor: middle; font-size: 13px; }
+#diagram .box text.name { font-weight: 700; font-size: 16px; }
+#diagram .box text.sub { fill: var(--muted); font-size: 12px; }
+#diagram .box.running rect { stroke: var(--ok); stroke-width: 2.5; }
+#diagram .box.faulted rect { stroke: var(--bad); stroke-width: 2.5; }
+#diagram .box.absent rect { stroke-dasharray: 6 4; }
+#diagram .box.grey rect { fill: var(--bg); stroke: var(--line); stroke-dasharray: 4 4; }
+#diagram .box.grey text { fill: var(--muted); }
+#diagram .nf { cursor: pointer; }
+#diagram .nf:hover rect { stroke: var(--accent); }
+#diagram .box.picked rect { stroke: var(--accent); stroke-width: 3; }
+#diagram line, #diagram path { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+#diagram line.bus { stroke: var(--ink); stroke-width: 3; }
+#diagram text.label { fill: var(--muted); font-size: 12px; }
+#diagram text.note { fill: var(--ink); font-size: 13px; }
+#diagram text.note.sub { fill: var(--muted); }

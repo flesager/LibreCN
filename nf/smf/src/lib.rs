@@ -149,9 +149,10 @@ impl Smf {
     }
 
     /// The AMF's requests carry N1/N2 containers (1 KiB); the UPF's answers
-    /// are small; management requests 8 KiB.
+    /// are small; management requests 8 KiB, four at once (the GUI asks for
+    /// several resources together).
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 1024), (1024, 1024), (8 * 1024, 2)])
+        EoConfig::new(name).max_timers(0).buffers(&[(256, 1024), (1024, 1024), (8 * 1024, 4)])
     }
 
     fn next_ctx(&mut self) -> u32 {
@@ -488,23 +489,26 @@ impl Smf {
     fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
         let (status, json) = match (request.method(), request.path().split_once('/').unwrap_or((request.path(), ""))) {
             (Some(Method::Get), ("sessions", "")) => {
-                let mut list: Vec<_> = self.contexts.iter().collect();
+                let supi = request.query("supi");
+                let mut list: Vec<_> =
+                    self.contexts.iter().filter(|(_, c)| supi.is_none_or(|s| c.supi.as_str() == s)).collect();
                 list.sort_by_key(|(id, _)| **id);
-                let list: Vec<_> = list
-                    .into_iter()
-                    .take(LISTED)
-                    .map(|(id, c)| {
-                        json!({ "id": id, "supi": c.supi.as_str(), "pdu_session_id": c.pdu_session_id,
-                                "ue_ip": c.ue_ip.to_string(), "dnn": self.config.dnns[c.dnn].dnn,
-                                "state": match (c.releasing, c.active, c.n3.is_some()) {
-                                    (true, _, _) => "releasing",
-                                    (_, true, _) => "active",
-                                    (_, false, true) => "idle",
-                                    (_, false, false) => "setting up",
-                                } })
+                let count = list.len();
+                let list: Vec<_> = list.into_iter().take(LISTED).map(|(id, c)| self.view(*id, c)).collect();
+                (200, json!({ "count": count, "sessions": list }))
+            }
+            (Some(Method::Get), ("dnns", "")) => {
+                let dnns: Vec<_> = self
+                    .config
+                    .dnns
+                    .iter()
+                    .enumerate()
+                    .map(|(i, d)| {
+                        json!({ "dnn": d.dnn, "pool": format!("{}/{}", d.pool.0, d.pool.1),
+                                "sessions": self.contexts.values().filter(|c| c.dnn == i).count() })
                     })
                     .collect();
-                (200, json!({ "count": self.contexts.len(), "sessions": list }))
+                (200, json!(dnns))
             }
             (Some(Method::Delete), ("sessions", id)) => match id.parse() {
                 Ok(id) if self.release_by_network(ctx, id) => (200, json!({ "releasing": id })),
@@ -515,6 +519,23 @@ impl Smf {
         if let Err(e) = send_reply(ctx, msg, status, &json.to_string()) {
             log!(self.log, ctx, Error, "cannot answer {}: {e}", msg.from());
         }
+    }
+
+    /// A session as the web API shows it.
+    fn view(&self, id: u32, c: &SmContext) -> serde_json::Value {
+        let state = match (c.releasing, c.active, c.n3.is_some()) {
+            (true, _, _) => "releasing",
+            (_, true, _) => "active",
+            (_, false, true) => "idle",
+            (_, false, false) => "setting up",
+        };
+        let rule = c.rule.as_ref().map(Policy::rule);
+        let mbps = |bps: u64| bps / 1_000_000;
+        json!({ "id": id, "supi": c.supi.as_str(), "pdu_session_id": c.pdu_session_id,
+                "ue_ip": c.ue_ip.to_string(), "dnn": self.config.dnns[c.dnn].dnn, "state": state,
+                "five_qi": rule.map(|r| r.five_qi),
+                "ambr_mbps": rule.map(|r| json!({ "uplink": mbps(r.ambr.uplink), "downlink": mbps(r.ambr.downlink) })),
+                "flows": rule.map(|r| r.rules().len()) })
     }
 
     /// Drops a session: the UPF's side, the address.

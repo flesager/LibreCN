@@ -10,6 +10,8 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Header-only: list the NF kinds `Control` can start.
 pub const KINDS: u32 = id(family::OAM_CONTROL, 3);
+/// Header-only: list the NFs `Control` started (name, kind, EO id).
+pub const NFS: u32 = id(family::OAM_CONTROL, 7);
 /// Header-only: list the active alarms.
 pub const ALARMS: u32 = id(family::OAM_CONTROL, 5);
 

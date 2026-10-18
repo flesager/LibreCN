@@ -80,11 +80,13 @@ const SUPERVISION: Duration = Duration::from_secs(1);
 /// Names that are never stopped through the API.
 const PROTECTED: [&str; 4] = [names::LOG, names::ALARM, names::CONTROL, "server"];
 
-/// Control EO (name [`names::CONTROL`]). Handles [`Deploy`], [`Stop`] and
-/// [`proto::KINDS`], each answered by a [`Reply`]; every second, raises a
-/// critical alarm for each EO that faulted.
+/// Control EO (name [`names::CONTROL`]). Handles [`Deploy`], [`Stop`],
+/// [`proto::KINDS`] and [`proto::NFS`], each answered by a [`Reply`]; every
+/// second, raises a critical alarm for each EO that faulted.
 pub struct Control {
     kinds: Vec<(String, Factory)>,
+    /// The NFs started: EO, kind (the GUI draws each by its kind).
+    started: Vec<(EoId, String)>,
     faulted: HashSet<EoId>,
     log: Logger,
     alarms: Alarms,
@@ -99,7 +101,13 @@ impl Default for Control {
 impl Control {
     /// No NF kind known yet.
     pub fn new() -> Self {
-        Control { kinds: Vec::new(), faulted: HashSet::new(), log: Logger::default(), alarms: Alarms::new() }
+        Control {
+            kinds: Vec::new(),
+            started: Vec::new(),
+            faulted: HashSet::new(),
+            log: Logger::default(),
+            alarms: Alarms::new(),
+        }
     }
 
     /// Registers the factory of an NF kind.
@@ -126,6 +134,7 @@ impl Control {
             match self.start(ctx, &spec) {
                 Ok(id) => {
                     log!(self.log, ctx, Info, "started {} ({}) as {id}", spec.name, spec.kind);
+                    self.started.push((id, spec.kind.clone()));
                     started.push(Started { name: spec.name, id: id.raw() });
                 }
                 Err(error) => {
@@ -201,6 +210,18 @@ impl ExecutionObject for Control {
             self.reply(ctx, msg, answer);
         } else if let Some(stop) = msg.body::<Stop>() {
             let answer = self.stop(ctx, EoId::from_raw(stop.eo));
+            self.reply(ctx, msg, answer);
+        } else if msg.id() == proto::NFS {
+            // Those still known to the scheduler (running or faulted).
+            let eos = ctx.eos();
+            self.started.retain(|(id, _)| eos.iter().any(|e| e.id == *id));
+            let nfs: Vec<_> = self
+                .started
+                .iter()
+                .filter_map(|(id, kind)| eos.iter().find(|e| e.id == *id).map(|e| (e, kind)))
+                .map(|(e, kind)| json!({ "name": e.name, "kind": kind, "id": e.id.raw(), "alive": e.alive }))
+                .collect();
+            let answer = (true, json!(nfs).to_string());
             self.reply(ctx, msg, answer);
         } else if msg.id() == proto::KINDS {
             let kinds: Vec<&str> = self.kinds.iter().map(|(k, _)| k.as_str()).collect();

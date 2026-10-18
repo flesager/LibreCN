@@ -3,7 +3,7 @@
 //!
 //! | Request | Answer |
 //! |---|---|
-//! | `GET subscribers` | `[{"supi", "amf", "sqn", "auth"}]`, by SUPI |
+//! | `GET subscribers` | `{"count", "subscribers": [{"supi", "amf", "sqn", "auth"}]}`, the first [`LISTED`] by SUPI |
 //! | `POST subscribers` | adds one subscriber or an array (fields of `[[nf.params.subscribers]]`): 201, or 409 if one exists |
 //! | `DELETE subscribers/{supi}` | removes it: 200, or 404 |
 
@@ -13,6 +13,9 @@ use librecn_common::manage::Method;
 use serde_json::json;
 
 use crate::config::{self, Subscriber};
+
+/// Subscribers listed by `GET subscribers`.
+pub const LISTED: usize = 64;
 
 /// Status, JSON answer, and what changed (for the log).
 pub struct Answer {
@@ -39,12 +42,13 @@ pub fn handle(
             list.sort_by(|a, b| a.0.cmp(b.0));
             let list: Vec<_> = list
                 .into_iter()
+                .take(LISTED)
                 .map(|(supi, s)| {
                     json!({ "supi": supi, "amf": format!("{:02X}{:02X}", s.amf[0], s.amf[1]),
                             "sqn": format!("{:012X}", s.sqn), "auth": s.auth() })
                 })
                 .collect();
-            answer(200, json!(list))
+            answer(200, json!({ "count": subscribers.len(), "subscribers": list }))
         }
         (Method::Post, ("subscribers", "")) => {
             let new = match config::subscribers(body) {
@@ -92,7 +96,7 @@ mod tests {
     fn subscribers_are_listed_added_and_removed() {
         let (mut subs, mut removed) = (HashMap::new(), BTreeSet::new());
         let list = |subs: &mut HashMap<_, _>| handle(subs, &mut BTreeSet::new(), Method::Get, "subscribers", "").json;
-        assert_eq!(list(&mut subs), "[]");
+        assert_eq!(list(&mut subs), r#"{"count":0,"subscribers":[]}"#);
 
         let added = handle(
             &mut subs,
@@ -107,9 +111,9 @@ mod tests {
         assert_eq!(
             list(&mut subs),
             concat!(
-                r#"[{"amf":"8000","auth":"5g-aka","sqn":"000000000000","supi":"imsi-1"},"#,
+                r#"{"count":3,"subscribers":[{"amf":"8000","auth":"5g-aka","sqn":"000000000000","supi":"imsi-1"},"#,
                 r#"{"amf":"8000","auth":"5g-aka","sqn":"000000000020","supi":"imsi-2"},"#,
-                r#"{"amf":"9000","auth":"5g-aka","sqn":"000000000000","supi":"imsi-3"}]"#
+                r#"{"amf":"9000","auth":"5g-aka","sqn":"000000000000","supi":"imsi-3"}]}"#
             ),
             "by SUPI, without keys"
         );

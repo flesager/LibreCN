@@ -143,15 +143,15 @@ The AMF's `max_ues`, the UPF's `max_sessions` and the UDM's subscribers are set 
 
 The 20 000 row is eleven runs on 1 to 4 cores, some with one malloc arena (`MALLOC_ARENA_MAX=1`). The 40 000 row is five runs, two of them with user-plane traffic.
 
-**What each EO preallocates** at creation (mailbox, buffer pools, timers, I/O, flight recorder), with 1024 UEs configured: 7.1 MiB in all.
+**What each EO preallocates** at creation (mailbox, buffer pools, timers, I/O, flight recorder), with 1024 UEs configured: 7.2 MiB in all.
 
 | EO | AMF | SMF | log | UPF | UDM | PCF | AUSF | alarms |
 |---|---|---|---|---|---|---|---|---|
-| MiB | 2.43 | 1.36 | 1.32 | 0.85 | 0.36 | 0.36 | 0.33 | 0.10 |
+| MiB | 2.45 | 1.38 | 1.32 | 0.85 | 0.36 | 0.36 | 0.33 | 0.10 |
 
 The UPF's share includes a class of 512-byte buffers for N4Establish, which carries the session's PCF rule. The rule's PCC rules are kept per session only when a session has some, so a session without them costs about 40 bytes more in the UPF and the SMF.
 
-The AMF's share grows with `max_ues` (one NAS timer per UE): 5.11 MiB for 40 000.
+The AMF's share grows with `max_ues` (one NAS timer per UE): 5.13 MiB for 40 000.
 
 **Reading the tables**:
 - **2 to 4 KiB per UE**, all functions together, measured from the resident memory at its peak. The plan in the README, 20 MiB plus 5 KiB per UE, covers every run.

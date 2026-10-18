@@ -223,6 +223,7 @@ fn control_deploys_from_toml_or_json_and_reports_each_nf() {
             ),
             ask_deploy("not = [valid"),
             ask_signal("control", proto::KINDS),
+            ask_signal("control", proto::NFS),
         ],
     );
     assert!(!replies[0].0, "one NF failed");
@@ -233,6 +234,8 @@ fn control_deploys_from_toml_or_json_and_reports_each_nf() {
     assert_eq!(replies[1].1["started"][0]["name"], "d3");
     assert!(replies[2].1["error"].as_str().unwrap().starts_with("invalid TOML"));
     assert_eq!(replies[3].1, serde_json::json!(["dummy"]));
+    let nfs: Vec<_> = replies[4].1.as_array().unwrap().iter().map(|n| (n["name"].clone(), n["kind"].clone())).collect();
+    assert_eq!(nfs, [("d1".into(), "dummy".into()), ("d3".into(), "dummy".into())], "the NFs started, with their kind");
 
     let names: Vec<_> = ["d1", "d2", "d3", "d4"].iter().map(|n| tb_has(&mut tb, n)).collect();
     assert_eq!(names, [true, false, true, false]);
