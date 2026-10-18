@@ -60,6 +60,21 @@
 </section>
 
 <section>
+  <h2>gNBs and UEs</h2>
+  <p class="muted">Seen by the AMF <input id="amf" value="amf-1" size="8" aria-label="AMF name">.
+    <span id="ue-counts"></span></p>
+  <div class="scroll"><table id="gnbs"></table></div>
+  <div class="scroll"><table id="ues"></table></div>
+</section>
+
+<section>
+  <h2>PDU sessions</h2>
+  <p class="muted">Held by the SMF <input id="smf" value="smf" size="8" aria-label="SMF name">.
+    User plane: <span id="throughput">…</span></p>
+  <div class="scroll"><table id="sessions"></table></div>
+</section>
+
+<section>
   <h2>Subscribers</h2>
   <p class="muted">Held by the UDM <input id="udm" value="udm" size="8" aria-label="UDM name">.
     Keys are write-only: they never leave the UDM.</p>
@@ -163,23 +178,82 @@ async function get(path) {
   return r.json();
 }
 
-let subscribersPending = false;
-async function refreshSubscribers() {
-  if (subscribersPending) return;
-  subscribersPending = true;
-  const udm = encodeURIComponent($("udm").value.trim());
+// Resource `path` of the NF named in input `nf`: its JSON, or an error.
+async function nfGet(nf, path) {
+  const r = await fetch(`/api/nfs/${encodeURIComponent($(nf).value.trim())}/${path}`);
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || r.status);
+  return body;
+}
+
+// Refreshes view `id` with `render`, one request at a time; an error shows in its table.
+const pending = {};
+async function view(id, render) {
+  if (pending[id]) return;
+  pending[id] = true;
   try {
-    const r = await fetch(`/api/nfs/${udm}/subscribers`);
-    const body = await r.json();
-    if (!r.ok) throw new Error(body.error || r.status);
-    table($("subscribers"), [["SUPI"], ["AMF field"], ["SQN"], [""]], body.map((s) =>
-      `<tr><td>${esc(s.supi)}</td><td>${esc(s.amf)}</td><td>${esc(s.sqn)}</td>` +
-      `<td><button data-remove="${esc(s.supi)}">Remove</button></td></tr>`));
+    await render();
   } catch (e) {
-    $("subscribers").innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
+    $(id).innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
   } finally {
-    subscribersPending = false;
+    pending[id] = false;
   }
+}
+
+const refreshSubscribers = () => view("subscribers", async () => {
+  const body = await nfGet("udm", "subscribers");
+  table($("subscribers"), [["SUPI"], ["AMF field"], ["SQN"], [""]], body.map((s) =>
+    `<tr><td>${esc(s.supi)}</td><td>${esc(s.amf)}</td><td>${esc(s.sqn)}</td>` +
+    `<td><button data-remove="${esc(s.supi)}">Remove</button></td></tr>`));
+});
+
+// A "N more" row when `shown` of `count` are listed.
+const more = (count, shown, cols) =>
+  count > shown ? [`<tr><td class="muted" colspan="${cols}">${count - shown} more</td></tr>`] : [];
+
+const refreshRan = () => view("ues", async () => {
+  const [gnbs, ues] = await Promise.all([nfGet("amf", "gnbs"), nfGet("amf", "ues")]);
+  const names = Object.fromEntries(gnbs.map((g) => [g.assoc, g.name || g.id || `association ${g.assoc}`]));
+  table($("gnbs"), [["gNB"], ["Name"], ["Tracking areas"], ["UEs connected", "num"]], gnbs.map((g) =>
+    `<tr><td class="${g.id ? "" : "warn"}">${esc(g.id ?? "not set up")}</td><td>${esc(g.name ?? "")}</td>` +
+    `<td>${esc(g.tas.join(", "))}</td><td class="num">${g.ues}</td></tr>`));
+  $("ue-counts").textContent = `${ues.connected} UE(s) connected (${ues.registered} registered), ${ues.idle} idle.`;
+  table($("ues"), [["SUPI"], ["CM"], ["5GMM"], ["5G-TMSI"], ["gNB"], ["Sessions"], ["Idle for", "num"]],
+    ues.ues.map((u) => {
+      const connected = u.cm === "connected";
+      return `<tr><td>${esc(u.supi ?? "unknown yet")}</td><td class="${connected ? "ok" : "muted"}">${u.cm}</td>` +
+        `<td>${esc(u.state ?? "registered")}</td><td>${esc(u.tmsi ?? "")}</td>` +
+        `<td>${connected ? esc(names[u.assoc] ?? "") : ""}</td><td>${esc(u.sessions.join(", "))}</td>` +
+        `<td class="num">${connected ? "" : u.idle_s + " s"}</td></tr>`;
+    }).concat(more(ues.connected + ues.idle, ues.ues.length, 7)));
+});
+
+const refreshSessions = () => view("sessions", async () => {
+  const body = await nfGet("smf", "sessions");
+  const state = { active: "ok", releasing: "warn" };
+  table($("sessions"), [["Id", "num"], ["SUPI"], ["PSI", "num"], ["DNN"], ["UE address"], ["State"]],
+    body.sessions.map((s) =>
+      `<tr><td class="num">${s.id}</td><td>${esc(s.supi)}</td><td class="num">${s.pdu_session_id}</td>` +
+      `<td>${esc(s.dnn)}</td><td>${esc(s.ue_ip)}</td><td class="${state[s.state] || "muted"}">${esc(s.state)}</td></tr>`)
+      .concat(more(body.count, body.sessions.length, 6)));
+});
+
+// The UPF's rates per second, from its counters' last two readings.
+let upf = null;
+function renderUserPlane(eos, now) {
+  const found = eos.find((e) => e.stats && e.stats.counters && "downlink_bytes" in e.stats.counters);
+  if (!found) {
+    $("throughput").textContent = "no UPF";
+    return;
+  }
+  const c = found.stats.counters;
+  if (upf && now > upf.at) {
+    const rate = (k) => Math.max(0, (c[k] - upf.c[k]) * 1000 / (now - upf.at));
+    const way = (w) => `${num(rate(w + "_bytes") * 8 / 1e6, 2)} Mbit/s (${num(rate(w + "_packets"))} packets/s)`;
+    $("throughput").textContent = `uplink ${way("uplink")}, downlink ${way("downlink")}; ` +
+      `per second ${num(rate("dropped_packets"))} dropped, ${num(rate("rate_limited_packets") || 0)} beyond the rates.`;
+  }
+  upf = { at: now, c };
 }
 
 // A policy's sessions in one line: "internet: 50 / 200, 5QI 9, 1 flow".
@@ -190,38 +264,30 @@ function sessions(p) {
   }).join("; ");
 }
 
-let policiesPending = false;
 let policies = {};
-async function refreshPolicies() {
-  if (policiesPending) return;
-  policiesPending = true;
-  const pcf = encodeURIComponent($("pcf").value.trim());
-  try {
-    const r = await fetch(`/api/nfs/${pcf}/policies`);
-    const body = await r.json();
-    if (!r.ok) throw new Error(body.error || r.status);
-    policies = Object.fromEntries(body.policies.map((p) => [p.supi, p]));
-    const row = (p, supi, source, remove) =>
-      `<tr><td>${supi}</td><td class="muted">${source}</td>` +
-      `<td class="num">${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}</td><td>${sessions(p)}</td>` +
-      `<td>${remove ? `<button data-edit="${esc(p.supi)}">Edit</button> <button data-remove="${esc(p.supi)}">Remove</button>` : ""}</td></tr>`;
-    const more = body.count > body.policies.length ? `<tr><td class="muted" colspan="5">${body.count - body.policies.length} more</td></tr>` : "";
-    table($("policies"), [["SUPI"], ["From"], ["UE-AMBR", "num"], ["Sessions"], [""]],
-      [row(body.default, "<i>default</i>", "configuration", false)]
-        .concat(body.policies.map((p) => row(p, esc(p.supi), p.provisioned ? "web API" : "configuration", true)), more ? [more] : []));
-  } catch (e) {
-    $("policies").innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
-  } finally {
-    policiesPending = false;
-  }
-}
+const refreshPolicies = () => view("policies", async () => {
+  const body = await nfGet("pcf", "policies");
+  policies = Object.fromEntries(body.policies.map((p) => [p.supi, p]));
+  const row = (p, supi, source, remove) =>
+    `<tr><td>${supi}</td><td class="muted">${source}</td>` +
+    `<td class="num">${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}</td><td>${sessions(p)}</td>` +
+    `<td>${remove ? `<button data-edit="${esc(p.supi)}">Edit</button> <button data-remove="${esc(p.supi)}">Remove</button>` : ""}</td></tr>`;
+  table($("policies"), [["SUPI"], ["From"], ["UE-AMBR", "num"], ["Sessions"], [""]],
+    [row(body.default, "<i>default</i>", "configuration", false)]
+      .concat(body.policies.map((p) => row(p, esc(p.supi), p.provisioned ? "web API" : "configuration", true)),
+        more(body.count, body.policies.length, 5)));
+});
 
 async function refresh() {
   try {
     const [eos, workers, alarms] = await Promise.all([get("/api/eos"), get("/api/workers"), get("/api/alarms").catch(() => [])]);
     renderAlarms(alarms);
     renderEos(eos);
-    renderWorkers(workers, performance.now());
+    const now = performance.now();
+    renderWorkers(workers, now);
+    renderUserPlane(eos, now);
+    refreshRan();
+    refreshSessions();
     refreshSubscribers();
     refreshPolicies();
     $("status").textContent = "updated " + new Date().toLocaleTimeString();

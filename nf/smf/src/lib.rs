@@ -46,6 +46,9 @@ use config::SmfConfig;
 use pool::Pool;
 use session::Refused;
 
+/// Sessions listed by `GET sessions` (the answer fits in 8 KiB).
+const LISTED: usize = 64;
+
 /// What an UpdateSmContextResult carries.
 #[derive(Default)]
 struct Answer<'a> {
@@ -489,13 +492,19 @@ impl Smf {
                 list.sort_by_key(|(id, _)| **id);
                 let list: Vec<_> = list
                     .into_iter()
+                    .take(LISTED)
                     .map(|(id, c)| {
                         json!({ "id": id, "supi": c.supi.as_str(), "pdu_session_id": c.pdu_session_id,
                                 "ue_ip": c.ue_ip.to_string(), "dnn": self.config.dnns[c.dnn].dnn,
-                                "state": if c.releasing { "releasing" } else { "active" } })
+                                "state": match (c.releasing, c.active, c.n3.is_some()) {
+                                    (true, _, _) => "releasing",
+                                    (_, true, _) => "active",
+                                    (_, false, true) => "idle",
+                                    (_, false, false) => "setting up",
+                                } })
                     })
                     .collect();
-                (200, json!(list))
+                (200, json!({ "count": self.contexts.len(), "sessions": list }))
             }
             (Some(Method::Delete), ("sessions", id)) => match id.parse() {
                 Ok(id) if self.release_by_network(ctx, id) => (200, json!({ "releasing": id })),

@@ -1,5 +1,7 @@
 //! The AMF's resources on the web API (`/api/nfs/{amf}/...`, a `Manage`
 //! request from the server):
+//! - `GET gnbs`: the gNBs connected (association, id, name, tracking
+//!   areas, connected UEs), set up or not yet;
 //! - `GET ues`: how many UEs, connected and idle, and the first [`LISTED`];
 //! - `GET ues/{supi}`: one UE;
 //! - `DELETE ues/{supi}`, body `{"reregister": true}` optional: the network
@@ -28,6 +30,7 @@ fn connected(ue: &UeContext) -> Value {
         "state": format!("{:?}", ue.mm.state()),
         "amf_ue_ngap_id": ue.amf_id,
         "ran_ue_ngap_id": ue.ran_id,
+        "assoc": ue.assoc,
         "tmsi": ue.mm.tmsi().map(|t| format!("{t:08x}")),
         "sessions": ue.sessions.iter().enumerate().filter(|(_, s)| s.is_some()).map(|(psi, _)| psi).collect::<Vec<_>>(),
     })
@@ -37,6 +40,26 @@ impl Amf {
     pub(crate) fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
         let path = request.path();
         let (status, answer) = match (request.method(), path.split_once('/').unwrap_or((path, ""))) {
+            (Some(Method::Get), ("gnbs", "")) => {
+                let mut gnbs: Vec<_> = self.gnbs.iter().collect();
+                gnbs.sort_by_key(|(assoc, _)| **assoc);
+                let listed: Vec<Value> = gnbs
+                    .into_iter()
+                    .map(|(assoc, g)| {
+                        let tas: Vec<String> = g
+                            .tas
+                            .iter()
+                            .map(|(plmn, tac)| {
+                                format!("{plmn} TAC {}", u32::from_be_bytes([0, tac[0], tac[1], tac[2]]))
+                            })
+                            .collect();
+                        json!({ "assoc": assoc, "id": g.node.as_ref().map(|(id, _)| id.to_string()),
+                                "name": g.node.as_ref().and_then(|(_, name)| name.as_deref()), "tas": tas,
+                                "ues": self.ues.iter().filter(|ue| ue.assoc == *assoc).count() })
+                    })
+                    .collect();
+                (200, json!(listed))
+            }
             (Some(Method::Get), ("ues", "")) => {
                 let idle = self.idle.iter().map(|(tmsi, idle)| idle.describe(*tmsi, ctx.now()));
                 let listed: Vec<Value> = self.ues.iter().map(connected).chain(idle).take(LISTED).collect();

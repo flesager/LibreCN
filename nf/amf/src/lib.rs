@@ -164,7 +164,8 @@ impl Amf {
             .max_io(1)
             .max_timers(timers)
             .system_capacity(timers as usize + 1 + 3)
-            .buffers(&[(256, 1024), (2048, 1024), (8 * 1024, 2)])
+            // Four web API requests at once: the GUI asks for gNBs and UEs together.
+            .buffers(&[(256, 1024), (2048, 1024), (8 * 1024, 4)])
     }
 
     /// The N2 address actually bound, once the EO started (port 0: chosen by the kernel).

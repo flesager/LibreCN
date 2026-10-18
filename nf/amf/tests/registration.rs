@@ -659,6 +659,10 @@ fn the_network_deregisters_a_connected_ue_then_an_idle_one() {
     ue.register(&mut s, &gnb);
     let (status, listed) = manage(&mut s, &ids, Method::Get, "ues", "");
     assert_eq!((status, &listed["connected"], &listed["registered"]), (200, &1.into(), &1.into()));
+    let (status, gnbs) = manage(&mut s, &ids, Method::Get, "gnbs", "");
+    assert_eq!((status, gnbs.as_array().map(Vec::len), &gnbs[0]["ues"]), (200, Some(1), &1.into()), "{gnbs}");
+    assert!(gnbs[0]["id"].as_str().is_some_and(|id| id.starts_with("gNB 208/93")), "{gnbs}");
+    assert!(gnbs[0]["tas"][0].as_str().is_some_and(|ta| ta.ends_with("TAC 1")), "{gnbs}");
     assert_eq!(listed["ues"][0]["supi"], "imsi-208930000000001");
 
     let (status, _) = manage(&mut s, &ids, Method::Delete, "ues/imsi-208930000000001", r#"{"reregister": true}"#);

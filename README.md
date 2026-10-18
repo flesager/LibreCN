@@ -39,6 +39,7 @@ scripts/ueransim/user-plane.sh     # in Docker: UERANSIM's UE pings through the 
 scripts/ueransim/scale.sh          # UERANSIM at scale: GNBS gNBs x UES UEs (default 4 x 250)
 scripts/ueransim/overload.sh       # UERANSIM: Overload Start and Stop from a full AMF
 scripts/ueransim/mobility.sh       # in Docker: an idle UE moves to another gNB and tracking area
+scripts/ueransim/demo.sh           # in Docker: gNBs and UEs kept busy, to watch in the GUI (Ctrl-C to stop)
 scripts/load.sh                    # capacity on 1 to 4 cores, control and user plane (BENCHMARKS.md)
 scripts/upf-modes.sh               # the UPF alone: modes, number of UEs, packet size (BENCHMARKS.md)
 ```

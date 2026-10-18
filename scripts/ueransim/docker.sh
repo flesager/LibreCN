@@ -25,14 +25,15 @@ cp docker/* target/release/librecn "$bin/nr-gnb" "$bin/nr-ue" "$bin/nr-cli" "$ct
 docker build -q -t "$image" "$ctx" >/dev/null
 docker network create --subnet 10.210.0.0/24 "$net" >/dev/null
 
-# run NAME IP COMMAND...: the command is PID 1 (LibreCN must get SIGTERM).
+# run NAME IP COMMAND...: the command is PID 1 (LibreCN must get SIGTERM);
+# $opts, if set, adds options to docker run (ports, volumes).
 run() {
   name=$1 ip=$2; shift 2
   docker rm -f "$name" >/dev/null 2>&1 || true
   containers="$containers $name"
   # No IPv6: the kernel's router solicitations on uesimtun0 would wake the idle UE.
   docker run -d --name "$name" --network "$net" --ip "$ip" --cap-add NET_ADMIN --device /dev/net/tun \
-    --sysctl net.ipv6.conf.all.disable_ipv6=1 "$image" "$@" >/dev/null
+    --sysctl net.ipv6.conf.all.disable_ipv6=1 ${opts:-} "$image" "$@" >/dev/null
 }
 # wait_for CONTAINER PATTERN: until PATTERN is in its logs (10 s).
 wait_for() { for _ in $(seq 100); do docker logs "$1" 2>&1 | grep -q "$2" && return 0; sleep 0.1; done; return 1; }

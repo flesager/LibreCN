@@ -208,7 +208,7 @@ The gNB is configured with AMF 192.168.1.10:38412, PLMN 001/01 and SST 1.
 ## 7. Checking that it runs
 
 - **Logs**: JSON lines on stdout. The `VIP` lines tell each start: `LibreCN started`, `UDM udm ready, 1 subscriber(s)`, `UPF upf ready, N3 192.168.1.10:2152, N6 upf0`, `AMF amf-1 ready: N2 on ...`. A gNB's NG Setup and each UE's registration are logged at `info`.
-- **GUI**: http://192.168.1.10:8080. It shows the running functions, workers, alarms, subscribers and policies (edited there as JSON).
+- **GUI**: http://192.168.1.10:8080. It shows the running functions, workers, alarms, the gNBs and UEs, the PDU sessions with the user plane's throughput, subscribers and policies (edited there as JSON). To see it busy without a real RAN: `scripts/ueransim/demo.sh` (Docker, UERANSIM).
 - **Alarms**: a lost gNB raises one (`N2 to ... lost`), and so does a failing function.
 - **Metrics**: http://192.168.1.10:8080/metrics, for Prometheus. It includes per-function queues and processing times, and the UPF's packets and bytes.
 

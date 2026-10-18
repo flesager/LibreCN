@@ -86,8 +86,9 @@ server answers 503 at once. Today:
 | PCF | `GET policies/{supi}` | that subscriber's policy (its own, else the default) |
 | PCF | `POST policies` | sets one or an array, fields of the configuration (`supi`, `count`, `ue_ambr_mbps`, `sessions`), replacing any: 200, 400; a new UE-AMBR reaches the UE's AMF (UE Context Modification), session policies apply to new sessions |
 | PCF | `DELETE policies/{supi}` | the subscriber falls back to the default: 200, or 404 |
-| SMF | `GET sessions` | `[{"id", "supi", "pdu_session_id", "ue_ip", "dnn", "state"}]` |
+| SMF | `GET sessions` | `{"count", "sessions": [...]}`, the first 64 by id (`id`, `supi`, `pdu_session_id`, `ue_ip`, `dnn`, `state`), `state` one of `setting up` (before the UPF answered), `active`, `idle` (no downlink tunnel: the UE idle, or the gNB yet to answer), `releasing` |
 | SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
+| AMF | `GET gnbs` | `[{"assoc", "id", "name", "tas", "ues"}]`: the gNBs connected, by association, with their connected UEs |
 | AMF | `GET ues` | `{"connected", "registered", "idle", "ues": [...]}`, the first 64 UEs (`supi`, `cm`, `state`, `tmsi`, `sessions`) |
 | AMF | `GET ues/{supi}` | that UE, or 404 |
 | AMF | `POST capacity`, body `{"relative_capacity"}` | the AMF's relative capacity, announced to every gNB (AMF Configuration Update): 202, 400 |
@@ -97,8 +98,10 @@ server answers 503 at once. Today:
 With `[oam] state_dir`, the UDM and the PCF keep these changes across
 restarts (`<state_dir>/udm.json`, with the SQNs, and `<state_dir>/pcf.json`).
 
-The GUI's Subscribers and Policies views use them (a policy is edited as
-JSON, as `GET policies` shows it).
+The GUI's views use them: gNBs and UEs (the AMF's), PDU sessions (the
+SMF's, with the UPF's throughput computed from its counters), Subscribers
+and Policies (a policy is edited as JSON, as `GET policies` shows it).
+`scripts/ueransim/demo.sh` keeps gNBs and UEs busy in Docker to watch them.
 
 ## Between the OAM EOs
 

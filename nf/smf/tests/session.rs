@@ -1,7 +1,7 @@
 //! PDU session establishment through the PCF, SMF and UPF EOs, an AMF probe
 //! carrying the N1 and N2 containers.
 
-use librecn_common::manage::{Manage, Method};
+use librecn_common::manage::{Manage, Method, Reply};
 use librecn_ngap::*;
 use librecn_oam::{CapturedLog, LogSink};
 use librecn_pcf::Pcf;
@@ -227,7 +227,8 @@ fn the_network_releases_a_session_through_the_amf() {
     c.tb.inject_from(c.amf, c.smf, 50, &manage).unwrap();
     c.tb.run_until_idle();
     let listed = c.seen.take();
-    assert_eq!(listed.len(), 1);
+    let listed: serde_json::Value = serde_json::from_str(listed[0].body::<Reply>().unwrap().text()).unwrap();
+    assert_eq!((&listed["count"], &listed["sessions"][0]["state"]), (&1.into(), &"idle".into()), "{listed}");
 
     manage.fill(Method::Delete, &format!("sessions/{sm_ctx}"), "");
     c.tb.inject_from(c.amf, c.smf, 51, &manage).unwrap();
@@ -294,8 +295,9 @@ fn a_ue_gets_sessions_on_two_dnns_each_from_its_pool() {
     manage.fill(Method::Get, "sessions", "");
     c.tb.inject_from(c.amf, c.smf, 50, &manage).unwrap();
     c.tb.run_until_idle();
-    let reply: librecn_common::manage::Reply = c.seen.take()[0].body().unwrap();
+    let reply: Reply = c.seen.take()[0].body().unwrap();
     let list: serde_json::Value = serde_json::from_str(reply.text()).unwrap();
-    let dnns: Vec<_> = list.as_array().unwrap().iter().map(|s| s["dnn"].as_str().unwrap().to_string()).collect();
+    let dnns: Vec<_> =
+        list["sessions"].as_array().unwrap().iter().map(|s| s["dnn"].as_str().unwrap().to_string()).collect();
     assert_eq!(dnns, ["internet", "ims", "internet"]);
 }
