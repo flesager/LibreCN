@@ -5,7 +5,8 @@
 //! ECIES Profile A with the home network keys of the deployment) and
 //! authentication vectors from Milenage, with SQN resynchronisation.
 //! Subscribers come from the deployment `params` ([`config`]) and from the
-//! web API while it runs ([`manage`]).
+//! web API while it runs ([`manage`]); the web API's changes and the SQNs
+//! survive restarts in the state file ([`persist`], `[oam] state_dir`).
 //!
 //! - [`aka`], the service on domain values;
 //! - [`config`], the subscribers;
@@ -15,16 +16,18 @@
 pub mod aka;
 pub mod config;
 pub mod manage;
+pub mod persist;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use librecn_common::log;
 use librecn_common::log::Logger;
 use librecn_common::manage::{Manage, send_reply};
 use librecn_common::msg::flags;
+use librecn_common::state::{SNAPSHOT_PERIOD, Store};
 use librecn_sbi::Outcome;
 use librecn_sbi::ue_authentication::{AuthData, AuthInfo, GetAuthData};
-use librecn_scheduler::{Context, EoConfig, ExecutionObject, Message};
+use librecn_scheduler::{Context, EoConfig, ExecutionObject, Message, TimerId};
 
 use config::{HomeNetworkKeys, Subscriber};
 
@@ -33,29 +36,73 @@ pub struct Udm {
     name: String,
     subscribers: HashMap<String, Subscriber>,
     keys: HomeNetworkKeys,
+    /// The configuration's subscribers the web API removed.
+    removed: BTreeSet<String>,
+    /// The state file, what it restored, and whether there is news for it.
+    store: Option<(Store, persist::Restored)>,
+    dirty: bool,
+    snapshot_timer: Option<TimerId>,
     log: Logger,
 }
 
 impl Udm {
     pub fn new(name: &str, subscribers: HashMap<String, Subscriber>, keys: HomeNetworkKeys) -> Self {
-        Udm { name: name.to_string(), subscribers, keys, log: Logger::default() }
+        Udm {
+            name: name.to_string(),
+            subscribers,
+            keys,
+            removed: BTreeSet::new(),
+            store: None,
+            dirty: false,
+            snapshot_timer: None,
+            log: Logger::default(),
+        }
     }
 
-    /// For the control EO's factory: EO sizes and the UDM from deployment `params`.
+    /// Keeps the state in `store`, restoring what it holds.
+    pub fn with_store(mut self, store: Store) -> Result<Self, String> {
+        let restored = match store.load().map_err(|e| format!("state {}: {e}", store.path().display()))? {
+            Some(text) => persist::restore(&text, &mut self.subscribers, &mut self.removed)
+                .map_err(|e| format!("state {}: {e}", store.path().display()))?,
+            None => persist::Restored { provisioned: 0, removed: 0, sqns: 0 },
+        };
+        self.store = Some((store, restored));
+        Ok(self)
+    }
+
+    /// For the control EO's factory: EO sizes and the UDM from deployment
+    /// `params`, its state restored from the state directory if there is one.
     pub fn from_params(name: &str, params: &serde_json::Value) -> Result<(EoConfig, Self), String> {
         let udm = Self::new(name, config::from_params(params)?, config::keys_from_params(params)?);
+        let udm = match Store::for_nf(name) {
+            Some(store) => udm.with_store(store)?,
+            None => udm,
+        };
         Ok((Self::eo_config(name), udm))
     }
 
-    /// Requests are 256 bytes; management requests 8 KiB.
+    /// Requests are 256 bytes; management requests 8 KiB; the snapshot timer.
     pub fn eo_config(name: &str) -> EoConfig {
-        EoConfig::new(name).max_timers(0).buffers(&[(256, 1024), (8 * 1024, 4)])
+        EoConfig::new(name).max_timers(1).buffers(&[(256, 1024), (8 * 1024, 4)])
+    }
+
+    /// Writes the state file if something changed.
+    fn snapshot(&mut self, ctx: &mut Context<'_>) {
+        let Some((store, _)) = &self.store else { return };
+        if !std::mem::take(&mut self.dirty) {
+            return;
+        }
+        if let Err(e) = store.save(&persist::snapshot(&self.subscribers, &self.removed)) {
+            self.dirty = true;
+            log!(self.log, ctx, Error, "state {} not written: {e}", store.path().display());
+        }
     }
 
     fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
         let Some(method) = request.method() else { return };
-        let answer = manage::handle(&mut self.subscribers, method, request.path(), request.body());
+        let answer = manage::handle(&mut self.subscribers, &mut self.removed, method, request.path(), request.body());
         if let Some(change) = &answer.change {
+            self.dirty = true;
             log!(self.log, ctx, Info, "{change}, {} subscriber(s)", self.subscribers.len());
         }
         if let Err(e) = send_reply(ctx, msg, answer.status, &answer.json) {
@@ -72,6 +119,7 @@ impl Udm {
             return Err(Outcome::AuthenticationRejected);
         }
         let rand = librecn_security::random().map_err(|_| Outcome::Unavailable)?;
+        self.dirty = true;
         Ok((supi, aka::vector(sub, &info.serving_network, rand)))
     }
 
@@ -129,10 +177,30 @@ impl ExecutionObject for Udm {
                 librecn_security::ecies::public_key(&self.keys[&id]).iter().map(|b| format!("{b:02x}")).collect();
             log!(self.log, ctx, Info, "SUCI home network key {id} (Profile A), public key {public}");
         }
+        if let Some((store, r)) = &self.store {
+            let path = store.path().display();
+            log!(
+                self.log,
+                ctx,
+                Info,
+                "state in {path}: {} subscriber(s) added and {} removed by the web API, {} SQN(s) restored",
+                r.provisioned,
+                r.removed,
+                r.sqns
+            );
+            self.snapshot_timer = ctx.arm_timer(SNAPSHOT_PERIOD, 0).ok();
+        }
+    }
+
+    fn on_stop(&mut self, ctx: &mut Context<'_>) {
+        self.snapshot(ctx);
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
-        if let Some(request) = msg.body::<GetAuthData>() {
+        if msg.timer().is_some() {
+            self.snapshot(ctx);
+            self.snapshot_timer = ctx.arm_timer(SNAPSHOT_PERIOD, 0).ok();
+        } else if let Some(request) = msg.body::<GetAuthData>() {
             self.on_get_auth_data(ctx, msg, request);
         } else if let Some(request) = msg.body::<Manage>() {
             self.on_manage(ctx, msg, request);

@@ -34,6 +34,8 @@ pub struct Subscriber {
     pub sqn: u64,
     /// Authenticated with EAP-AKA' rather than 5G AKA.
     pub eap_aka_prime: bool,
+    /// Added through the web API, not the configuration: kept in the state file.
+    pub provisioned: bool,
 }
 
 impl Subscriber {
@@ -171,6 +173,7 @@ fn parse(s: SubscriberParams) -> Result<Vec<(String, Subscriber)>, String> {
         amf: hex(&s.amf).ok_or_else(|| what("amf: 4 hex digits"))?,
         sqn,
         eap_aka_prime,
+        provisioned: false,
     };
     let digits = &s.supi[5..];
     let first: u64 = digits.parse().map_err(|_| what("the SUPI must be imsi-<digits>"))?;

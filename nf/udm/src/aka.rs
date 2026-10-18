@@ -146,6 +146,7 @@ mod tests {
             amf: [0x80, 0],
             sqn: 0,
             eap_aka_prime: false,
+            provisioned: false,
         }
     }
 

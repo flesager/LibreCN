@@ -54,6 +54,9 @@ fn run() -> Result<(), String> {
     let level =
         Level::parse(&app.oam.log_level).ok_or_else(|| format!("log_level {:?}: unknown", app.oam.log_level))?;
     log::set_default_level(level);
+    if let Some(dir) = &app.oam.state_dir {
+        librecn_common::state::set_dir(dir.clone());
+    }
     let nfs = text.as_deref().map(Deployment::parse).transpose()?.map_or(0, |d| d.nf.len());
     let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM]).map_err(|e| format!("signals: {e}"))?;
 

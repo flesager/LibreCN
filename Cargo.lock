@@ -653,6 +653,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "zerocopy",
 ]
 
 [[package]]

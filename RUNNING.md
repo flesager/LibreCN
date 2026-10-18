@@ -121,7 +121,12 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
 
-Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. Those live in memory only and are gone at the next start.
+Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. With `[oam] state_dir` set (for example `/var/lib/librecn`), they survive restarts:
+- the UDM keeps what the web API changed (subscribers added and removed) and every subscriber's SQN in `<state_dir>/udm.json`, readable by its owner only (it holds keys);
+- it is written at most every 5 s when something changed, and at stop;
+- at start, the configuration is read first, then the state file on top of it; each SQN moves 1024 steps ahead, so none is used twice.
+
+Without `state_dir`, they live in memory only and are gone at the next start. A database will come later.
 
 ## 6. A complete example
 

@@ -64,11 +64,13 @@ pub struct OamSection {
     pub listen: SocketAddr,
     /// Threshold of every EO's logs: vip, fatal, error, info or debug.
     pub log_level: String,
+    /// Where the NFs keep their state across restarts; none: nothing is kept.
+    pub state_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for OamSection {
     fn default() -> Self {
-        OamSection { listen: SocketAddr::from(([127, 0, 0, 1], 8080)), log_level: "info".into() }
+        OamSection { listen: SocketAddr::from(([127, 0, 0, 1], 8080)), log_level: "info".into(), state_dir: None }
     }
 }
 

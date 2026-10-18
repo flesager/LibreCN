@@ -17,6 +17,7 @@ workers = 1
 [oam]
 listen = "127.0.0.1:8080"     # web API and GUI
 log_level = "info"            # vip, fatal, error, info, debug: every EO's threshold
+# state_dir = "/var/lib/librecn"  # optional: what the NFs keep across restarts (web API changes, SQNs)
 
 # NFs started at boot; more through the GUI or `POST /api/nfs`.
 [[nf]]

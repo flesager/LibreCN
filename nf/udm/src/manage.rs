@@ -7,7 +7,7 @@
 //! | `POST subscribers` | adds one subscriber or an array (fields of `[[nf.params.subscribers]]`): 201, or 409 if one exists |
 //! | `DELETE subscribers/{supi}` | removes it: 200, or 404 |
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use librecn_common::manage::Method;
 use serde_json::json;
@@ -25,7 +25,14 @@ fn answer(status: u16, json: serde_json::Value) -> Answer {
     Answer { status, json: json.to_string(), change: None }
 }
 
-pub fn handle(subscribers: &mut HashMap<String, Subscriber>, method: Method, path: &str, body: &str) -> Answer {
+/// `removed`: the configuration's subscribers removed here (kept in the state file).
+pub fn handle(
+    subscribers: &mut HashMap<String, Subscriber>,
+    removed: &mut BTreeSet<String>,
+    method: Method,
+    path: &str,
+    body: &str,
+) -> Answer {
     match (method, path.split_once('/').unwrap_or((path, ""))) {
         (Method::Get, ("subscribers", "")) => {
             let mut list: Vec<_> = subscribers.iter().collect();
@@ -55,15 +62,20 @@ pub fn handle(subscribers: &mut HashMap<String, Subscriber>, method: Method, pat
             }
             let added = supis.join(", ");
             let reply = json!({ "added": supis });
-            subscribers.extend(new);
+            subscribers.extend(new.into_iter().map(|(supi, s)| (supi, Subscriber { provisioned: true, ..s })));
             Answer { status: 201, json: reply.to_string(), change: Some(format!("subscriber(s) added: {added}")) }
         }
         (Method::Delete, ("subscribers", supi)) if !supi.is_empty() => match subscribers.remove(supi) {
-            Some(_) => Answer {
-                status: 200,
-                json: json!({ "removed": supi }).to_string(),
-                change: Some(format!("subscriber removed: {supi}")),
-            },
+            Some(gone) => {
+                if !gone.provisioned {
+                    removed.insert(supi.to_string());
+                }
+                Answer {
+                    status: 200,
+                    json: json!({ "removed": supi }).to_string(),
+                    change: Some(format!("subscriber removed: {supi}")),
+                }
+            }
             None => answer(404, json!({ "error": format!("no subscriber {supi}") })),
         },
         _ => answer(404, json!({ "error": format!("no resource {path:?}") })),
@@ -78,19 +90,20 @@ mod tests {
 
     #[test]
     fn subscribers_are_listed_added_and_removed() {
-        let mut subs = HashMap::new();
-        let list = |subs: &mut HashMap<_, _>| handle(subs, Method::Get, "subscribers", "").json;
+        let (mut subs, mut removed) = (HashMap::new(), BTreeSet::new());
+        let list = |subs: &mut HashMap<_, _>| handle(subs, &mut BTreeSet::new(), Method::Get, "subscribers", "").json;
         assert_eq!(list(&mut subs), "[]");
 
         let added = handle(
             &mut subs,
+            &mut removed,
             Method::Post,
             "subscribers",
             &format!(r#"{{"supi": "imsi-2", {K}, "sqn": "000000000020"}}"#),
         );
         assert_eq!((added.status, added.change.as_deref()), (201, Some("subscriber(s) added: imsi-2")));
         let two = format!(r#"[{{"supi": "imsi-1", {K}}}, {{"supi": "imsi-3", {K}, "amf": "9000"}}]"#);
-        assert_eq!(handle(&mut subs, Method::Post, "subscribers", &two).status, 201);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Post, "subscribers", &two).status, 201);
         assert_eq!(
             list(&mut subs),
             concat!(
@@ -101,16 +114,24 @@ mod tests {
             "by SUPI, without keys"
         );
 
-        let again = handle(&mut subs, Method::Post, "subscribers", &format!(r#"{{"supi": "imsi-1", {K}}}"#));
+        let again =
+            handle(&mut subs, &mut removed, Method::Post, "subscribers", &format!(r#"{{"supi": "imsi-1", {K}}}"#));
         assert_eq!((again.status, again.change), (409, None));
         let twice = format!(r#"[{{"supi": "imsi-9", {K}}}, {{"supi": "imsi-9", {K}}}]"#);
-        assert_eq!(handle(&mut subs, Method::Post, "subscribers", &twice).status, 400);
-        assert_eq!(handle(&mut subs, Method::Post, "subscribers", r#"{"supi": "imsi-4"}"#).status, 400);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Post, "subscribers", &twice).status, 400);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Post, "subscribers", r#"{"supi": "imsi-4"}"#).status, 400);
         assert_eq!(subs.len(), 3, "a refused request adds nothing");
 
-        assert_eq!(handle(&mut subs, Method::Delete, "subscribers/imsi-2", "").status, 200);
-        assert_eq!(handle(&mut subs, Method::Delete, "subscribers/imsi-2", "").status, 404);
-        assert_eq!(handle(&mut subs, Method::Get, "keys", "").status, 404);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Delete, "subscribers/imsi-2", "").status, 200);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Delete, "subscribers/imsi-2", "").status, 404);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Get, "keys", "").status, 404);
         assert_eq!(subs.len(), 2);
+        assert!(removed.is_empty() && subs.values().all(|s| s.provisioned), "added here: nothing to record");
+
+        // One of the configuration's: its removal is recorded.
+        let configured = config::subscribers(&format!(r#"{{"supi": "imsi-7", {K}}}"#)).unwrap();
+        subs.extend(configured);
+        assert_eq!(handle(&mut subs, &mut removed, Method::Delete, "subscribers/imsi-7", "").status, 200);
+        assert_eq!(removed, BTreeSet::from(["imsi-7".to_string()]));
     }
 }

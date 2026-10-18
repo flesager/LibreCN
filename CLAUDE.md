@@ -64,6 +64,7 @@ Later: deployment. Dependencies point down only: `scheduler` ← `common` ← `o
 - **Logs are JSON lines**. Levels: `VIP` / `FATAL` / `ERROR` / `INFO` / `DEBUG`; `VIP` is never filtered and is meant for rare lines such as "NF started successfully".
   - EOs log through a convenient call (`log!(self.log, ctx, Info, ...)`): a message to the log EO if it runs, otherwise a plain print.
   - Tests check logs with a capture helper that sits next to the log EO, not inside it (`LogSink::capture()`).
+- **Persistence** (`common::state`, `[oam] state_dir`): an NF keeps its state in `<state_dir>/<name>.json`, read at creation, written as a snapshot (temporary file then rename, mode 0600) when it changed, at most every 5 s, and at stop. The UDM keeps the web API's changes (subscribers added, the configuration's removed) and every SQN, moved 1024 SEQ ahead on restore; the configuration stays the source of what it lists. A database comes later (the owner's choice: a state file first).
 - **Alarms are required**: raise, update and clear with X.733 severities; every change is logged.
 - **NF resources on the web API**: `/api/nfs/{name}/{path}` is forwarded to the NF as a generic `Manage` request (`common::manage`), so the server never knows an NF. The UDM serves `subscribers` (list without keys, add, remove), with a Subscribers view in the GUI. Subscribers added this way live in memory only, like their SQNs.
 
