@@ -97,7 +97,8 @@ server answers 503 at once. Today:
 With `[oam] state_dir`, the UDM and the PCF keep these changes across
 restarts (`<state_dir>/udm.json`, with the SQNs, and `<state_dir>/pcf.json`).
 
-The GUI's Subscribers view uses them.
+The GUI's Subscribers and Policies views use them (a policy is edited as
+JSON, as `GET policies` shows it).
 
 ## Between the OAM EOs
 

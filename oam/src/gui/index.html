@@ -75,6 +75,26 @@
 </section>
 
 <section>
+  <h2>Policies</h2>
+  <p class="muted">Held by the PCF <input id="pcf" value="pcf" size="8" aria-label="PCF name">, per subscriber;
+    the others get the default. Bit rates in Mbit/s, uplink / downlink. A new UE-AMBR reaches the UE at once,
+    session policies apply to new sessions.</p>
+  <div class="scroll"><table id="policies"></table></div>
+  <textarea id="policy" aria-label="Policy (JSON)" style="min-height: 260px">{
+  "supi": "imsi-999700000000001",
+  "ue_ambr_mbps": { "uplink": 100, "downlink": 500 },
+  "sessions": [{
+    "dnn": "internet",
+    "ambr_mbps": { "uplink": 50, "downlink": 200 },
+    "flows": [{ "five_qi": 1, "arp": 2, "precedence": 10,
+                "mbr_mbps": { "uplink": 1, "downlink": 1 }, "gbr_mbps": { "uplink": 1, "downlink": 1 },
+                "filters": [{ "remote": "10.10.0.0/16", "protocol": 17, "remote_ports": "5060-5061" }] }]
+  }]
+}</textarea>
+  <p><button id="set-policy">Set</button></p>
+</section>
+
+<section>
   <h2>Start NFs</h2>
   <p class="muted">Deployment in TOML or JSON. Kinds: <span id="kinds">…</span></p>
   <textarea id="deployment">[[nf]]
@@ -162,6 +182,40 @@ async function refreshSubscribers() {
   }
 }
 
+// A policy's sessions in one line: "internet: 50 / 200, 5QI 9, 1 flow".
+function sessions(p) {
+  return (p.sessions || []).map((s) => {
+    const flows = s.flows.length ? `, ${s.flows.length} flow${s.flows.length > 1 ? "s" : ""}` : "";
+    return `${esc(s.dnn ?? "any DNN")}: ${s.ambr_mbps.uplink} / ${s.ambr_mbps.downlink}, 5QI ${s.five_qi}${flows}`;
+  }).join("; ");
+}
+
+let policiesPending = false;
+let policies = {};
+async function refreshPolicies() {
+  if (policiesPending) return;
+  policiesPending = true;
+  const pcf = encodeURIComponent($("pcf").value.trim());
+  try {
+    const r = await fetch(`/api/nfs/${pcf}/policies`);
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || r.status);
+    policies = Object.fromEntries(body.policies.map((p) => [p.supi, p]));
+    const row = (p, supi, source, remove) =>
+      `<tr><td>${supi}</td><td class="muted">${source}</td>` +
+      `<td class="num">${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}</td><td>${sessions(p)}</td>` +
+      `<td>${remove ? `<button data-edit="${esc(p.supi)}">Edit</button> <button data-remove="${esc(p.supi)}">Remove</button>` : ""}</td></tr>`;
+    const more = body.count > body.policies.length ? `<tr><td class="muted" colspan="5">${body.count - body.policies.length} more</td></tr>` : "";
+    table($("policies"), [["SUPI"], ["From"], ["UE-AMBR", "num"], ["Sessions"], [""]],
+      [row(body.default, "<i>default</i>", "configuration", false)]
+        .concat(body.policies.map((p) => row(p, esc(p.supi), p.provisioned ? "web API" : "configuration", true)), more ? [more] : []));
+  } catch (e) {
+    $("policies").innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`;
+  } finally {
+    policiesPending = false;
+  }
+}
+
 async function refresh() {
   try {
     const [eos, workers, alarms] = await Promise.all([get("/api/eos"), get("/api/workers"), get("/api/alarms").catch(() => [])]);
@@ -169,6 +223,7 @@ async function refresh() {
     renderEos(eos);
     renderWorkers(workers, performance.now());
     refreshSubscribers();
+    refreshPolicies();
     $("status").textContent = "updated " + new Date().toLocaleTimeString();
     $("status").className = "muted";
   } catch (e) {
@@ -203,6 +258,27 @@ $("add-subscriber").addEventListener("submit", async (ev) => {
   $("result").textContent = JSON.stringify(await r.json(), null, 2);
   if (r.ok) ev.target.reset();
   refreshSubscribers();
+});
+
+$("policies").addEventListener("click", async (ev) => {
+  const { edit, remove } = ev.target.dataset;
+  if (edit && policies[edit]) {
+    const { provisioned, ...policy } = policies[edit];
+    $("policy").value = JSON.stringify(policy, null, 2);
+    return;
+  }
+  if (!remove || !confirm(`Remove the policy of ${remove}? The default applies.`)) return;
+  const r = await fetch(`/api/nfs/${encodeURIComponent($("pcf").value.trim())}/policies/${encodeURIComponent(remove)}`,
+    { method: "DELETE" });
+  $("result").textContent = JSON.stringify(await r.json(), null, 2);
+  refreshPolicies();
+});
+
+$("set-policy").addEventListener("click", async () => {
+  const r = await fetch(`/api/nfs/${encodeURIComponent($("pcf").value.trim())}/policies`,
+    { method: "POST", body: $("policy").value });
+  $("result").textContent = JSON.stringify(await r.json(), null, 2);
+  refreshPolicies();
 });
 
 $("deploy").addEventListener("click", async () => {

@@ -136,3 +136,29 @@ pub fn handle(
         _ => answer(404, json!({ "error": format!("no resource {path:?}") })),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The GUI edits a policy as `GET policies` shows it, `provisioned` left out.
+    #[test]
+    fn a_listed_policy_can_be_posted_back_unchanged() {
+        let source = json!({ "supi": "imsi-1", "ue_ambr_mbps": { "uplink": 5, "downlink": 10 },
+            "sessions": [{ "dnn": "internet", "ambr_mbps": { "uplink": 2, "downlink": 4 },
+                "flows": [{ "five_qi": 1, "mbr_mbps": { "uplink": 1, "downlink": 1 }, "gbr_mbps": { "uplink": 1, "downlink": 1 },
+                            "filters": [{ "remote": "10.10.0.0/16", "protocol": 17, "remote_ports": "5060" }] },
+                          { "five_qi": 9, "filters": [{ "direction": "downlink", "local_ports": "80-81" }] }] }] });
+        let mut policies = Policies::from_params(&json!({ "policies": [source] })).unwrap();
+        let mut removed = BTreeSet::new();
+        let listed: Value =
+            serde_json::from_str(&handle(&mut policies, &mut removed, Method::Get, "policies", "").json).unwrap();
+        let mut entry = listed["policies"][0].clone();
+        entry.as_object_mut().unwrap().remove("provisioned");
+        let before = policies.of("imsi-1").clone();
+        let posted = handle(&mut policies, &mut removed, Method::Post, "policies", &entry.to_string());
+        assert_eq!(posted.status, 200, "{}", posted.json);
+        assert_eq!(policies.of("imsi-1"), &before);
+        assert!(policies.by_supi["imsi-1"].provisioned);
+    }
+}

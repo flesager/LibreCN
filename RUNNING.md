@@ -125,7 +125,7 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
 
-**QoS and bit rates** come from the PCF, per subscriber, with a `default` entry for the others (see `app/librecn.example.toml`): the UE-AMBR, and for each DNN the session AMBR, the default flow's 5QI and ARP, and extra QoS flows with their packet filters. What an entry leaves out comes from `default`, then from the built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way.
+**QoS and bit rates** come from the PCF, per subscriber, with a `default` entry for the others (see `app/librecn.example.toml`): the UE-AMBR, and for each DNN the session AMBR, the default flow's 5QI and ARP, and extra QoS flows with their packet filters. What an entry leaves out comes from `default`, then from the built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way. The GUI's Policies view, or `POST /api/nfs/pcf/policies`, changes them while LibreCN runs. The UPF enforces the session AMBR and the flows' MBRs.
 
 Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. With `[oam] state_dir` set (for example `/var/lib/librecn`), they survive restarts:
 - the UDM keeps what the web API changed (subscribers added and removed) and every subscriber's SQN in `<state_dir>/udm.json`, readable by its owner only (it holds keys);
@@ -208,7 +208,7 @@ The gNB is configured with AMF 192.168.1.10:38412, PLMN 001/01 and SST 1.
 ## 7. Checking that it runs
 
 - **Logs**: JSON lines on stdout. The `VIP` lines tell each start: `LibreCN started`, `UDM udm ready, 1 subscriber(s)`, `UPF upf ready, N3 192.168.1.10:2152, N6 upf0`, `AMF amf-1 ready: N2 on ...`. A gNB's NG Setup and each UE's registration are logged at `info`.
-- **GUI**: http://192.168.1.10:8080. It shows the running functions, workers, alarms and subscribers.
+- **GUI**: http://192.168.1.10:8080. It shows the running functions, workers, alarms, subscribers and policies (edited there as JSON).
 - **Alarms**: a lost gNB raises one (`N2 to ... lost`), and so does a failing function.
 - **Metrics**: http://192.168.1.10:8080/metrics, for Prometheus. It includes per-function queues and processing times, and the UPF's packets and bytes.
 
