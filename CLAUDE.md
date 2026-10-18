@@ -149,4 +149,5 @@ scripts/ueransim/scale.sh                                 # UERANSIM at scale (G
 scripts/ueransim/overload.sh                              # UERANSIM: Overload Start and Stop from a full AMF
 scripts/ueransim/mobility.sh                              # in Docker: an idle UE moves to another gNB and tracking area
 scripts/ueransim/demo.sh [stop]                           # in Docker: a long run to watch in the GUI (GNBS=2 UES=10 PORT=8080), Ctrl-C ends it
+scripts/free-ran-ue/check.sh                              # in Docker: free-ran-ue's UE pings through LibreCN, then N=1000 UEs get their session
 ```
