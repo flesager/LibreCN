@@ -169,6 +169,7 @@ Dependencies: `rustix` (epoll, eventfd, affinity), `zerocopy`, `thiserror`; test
 **Deliberately not done**
 - *Zero-copy hand-off of a received buffer to another EO.* It would put buffers of one EO's pool in another's mailbox, so each slot would carry its owner and pay a reference count on every forward. That breaks "an EO's pool holds what is sent to it". Copying a packet costs tens of nanoseconds; to be reconsidered with a real UPF profile.
 - *Multiple instances of one NF, multi-process messaging, a file sink for failure reports, `tracing`*: not needed yet.
+- *Rate shaping in the UPF* (the owner's choice): the session AMBR and the flows' MBRs are policed, packets beyond them dropped, as a QER's MBR is. A shaper would need a queue per session, with its memory and timers. The cost: one TCP flow over a sub-millisecond round trip gets about half of its rate (measured in Docker with UERANSIM, `nf/README.md`); over real round trips the 100 ms burst covers its window.
 
 **Learned the hard way**
 - The textbook Vyukov ring breaks at capacity 1; the property test found it.
