@@ -76,7 +76,7 @@ impl<M: Copy + Default> Batch<M> {
                 socket.as_raw_fd(),
                 h.msgs.as_mut_ptr(),
                 BATCH as _,
-                libc::MSG_DONTWAIT,
+                libc::MSG_DONTWAIT as _,
                 std::ptr::null_mut(),
             )
         };
