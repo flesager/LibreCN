@@ -127,7 +127,7 @@ Dependencies point down only: `scheduler` ← `common` ← `oam`, `proto/*` ← 
 - **Structure**: procedures are pure functions on domain values (`setup.rs`); ASN.1 only in `n2.rs`; the EO is thin glue (`lib.rs`).
 - **Test values** (the owner let me choose; they match UERANSIM's samples): PLMN 999/70, TAC 1, SST 1, AMF Region 1 / Set 1 / Pointer 0, capacity 255, N2 on 127.0.0.1:38412; subscriber imsi-999700000000001 with UERANSIM's K and OPc, AMF field 8000. The UDM's SQN is SEQ || IND (5 bits, IND 0), as UERANSIM checks it.
 - **Session values** (agreed with the owner, in the SMF's params until subscription data exists): DNNs as a list (`dnns`, each with its IPv4 pool, the first by default; the interop setups serve `internet` 10.45.0.0/16 and `ims` 10.46.0.0/16, and the UE holds a session on each), SST 1, the first address of each pool is the UPF's N6 side, default 5QI 9, session AMBR 1000 Mbit/s each way. The UPF's N3 is 127.0.0.2: UERANSIM's gNB binds GTP-U on 127.0.0.1.
-- **UERANSIM** v3.3.0 lives in `/mnt/part_1TB_disck/prg/UERANSIM`, next to this repository, built by its `build.sh` without system packages: cmake and libsctp come from its `tools/`.
+- **UERANSIM** v3.3.0 lives in `../UERANSIM`, next to this repository, built by its `build.sh` without system packages: cmake and libsctp come from its `tools/`.
   - **UERANSIM is patched** (`scripts/ueransim/patches/`, applied to `../UERANSIM/src` and rebuilt):
     - 0001: v3.3.0's gNB picks an AMF only from the slice of a plain Registration Request, so no protected initial message (a UE back from idle) could reach any AMF. `user-plane.sh` refuses to run without it.
     - 0002: a data race on the gNB's RLS UE map (two threads, no lock) crashed it with hundreds of UEs attaching at once.
