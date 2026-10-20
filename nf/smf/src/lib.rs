@@ -32,7 +32,7 @@ use librecn_common::log::Logger;
 use librecn_common::manage::{Manage, Method, send_reply};
 use librecn_common::msg::flags;
 use librecn_nas::Snssai;
-use librecn_nas::sm::{SmUplink, cause};
+use librecn_nas::sm::{PcoRequests, SmUplink, cause};
 use librecn_sbi::pdu_session::{
     CreateSmContext, CreateSmContextResult, N4Delete, N4Establish, N4EstablishResult, N4Modify, N4ModifyResult,
     N4Report, ReleaseSmContext, SmNotify, SmNotifyResult, UpdateSmContext, UpdateSmContextResult, n2, update,
@@ -44,7 +44,7 @@ use serde_json::json;
 
 use config::SmfConfig;
 use pool::Pool;
-use session::Refused;
+use session::{Accepted, Refused};
 
 /// Sessions listed by `GET sessions` (the answer fits in 8 KiB).
 const LISTED: usize = 64;
@@ -101,6 +101,8 @@ struct SmContext {
     /// Its DNN, an index in the configuration's (and in the pools).
     dnn: usize,
     ue_ip: Ipv4Addr,
+    /// What the UE asked for in its ePCO, answered in the accept.
+    pco: PcoRequests,
     amf: EoId,
     /// The AMF's id of the UE, the `corr_id` of its last request.
     amf_ue: u32,
@@ -217,6 +219,7 @@ impl Smf {
             slice,
             dnn,
             ue_ip,
+            pco: accepted.pco,
             amf: to.0,
             amf_ue: to.1,
             releasing: false,
@@ -270,7 +273,7 @@ impl Smf {
         }
         let n3 = (Ipv4Addr::from(result.n3_addr), result.ul_teid);
         c.n3 = Some(n3);
-        let (pti, slice, dnn, ue_ip) = (c.pti, c.slice, c.dnn, c.ue_ip);
+        let (pti, slice, dnn, ue_ip, pco) = (c.pti, c.slice, c.dnn, c.ue_ip, c.pco);
         let n2 = match setup_transfer(n3, &rule) {
             Ok(n2) => n2,
             Err(e) => {
@@ -279,7 +282,7 @@ impl Smf {
                 return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });
             }
         };
-        let Some(n1) = session::accept(&self.config, psi, pti, slice, dnn, ue_ip, &rule) else {
+        let Some(n1) = session::accept(&self.config, psi, Accepted { pti, dnn, pco }, slice, ue_ip, &rule) else {
             log!(self.log, ctx, Error, "{supi}: the PCF's rules do not fit in a PDU Session Establishment Accept");
             self.remove(ctx, id);
             return self.refuse(ctx, to, &supi, psi, Refused { pti, cause: cause::INSUFFICIENT_RESOURCES });

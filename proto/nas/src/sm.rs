@@ -66,6 +66,39 @@ pub struct Header {
     pub kind: u8,
 }
 
+/// What a UE asks for in its extended protocol configuration options
+/// (ePCO, TS 24.008 §10.5.6.3: containers of the request, without content).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PcoRequests {
+    /// DNS server IPv4 addresses (container 000DH).
+    pub dns: bool,
+    /// IPv4 link MTU (container 0010H).
+    pub mtu: bool,
+}
+
+/// The containers an ePCO's `value` asks for; a malformed tail is ignored.
+fn pco_requests(value: &[u8]) -> PcoRequests {
+    let mut asked = PcoRequests::default();
+    // The configuration protocol octet, then containers: id (2), length (1), content.
+    let mut rest = value.get(1..).unwrap_or_default();
+    while let [id0, id1, len, tail @ ..] = rest {
+        match u16::from_be_bytes([*id0, *id1]) {
+            0x000d => asked.dns = true,
+            0x0010 => asked.mtu = true,
+            _ => {}
+        }
+        rest = tail.get(usize::from(*len)..).unwrap_or_default();
+    }
+    asked
+}
+
+/// What the network answers to a UE's ePCO requests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pco<'a> {
+    pub dns: &'a [[u8; 4]],
+    pub mtu: Option<u16>,
+}
+
 /// The uplink 5GSM messages the SMF handles, decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SmUplink {
@@ -73,6 +106,7 @@ pub enum SmUplink {
         /// Requested PDU session type, if any.
         session_type: Option<u8>,
         ssc_mode: Option<u8>,
+        pco: PcoRequests,
     },
     ReleaseRequest,
     ReleaseComplete,
@@ -95,16 +129,17 @@ impl SmUplink {
         let message = match header.kind {
             kind::ESTABLISHMENT_REQUEST => {
                 r.take(2)?; // integrity protection maximum data rate
-                let (mut session_type, mut ssc_mode) = (None, None);
+                let (mut session_type, mut ssc_mode, mut pco) = (None, None, PcoRequests::default());
                 // Maximum number of supported packet filters (0x55) is TV.
                 while let Some((iei, v)) = r.optional(&[(0x55, 2)])? {
                     match iei {
                         0x90 => session_type = Some(v[0] & 0x07),
                         0xa0 => ssc_mode = Some(v[0] & 0x07),
+                        0x7b => pco = pco_requests(v),
                         _ => {}
                     }
                 }
-                SmUplink::EstablishmentRequest { session_type, ssc_mode }
+                SmUplink::EstablishmentRequest { session_type, ssc_mode, pco }
             }
             kind::RELEASE_REQUEST => SmUplink::ReleaseRequest,
             kind::RELEASE_COMPLETE => SmUplink::ReleaseComplete,
@@ -165,6 +200,8 @@ pub enum SmDownlink<'a> {
         ambr: (u64, u64),
         snssai: Snssai,
         dnn: &'a str,
+        /// The answers to the UE's ePCO requests (none: no ePCO).
+        pco: Pco<'a>,
     },
     EstablishmentReject {
         cause: u8,
@@ -243,7 +280,7 @@ impl SmDownlink<'_> {
         let mut w = Writer::new(out);
         w.bytes(&[EPD_5GSM, pdu_session_id, pti, self.kind()]);
         match *self {
-            SmDownlink::EstablishmentAccept { address, ssc_mode, flows, ambr, snssai, dnn } => {
+            SmDownlink::EstablishmentAccept { address, ssc_mode, flows, ambr, snssai, dnn, pco } => {
                 w.u8(ssc_mode << 4 | crate::sm::session_type::IPV4);
                 // Authorized QoS rules (§9.11.4.13), one per flow, rule
                 // identifiers from 1: the default rule (DQR) with one
@@ -294,6 +331,21 @@ impl SmDownlink<'_> {
                         }
                     }
                 });
+                // ePCO: the configuration protocol octet (PPP, ext bit),
+                // then one container per DNS server, the MTU's.
+                if !pco.dns.is_empty() || pco.mtu.is_some() {
+                    w.tlve(0x7b, |w| {
+                        w.u8(0x80);
+                        for dns in pco.dns {
+                            w.bytes(&[0x00, 0x0d, 4]);
+                            w.bytes(dns);
+                        }
+                        if let Some(mtu) = pco.mtu {
+                            w.bytes(&[0x00, 0x10, 2]);
+                            w.bytes(&mtu.to_be_bytes());
+                        }
+                    });
+                }
                 w.tlv(0x25, |w| Dnn::encode(dnn, w));
             }
             SmDownlink::EstablishmentReject { cause }
@@ -316,7 +368,8 @@ mod tests {
         let pdu = hex("2e 01 01 c1 ffff 91 a1 28 01 00 7b 0007 80000a00000d00");
         let (header, message) = SmUplink::decode(&pdu).unwrap();
         assert_eq!(header, Header { pdu_session_id: 1, pti: 1, kind: kind::ESTABLISHMENT_REQUEST });
-        assert_eq!(message, SmUplink::EstablishmentRequest { session_type: Some(1), ssc_mode: Some(1) });
+        let pco = PcoRequests { dns: true, mtu: false };
+        assert_eq!(message, SmUplink::EstablishmentRequest { session_type: Some(1), ssc_mode: Some(1), pco });
         // UERANSIM's release request carries a 5GSM cause (#36): ignored.
         assert_eq!(SmUplink::decode(&hex("2e0102d1 5924")).unwrap().1, SmUplink::ReleaseRequest);
         assert_eq!(SmUplink::decode(&hex("2e0100d4")).unwrap().1, SmUplink::ReleaseComplete);
@@ -336,6 +389,7 @@ mod tests {
             ambr: (100_000_000, 1_000_000_000),
             snssai: Snssai { sst: 1, sd: None },
             dnn: "internet",
+            pco: Pco::default(),
         };
         let mut buf = [0u8; 128];
         let n = accept.encode(1, 1, &mut buf).unwrap();
@@ -347,6 +401,30 @@ mod tests {
         assert_eq!(buf[..n], hex("2e0503c31b")[..]);
         let n = SmDownlink::ReleaseCommand { cause: cause::REGULAR_DEACTIVATION }.encode(1, 0, &mut buf).unwrap();
         assert_eq!(buf[..n], hex("2e0100d324")[..], "network-requested: PTI 0");
+    }
+
+    /// A UE's ePCO requests (a Quectel's: P-CSCF, DNS, MTU, IP address
+    /// allocation), and the network's answer before the DNN.
+    #[test]
+    fn dns_servers_and_the_mtu_answer_the_ues_requests() {
+        assert_eq!(pco_requests(&hex("80 000c00 000d00 001000 000a00")), PcoRequests { dns: true, mtu: true });
+        assert_eq!(pco_requests(&hex("80 000a00")), PcoRequests::default());
+        assert_eq!(pco_requests(&hex("80 000d")), PcoRequests::default(), "truncated: ignored");
+        assert_eq!(pco_requests(&[]), PcoRequests::default());
+        let accept = SmDownlink::EstablishmentAccept {
+            address: [10, 45, 0, 2],
+            ssc_mode: 1,
+            flows: &[QosFlow { qfi: 1, five_qi: 9, gbr: None, precedence: 0, filters: &[] }],
+            ambr: (100_000_000, 1_000_000_000),
+            snssai: Snssai { sst: 1, sd: None },
+            dnn: "internet",
+            pco: Pco { dns: &[[8, 8, 8, 8], [1, 1, 1, 1]], mtu: Some(1400) },
+        };
+        let mut buf = [0u8; 128];
+        let n = accept.encode(1, 1, &mut buf).unwrap();
+        let tail =
+            hex("79 0006 012041010109 7b 0014 80 000d04 08080808 000d04 01010101 001002 0578 25 09 08696e7465726e6574");
+        assert_eq!(buf[n - tail.len()..n], tail[..]);
     }
 
     /// An extra GBR flow: its rule's filter components (§9.11.4.13) and its
@@ -375,6 +453,7 @@ mod tests {
             ambr: (20_000_000, 100_000_000),
             snssai: Snssai { sst: 1, sd: None },
             dnn: "internet",
+            pco: Pco::default(),
         };
         let mut buf = [0u8; 256];
         let n = accept.encode(1, 1, &mut buf).unwrap();

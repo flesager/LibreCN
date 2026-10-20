@@ -7,8 +7,10 @@
 //! [nf.params]
 //! upf = "upf"                    # the UPF's EO name
 //! # The data networks served, the first by default; each with its UE
-//! # addresses (its first one is the UPF's N6 side). Pools do not overlap.
-//! dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]
+//! # addresses (its first one is the UPF's N6 side; pools do not overlap),
+//! # and what a UE asking for them (ePCO) gets: DNS servers (1 to 4) and
+//! # the IPv4 link MTU (room for the tunnel's 44 bytes on a 1500 N3).
+//! dnns = [{ dnn = "internet", pool = "10.45.0.0/16", dns = ["8.8.8.8", "1.1.1.1"], mtu = 1400 }]
 //! slices = [{ sst = 1 }]
 //! pcf = "pcf"                    # the PCF's EO name: each session's QoS (SM policy)
 //! ```
@@ -33,6 +35,18 @@ struct SliceParams {
 struct DnnParams {
     dnn: String,
     pool: String,
+    #[serde(default = "public_dns")]
+    dns: Vec<Ipv4Addr>,
+    #[serde(default = "link_mtu")]
+    mtu: u16,
+}
+
+fn public_dns() -> Vec<Ipv4Addr> {
+    vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(1, 1, 1, 1)]
+}
+
+fn link_mtu() -> u16 {
+    1400
 }
 
 #[derive(Deserialize)]
@@ -48,19 +62,27 @@ impl Default for Params {
     fn default() -> Self {
         Params {
             upf: "upf".into(),
-            dnns: vec![DnnParams { dnn: "internet".into(), pool: "10.45.0.0/16".into() }],
+            dnns: vec![DnnParams {
+                dnn: "internet".into(),
+                pool: "10.45.0.0/16".into(),
+                dns: public_dns(),
+                mtu: link_mtu(),
+            }],
             slices: vec![SliceParams { sst: 1, sd: None }],
             pcf: "pcf".into(),
         }
     }
 }
 
-/// A data network served, and its UE addresses.
+/// A data network served, its UE addresses, and what its UEs are told.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DnnConfig {
     pub dnn: String,
     /// Network and prefix length.
     pub pool: (Ipv4Addr, u8),
+    /// DNS servers, and the IPv4 link MTU, for the UEs that ask (ePCO).
+    pub dns: Vec<[u8; 4]>,
+    pub mtu: u16,
 }
 
 /// What the SMF serves.
@@ -122,7 +144,13 @@ fn dnn(d: &DnnParams) -> Result<DnnConfig, String> {
     if !(8..=30).contains(&len) || u32::from(net) & (u32::MAX >> len) != 0 {
         return Err(bad_pool());
     }
-    Ok(DnnConfig { dnn: d.dnn.clone(), pool: (net, len) })
+    if d.dns.is_empty() || d.dns.len() > 4 {
+        return Err(format!("dns of {:?}: 1 to 4 IPv4 addresses", d.dnn));
+    }
+    if !(576..=9000).contains(&d.mtu) {
+        return Err(format!("mtu of {:?}: 576 to 9000", d.dnn));
+    }
+    Ok(DnnConfig { dnn: d.dnn.clone(), pool: (net, len), dns: d.dns.iter().map(|a| a.octets()).collect(), mtu: d.mtu })
 }
 
 fn sd(hex: &str) -> Option<[u8; 3]> {
@@ -137,11 +165,19 @@ mod tests {
     #[test]
     fn defaults_and_checks() {
         let c = SmfConfig::from_params(&serde_json::Value::Null).unwrap();
-        let internet = DnnConfig { dnn: "internet".into(), pool: (Ipv4Addr::new(10, 45, 0, 0), 16) };
+        let internet = DnnConfig {
+            dnn: "internet".into(),
+            pool: (Ipv4Addr::new(10, 45, 0, 0), 16),
+            dns: vec![[8, 8, 8, 8], [1, 1, 1, 1]],
+            mtu: 1400,
+        };
         assert_eq!((&c.dnns[..], c.pcf.as_str()), (&[internet][..], "pcf"));
         let two = serde_json::json!({ "dnns": [{ "dnn": "internet", "pool": "10.45.0.0/16" },
                                                { "dnn": "ims", "pool": "10.46.0.0/24" }] });
         assert_eq!(SmfConfig::from_params(&two).unwrap().dnns[1].pool, (Ipv4Addr::new(10, 46, 0, 0), 24));
+        let own = serde_json::json!({ "dnns": [{ "dnn": "internet", "pool": "10.45.0.0/16", "dns": ["9.9.9.9"], "mtu": 1450 }] });
+        let own = &SmfConfig::from_params(&own).unwrap().dnns[0];
+        assert_eq!((&own.dns[..], own.mtu), (&[[9, 9, 9, 9]][..], 1450));
         let c = SmfConfig::from_params(&serde_json::json!({ "slices": [{ "sst": 1, "sd": "010203" }] })).unwrap();
         assert_eq!(c.slices, [Snssai { sst: 1, sd: Some([1, 2, 3]) }]);
         let dnns = |list: serde_json::Value| serde_json::json!({ "dnns": list });
@@ -150,6 +186,9 @@ mod tests {
             dnns(serde_json::json!([{ "dnn": "internet", "pool": "10.45.0.0/31" }])),
             dnns(serde_json::json!([{ "dnn": "internet", "pool": "10.45.0.0" }])),
             dnns(serde_json::json!([{ "dnn": "a..b", "pool": "10.45.0.0/16" }])),
+            dnns(serde_json::json!([{ "dnn": "a", "pool": "10.45.0.0/16", "dns": [] }])),
+            dnns(serde_json::json!([{ "dnn": "a", "pool": "10.45.0.0/16", "dns": ["dns.example"] }])),
+            dnns(serde_json::json!([{ "dnn": "a", "pool": "10.45.0.0/16", "mtu": 100 }])),
             dnns(serde_json::json!([])),
             dnns(serde_json::json!([{ "dnn": "a", "pool": "10.45.0.0/16" }, { "dnn": "b", "pool": "10.45.1.0/24" }])),
             dnns(serde_json::json!([{ "dnn": "a", "pool": "10.45.0.0/16" }, { "dnn": "A", "pool": "10.46.0.0/16" }])),

@@ -20,6 +20,7 @@ sst=${LIBRECN_SST:-1}
 sd=${LIBRECN_SD:-}
 dnn=${LIBRECN_DNN:-internet}
 pool=${LIBRECN_UE_POOL:-10.45.0.0/16}
+dns=${LIBRECN_DNS:-8.8.8.8,1.1.1.1}
 nat=${LIBRECN_NAT:-yes}
 gui=${LIBRECN_GUI:-127.0.0.1:8080}
 log=${LIBRECN_LOG:-info}
@@ -75,7 +76,7 @@ name = "pcf"
 kind = "smf"
 name = "smf"
 [nf.params]
-dnns = [{ dnn = "$dnn", pool = "$pool" }]
+dnns = [{ dnn = "$dnn", pool = "$pool", dns = [$(echo "$dns" | sed 's/ //g; s/[^,][^,]*/"&"/g')] }]
 slices = [$slice]
 
 [[nf]]

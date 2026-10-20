@@ -5,7 +5,7 @@
 use std::net::Ipv4Addr;
 
 use librecn_nas::Snssai;
-use librecn_nas::sm::{FlowRates, PacketFilter, QosFlow, SmDownlink, SmUplink, cause, session_type};
+use librecn_nas::sm::{FlowRates, PacketFilter, Pco, PcoRequests, QosFlow, SmDownlink, SmUplink, cause, session_type};
 use librecn_sbi::pdu_session::CONTAINER;
 use librecn_sbi::policy::{DEFAULT_QFI, MAX_FILTERS, MAX_RULES, SessionRule, rule_qfi};
 
@@ -20,6 +20,8 @@ pub struct Accepted {
     pub pti: u8,
     /// The DNN chosen, an index in the configuration's.
     pub dnn: usize,
+    /// What the UE asked for in its ePCO (DNS servers, MTU).
+    pub pco: PcoRequests,
 }
 
 /// A refused request: its PTI and 5GSM cause.
@@ -41,7 +43,7 @@ pub fn decide(
     let (header, message) =
         SmUplink::decode(n1).map_err(|_| Refused { pti: 0, cause: cause::INVALID_MANDATORY_INFORMATION })?;
     let refuse = |cause| Err(Refused { pti: header.pti, cause });
-    let SmUplink::EstablishmentRequest { session_type, ssc_mode } = message else {
+    let SmUplink::EstablishmentRequest { session_type, ssc_mode, pco } = message else {
         return refuse(cause::MESSAGE_TYPE_NOT_IMPLEMENTED);
     };
     if header.pdu_session_id != pdu_session_id || !(1..=15).contains(&pdu_session_id) {
@@ -60,22 +62,23 @@ pub fn decide(
     if ssc_mode.is_some_and(|m| m != 1) {
         return refuse(cause::SERVICE_OPTION_NOT_SUPPORTED);
     }
-    Ok(Accepted { pti: header.pti, dnn })
+    Ok(Accepted { pti: header.pti, dnn, pco })
 }
 
-/// PDU Session Establishment Accept: IPv4 `address` on DNN `dnn` (an index
-/// in the configuration's), SSC mode 1, the PCF's `rule`: the session AMBR,
-/// the default flow, and a flow per PCC rule. None if it does not fit in
-/// [`N1_MAX`] (the most filters with every field).
+/// PDU Session Establishment Accept of the `accepted` request: IPv4
+/// `address` on its DNN, SSC mode 1, the PCF's `rule` (the session AMBR,
+/// the default flow, and a flow per PCC rule), and the DNN's DNS servers
+/// and MTU if the UE asked for them. None if it does not fit in [`N1_MAX`]
+/// (the most filters with every field).
 pub fn accept(
     config: &SmfConfig,
     pdu_session_id: u8,
-    pti: u8,
+    accepted: Accepted,
     slice: Snssai,
-    dnn: usize,
     address: Ipv4Addr,
     rule: &SessionRule,
 ) -> Option<Vec<u8>> {
+    let Accepted { pti, dnn, pco } = accepted;
     let mut filters = [[PacketFilter::default(); MAX_FILTERS]; MAX_RULES];
     for (mine, pcc) in filters.iter_mut().zip(rule.rules()) {
         for (f, p) in mine.iter_mut().zip(pcc.filters()) {
@@ -110,6 +113,10 @@ pub fn accept(
         ambr: (rule.ambr.uplink, rule.ambr.downlink),
         snssai: slice,
         dnn: &config.dnns[dnn].dnn,
+        pco: Pco {
+            dns: if pco.dns { &config.dnns[dnn].dns } else { &[] },
+            mtu: pco.mtu.then_some(config.dnns[dnn].mtu),
+        },
     };
     let n = accept.encode(pdu_session_id, pti, &mut out).ok()?;
     Some(out[..n].to_vec())
@@ -169,9 +176,27 @@ mod tests {
                                                   { "dnn": "ims", "pool": "10.46.0.0/16" }] });
         let c = SmfConfig::from_params(&params).unwrap();
         let request = hex("2e 01 07 c1 ffff 91 a1");
-        assert_eq!(decide(&c, 1, SST1, "internet", &request), Ok(Accepted { pti: 7, dnn: 0 }));
-        assert_eq!(decide(&c, 1, SST1, "IMS", &request), Ok(Accepted { pti: 7, dnn: 1 }), "DNNs ignore case");
-        assert_eq!(decide(&c, 1, SST1, "", &request), Ok(Accepted { pti: 7, dnn: 0 }), "the first DNN by default");
+        let none = PcoRequests::default();
+        assert_eq!(decide(&c, 1, SST1, "internet", &request), Ok(Accepted { pti: 7, dnn: 0, pco: none }));
+        assert_eq!(
+            decide(&c, 1, SST1, "IMS", &request),
+            Ok(Accepted { pti: 7, dnn: 1, pco: none }),
+            "DNNs ignore case"
+        );
+        assert_eq!(
+            decide(&c, 1, SST1, "", &request),
+            Ok(Accepted { pti: 7, dnn: 0, pco: none }),
+            "the first DNN by default"
+        );
+        // A UE asking for DNS servers and the MTU (ePCO containers 000D, 0010).
+        let asking = hex("2e 01 07 c1 ffff 91 a1 7b 0007 80 000d00 001000");
+        let both = PcoRequests { dns: true, mtu: true };
+        assert_eq!(decide(&c, 1, SST1, "", &asking), Ok(Accepted { pti: 7, dnn: 0, pco: both }));
+        let answered =
+            super::accept(&c, 1, Accepted { pti: 7, dnn: 0, pco: both }, SST1, Ipv4Addr::new(10, 45, 0, 2), &rule())
+                .unwrap();
+        let epco = hex("7b 0014 80 000d04 08080808 000d04 01010101 001002 0578");
+        assert!(answered.windows(epco.len()).any(|w| w == epco), "the DNN's DNS servers and MTU");
         let refused = |cause| Err(Refused { pti: 7, cause });
         assert_eq!(decide(&c, 1, SST1, "mms", &request), refused(cause::MISSING_OR_UNKNOWN_DNN));
         assert_eq!(decide(&c, 2, SST1, "internet", &request), refused(cause::INVALID_PDU_SESSION_IDENTITY));
@@ -184,7 +209,9 @@ mod tests {
         assert_eq!(reject(1, Refused { pti: 7, cause: 27 }), hex("2e0107c31b"));
         assert_eq!(release_command(1, 0), hex("2e0100d324"));
         assert_eq!(modification_reject(1, 3), hex("2e0103ca1f"));
-        let accept = |dnn, rule: &SessionRule| accept(&c, 1, 7, SST1, dnn, Ipv4Addr::new(10, 45, 0, 2), rule);
+        let accept = |dnn, rule: &SessionRule| {
+            accept(&c, 1, Accepted { pti: 7, dnn, pco: none }, SST1, Ipv4Addr::new(10, 45, 0, 2), rule)
+        };
         assert_eq!(accept(0, &rule()).unwrap()[..5], hex("2e0107c211")[..]);
         let ims = accept(1, &rule()).unwrap();
         assert!(ims.ends_with(&hex("25 04 03696d73")), "DNN ims in the accept");

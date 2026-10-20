@@ -2,7 +2,7 @@
 
 LibreCN is an open 5G core in Rust, built on a reactor scheduler of run-to-completion execution objects (EOs). It must run on Linux, baremetal or in Docker, with the kernel network stack (baremetal means "no container", not `no_std`). Each network function (NF) is hosted in an EO.
 
-The detailed design is in `scheduler/DESIGN.md` and `oam/README.md`. This file records the owner's decisions and how they want to work. When the code and this file disagree, ask.
+The detailed design is in `scheduler/DESIGN.md` and `oam/README.md`. This file records the owner's decisions and how they want to work. When the code and this file disagree, ask. Integrating LibreCN with a real RAN and UEs, or the openMCX work: read `INTEGRATION.md` first.
 
 ## Principles (apply to every change)
 
@@ -126,7 +126,7 @@ Dependencies point down only: `scheduler` ← `common` ← `oam`, `proto/*` ← 
 - **SCTP**: one-to-many style (one socket for every gNB, association id per message), kernel SCTP through `libc`.
 - **Structure**: procedures are pure functions on domain values (`setup.rs`); ASN.1 only in `n2.rs`; the EO is thin glue (`lib.rs`).
 - **Test values** (the owner let me choose; they match UERANSIM's samples): PLMN 999/70, TAC 1, SST 1, AMF Region 1 / Set 1 / Pointer 0, capacity 255, N2 on 127.0.0.1:38412; subscriber imsi-999700000000001 with UERANSIM's K and OPc, AMF field 8000. The UDM's SQN is SEQ || IND (5 bits, IND 0), as UERANSIM checks it.
-- **Session values** (agreed with the owner, in the SMF's params until subscription data exists): DNNs as a list (`dnns`, each with its IPv4 pool, the first by default; the interop setups serve `internet` 10.45.0.0/16 and `ims` 10.46.0.0/16, and the UE holds a session on each), SST 1, the first address of each pool is the UPF's N6 side, default 5QI 9, session AMBR 1000 Mbit/s each way. The UPF's N3 is 127.0.0.2: UERANSIM's gNB binds GTP-U on 127.0.0.1.
+- **Session values** (agreed with the owner, in the SMF's params until subscription data exists): DNNs as a list (`dnns`, each with its IPv4 pool, the first by default, and the DNS servers and MTU a UE asking in its ePCO gets: default 8.8.8.8, 1.1.1.1 and 1400; `LIBRECN_DNS` in `.env`; the interop setups serve `internet` 10.45.0.0/16 and `ims` 10.46.0.0/16, and the UE holds a session on each), SST 1, the first address of each pool is the UPF's N6 side, default 5QI 9, session AMBR 1000 Mbit/s each way. The UPF's N3 is 127.0.0.2: UERANSIM's gNB binds GTP-U on 127.0.0.1.
 - **UERANSIM** v3.3.0 lives in `../UERANSIM`, next to this repository, built by its `build.sh` without system packages: cmake and libsctp come from its `tools/`.
   - **UERANSIM is patched** (`scripts/ueransim/patches/`, applied to `../UERANSIM/src` and rebuilt):
     - 0001: v3.3.0's gNB picks an AMF only from the slice of a plain Registration Request, so no protected initial message (a UE back from idle) could reach any AMF. `user-plane.sh` refuses to run without it.

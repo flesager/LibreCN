@@ -90,8 +90,9 @@ pool = "cp"
 upf = "upf"
 pcf = "pcf"                   # each session's QoS and AMBR
 # Data networks, the first by default, each with its UE addresses (the first
-# address is the UPF's N6 side: 10.45.0.1); pools must not overlap.
-dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]
+# address is the UPF's N6 side: 10.45.0.1; pools must not overlap), and the
+# DNS servers (1 to 4) and IPv4 link MTU told to the UEs that ask (ePCO).
+dnns = [{ dnn = "internet", pool = "10.45.0.0/16", dns = ["8.8.8.8", "1.1.1.1"], mtu = 1400 }]
 slices = [{ sst = 1 }]
 
 [[nf]]

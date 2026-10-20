@@ -146,6 +146,7 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | Subscriber | UDM: `[[nf.params.subscribers]]` with `supi`, `k`, `opc` (`amf`, `sqn`, `count`, `auth` = `5g-aka` or `eap-aka-prime` optional) | UE: `supi`, `key`, `op` with `opType: OPC`, `amf` |
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
+| DNS and MTU | SMF, per DNN: `dns = ["8.8.8.8", "1.1.1.1"]`, `mtu = 1400` (the defaults), sent to a UE that asks in its PDU session request (ePCO) | the UE asks on its own (phones and modems do) |
 
 **QoS and bit rates** come from the PCF, per subscriber, with a `default` entry for the others (see `app/librecn.example.toml`): the UE-AMBR, and for each DNN the session AMBR, the default flow's 5QI and ARP, and extra QoS flows with their packet filters. What an entry leaves out comes from `default`, then from the built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way. The GUI's Provisioning panel, or `POST /api/nfs/pcf/policies`, changes them while LibreCN runs. The UPF enforces the session AMBR and the flows' MBRs.
 

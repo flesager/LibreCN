@@ -43,6 +43,7 @@ Every line is optional; [`env.example`](env.example) explains each one.
 | `LIBRECN_MCC`, `LIBRECN_MNC` | 001, 01 | the PLMN, as on the gNB and the SIMs |
 | `LIBRECN_SST`, `LIBRECN_SD` | 1, none | the slice served |
 | `LIBRECN_DNN`, `LIBRECN_UE_POOL` | internet, 10.45.0.0/16 | the data network and the UEs' addresses |
+| `LIBRECN_DNS` | 8.8.8.8,1.1.1.1 | the DNS servers the UEs are told |
 | `LIBRECN_NAT` | yes | the UEs reach the outside through the host |
 | `LIBRECN_GRO` | off | GRO off on the host's card while the core runs (`keep`: left as it is) |
 | `LIBRECN_GUI` | 127.0.0.1:8080 | the GUI and web API; `0.0.0.0:8080` opens them to the network (**no authentication yet**: trusted networks only) |
