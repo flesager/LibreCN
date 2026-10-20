@@ -162,7 +162,26 @@ The AMF's share grows with `max_ues` (one NAS timer per UE): 5.13 MiB for 40 000
 - **The `librecn` binary at rest**, with `app/librecn.example.toml` (1024 UEs, the default pools): 14 MiB resident.
 - The load generator runs in the same process; its own share is under 1 % (a few bytes per UE).
 
-## 5. Found by these benchmarks
+## 5. The Docker image (musl)
+
+The image (`deploy/`, Alpine) holds a static binary built against musl,
+not glibc; every other figure here is glibc's. musl's memory allocator is
+slower with several threads, and the control plane allocates (the NGAP
+codec): registrations lose a quarter to a third. The user plane allocates
+nothing per packet and does not change. Same machine and cores, both
+builds in one container, three alternating rounds:
+
+| | glibc | musl (the image) |
+|---|---|---|
+| Registrations with their PDU session, 1 core | 8 714/s, p50 29.2 ms | 6 527/s, p50 38.9 ms (−25 %) |
+| The same, 2 cores | 9 120/s, p50 27.8 ms | 5 991/s, p50 42.4 ms (−34 %) |
+| User plane, 1400-byte packets, 1 core | 1.13 Gbit/s each way | 1.14 Gbit/s each way |
+
+Accepted for a small core, for an image six times smaller (25 MB against
+139 MB on Debian with glibc). Built from source with glibc, LibreCN keeps
+the figures above.
+
+## 6. Found by these benchmarks
 
 - **The AMF looked up UE contexts with a scan**: now an index, about 40 % more registrations.
 - **A lost gNB flooded the SMF**: its thousands of UEs going idle at once filled the SMF's mailbox. The AMF now sends these notices 64 at most unacknowledged.

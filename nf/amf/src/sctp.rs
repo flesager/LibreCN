@@ -234,7 +234,8 @@ impl SctpSocket {
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
         msg.msg_control = control.as_mut_ptr().cast();
-        msg.msg_controllen = size_of_val(&control);
+        // `as _`: socklen_t on musl, usize on glibc.
+        msg.msg_controllen = size_of_val(&control) as _;
         // SAFETY: `msg` describes live buffers of the given sizes.
         let n = match cvt(unsafe { libc::recvmsg(self.fd.as_raw_fd(), &mut msg, 0) as c_int }) {
             Ok(n) => n as usize,
@@ -268,14 +269,14 @@ impl SctpSocket {
         msg.msg_iovlen = 1;
         msg.msg_control = control.as_mut_ptr().cast();
         // SAFETY: CMSG_SPACE is a pure size computation.
-        msg.msg_controllen = unsafe { libc::CMSG_SPACE(size_of::<SndInfo>() as u32) } as usize;
+        msg.msg_controllen = unsafe { libc::CMSG_SPACE(size_of::<SndInfo>() as u32) } as _;
         // SAFETY: `msg_control` points to a buffer of at least `msg_controllen`
         // bytes, so the first header and its data fit.
         unsafe {
             let cmsg = libc::CMSG_FIRSTHDR(&msg);
             (*cmsg).cmsg_level = libc::IPPROTO_SCTP;
             (*cmsg).cmsg_type = SCTP_SNDINFO;
-            (*cmsg).cmsg_len = libc::CMSG_LEN(size_of::<SndInfo>() as u32) as usize;
+            (*cmsg).cmsg_len = libc::CMSG_LEN(size_of::<SndInfo>() as u32) as _;
             let info = SndInfo { sid: stream, flags: 0, ppid: ppid.to_be(), context: 0, assoc_id: assoc };
             std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<SndInfo>(), info);
         }

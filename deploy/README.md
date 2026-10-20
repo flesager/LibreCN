@@ -71,9 +71,11 @@ The host must:
 ## The image
 
 `ghcr.io/flesager/librecn`, for amd64 and arm64, built from this repository
-by [`Dockerfile`](Dockerfile): Rust compiled on the build machine (arm64
-cross-compiled, not emulated), on Debian trixie slim with `ip` and
-`iptables`; about 140 MB. To build it yourself:
+by [`Dockerfile`](Dockerfile): a static binary (musl) compiled on the
+build machine (arm64 cross-compiled, not emulated), on Alpine with `ip`
+and `iptables`; about 25 MB. With musl the core registers UEs about a
+third slower than built with glibc (BENCHMARKS.md §5: still about 6 000
+per second); its user plane is the same. To build it yourself:
 
 ```
 docker buildx build -f deploy/Dockerfile --platform linux/amd64 -t librecn:local --load .
