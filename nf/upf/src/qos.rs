@@ -117,6 +117,11 @@ impl Qos {
         self.ambr[0].rate
     }
 
+    /// The session AMBR downlink, bit/s (0: none).
+    pub fn downlink_ambr(&self) -> u64 {
+        self.ambr[1].rate
+    }
+
     /// The session's PCC rules.
     pub fn rules(&self) -> &[PccRule] {
         self.flows.as_ref().map_or(&[], |f| f.rule.rules())

@@ -29,7 +29,7 @@
 //!
 //! - [`sessions`], the session table;
 //! - [`batch`], N3's datagrams in batches (`recvmmsg`, `sendmmsg`);
-//! - [`fast`], the fast path: the kernel carries the uplink (XDP);
+//! - [`fast`], the fast path: the kernel carries what it can (XDP, TC);
 //!
 //! Traffic is also counted per cell (`GET cells` on the web API: a gNB's
 //! is the sum of its cells), by the UE's cell the SMF gives with each
@@ -137,7 +137,8 @@ const DROPPED: usize = 4;
 const EXTRA_FLOW: usize = 5;
 /// Packets dropped beyond the session AMBR or their flow's MBR.
 const RATE_LIMITED: usize = 6;
-/// Uplink packets the kernel carried (the fast path), also in UPLINK_PACKETS.
+/// Packets the kernel carried (the fast path), both ways, also in
+/// UPLINK_PACKETS and DOWNLINK_PACKETS.
 const FAST_PATH: usize = 7;
 
 /// The UPF EO.
@@ -254,7 +255,8 @@ impl Upf {
         if !self.fast_path {
             return;
         }
-        match fast::FastPath::start(self.n3, self.max_sessions) {
+        let n6 = self.n6_name.as_deref().unwrap_or_default();
+        match fast::FastPath::start(self.n3, n6, self.max_sessions) {
             Ok(f) => {
                 self.fast = Some(f);
                 if let Err(e) = ctx.arm_timer(FOLD_PERIOD, 0) {
@@ -281,12 +283,15 @@ impl Upf {
     fn fold(&mut self, ctx: &mut Context<'_>) {
         let (Some(f), traffic) = (&mut self.fast, &mut self.traffic) else { return };
         f.take(traffic.len(), |slot, c| {
-            ctx.count(UPLINK_PACKETS, c.packets);
-            ctx.count(FAST_PATH, c.packets);
-            ctx.count(UPLINK_BYTES, c.bytes);
+            ctx.count(UPLINK_PACKETS, c.up_packets);
+            ctx.count(UPLINK_BYTES, c.up_bytes);
+            ctx.count(DOWNLINK_PACKETS, c.down_packets);
+            ctx.count(DOWNLINK_BYTES, c.down_bytes);
+            ctx.count(FAST_PATH, c.up_packets + c.down_packets);
             ctx.count(RATE_LIMITED, c.rate_limited);
             if let Some(t) = slot.and_then(|i| traffic.get_mut(i)) {
-                (t.1[0], t.1[1]) = (t.1[0] + c.bytes, t.1[1] + c.packets);
+                let [ub, up, db, dp] = &mut t.1;
+                (*ub, *up, *db, *dp) = (*ub + c.up_bytes, *up + c.up_packets, *db + c.down_bytes, *dp + c.down_packets);
             }
         });
     }
@@ -449,7 +454,6 @@ impl Upf {
         }
         let outcome = if self.sessions.modify(request.seid, dl) {
             let (seid, teid) = (request.seid, request.dl_teid);
-            self.carry(seid);
             match dl {
                 Some(_) => {
                     log!(self.log, ctx, Info, "session {seid:#x}: downlink to {} TEID {teid:#x}", gnb.ip());
@@ -457,6 +461,8 @@ impl Upf {
                 }
                 None => log!(self.log, ctx, Info, "session {seid:#x}: downlink deactivated"),
             }
+            // After the parked packets: the kernel's go behind them.
+            self.carry(seid);
             Outcome::Ok
         } else {
             Outcome::ContextNotFound
@@ -658,7 +664,7 @@ impl ExecutionObject for Upf {
             && let Some(session) = self.sessions.delete(request.seid)
         {
             if let Some(f) = &mut self.fast {
-                f.remove(session.ul_teid);
+                f.remove(&session);
             }
             self.parked.release(request.seid, |_| ctx.count(DROPPED, 1));
             log!(self.log, ctx, Info, "session {:#x} deleted, {} left", request.seid, self.sessions.len());

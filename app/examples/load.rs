@@ -25,15 +25,15 @@
 //! (another network namespace): what traffic runs is read from the file
 //! `CTL` (`idle`, `up SIZE RATE`, `down SIZE RATE`, `both SIZE RATE`,
 //! `quit`; RATE in packets per second each way, 0: as fast as it goes).
-//! - `load gnb N2 GNB DN UES CTL CORE`: a gNB on address `GNB` registers
-//!   `UES` UEs with their session at the AMF on `N2`, writes their
-//!   addresses in `CTL.ues`, drains its downlink, and sends uplink G-PDUs
-//!   to the data network's `DN` (port 5001) from three threads.
-//! - `load dn DN CTL CORE`: the data network on `DN`: drains the uplink
-//!   and sends to the UEs of `CTL.ues` from three threads.
+//! - `load gnb N2 GNB DN UES CTL CORE SENDERS`: a gNB on address `GNB`
+//!   registers `UES` UEs with their session at the AMF on `N2`, writes
+//!   their addresses in `CTL.ues`, drains its downlink, and sends uplink
+//!   G-PDUs to the data network's `DN` (port 5001).
+//! - `load dn DN CTL CORE SENDERS`: the data network on `DN`: drains the
+//!   uplink and sends to the UEs of `CTL.ues`.
 //!
-//! Each role's threads run on `CORE + 1` (registration, draining) and the
-//! three after it (senders).
+//! Each role registers and drains on `CORE`, and sends from a thread on
+//! each core of `SENDERS` (a list: `8,9,24`).
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -629,13 +629,14 @@ fn g_pdu(teid: u32, payload: &[u8]) -> Vec<u8> {
 /// The datagrams a sender sends in turn, for a packet size.
 type Datagrams = Vec<(Vec<u8>, SocketAddrV4)>;
 
-/// Three threads (cores `first` to `first + 2`), from `bind`, send what
-/// `build` gives for the size of the control file's load while `wanted`
-/// says so, 32 per system call, at its rate (a third each: they wait for
-/// their next batch spinning, on their own cores); until it says `quit`.
+/// A thread on each of `cores`, from `bind`, sends what `build` gives for
+/// the size of the control file's load while `wanted` says so: as fast as
+/// it goes, 32 per system call; or at its rate (shared), 4 per system call,
+/// waiting for the next spinning (on their own cores), so that bursts stay
+/// short; until it says `quit`.
 fn senders(
     ctl: &str,
-    first: usize,
+    cores: Vec<usize>,
     bind: Ipv4Addr,
     wanted: fn(&Load) -> bool,
     build: impl Fn(usize) -> Datagrams + Send + Sync + 'static,
@@ -643,10 +644,11 @@ fn senders(
     let size = Arc::new(AtomicUsize::new(0));
     let rate = Arc::new(AtomicU64::new(0));
     let build = Arc::new(build);
-    for t in 0..3 {
+    let threads = cores.len() as u64;
+    for (t, core) in cores.into_iter().enumerate() {
         let (size, rate, build) = (size.clone(), rate.clone(), build.clone());
         std::thread::spawn(move || {
-            pin(first + t);
+            pin(core);
             let socket = UdpSocket::bind((bind, 0)).unwrap();
             let (mut built, mut datagrams, mut next) = (0, Vec::new(), t);
             let mut due = Instant::now();
@@ -657,7 +659,9 @@ fn senders(
                     due = Instant::now();
                     continue;
                 }
-                if let Some(period) = (32 * 1_000_000_000u64).checked_div(rate.load(Relaxed) / 3) {
+                let per_thread = rate.load(Relaxed) / threads;
+                let batch = if per_thread > 0 { 4 } else { 32 };
+                if let Some(period) = (batch as u64 * 1_000_000_000).checked_div(per_thread) {
                     due += Duration::from_nanos(period);
                     let now = Instant::now();
                     if due < now - Duration::from_millis(10) {
@@ -680,7 +684,7 @@ fn senders(
                 let mut iovs = [libc::iovec { iov_base: std::ptr::null_mut(), iov_len: 0 }; 32];
                 // SAFETY: all-zero is a valid mmsghdr.
                 let mut msgs: [libc::mmsghdr; 32] = unsafe { std::mem::zeroed() };
-                for (iov, msg) in iovs.iter_mut().zip(msgs.iter_mut()) {
+                for (iov, msg) in iovs.iter_mut().zip(msgs.iter_mut()).take(batch) {
                     let (d, name) = &datagrams[next % datagrams.len()];
                     next += 1;
                     *iov = libc::iovec { iov_base: d.as_ptr() as *mut _, iov_len: d.len() };
@@ -691,7 +695,7 @@ fn senders(
                 }
                 let fd = std::os::fd::AsRawFd::as_raw_fd(&socket);
                 // SAFETY: the headers point to live datagrams and addresses.
-                unsafe { libc::sendmmsg(fd, msgs.as_mut_ptr(), 32, 0) };
+                unsafe { libc::sendmmsg(fd, msgs.as_mut_ptr(), batch as _, 0) };
             }
         });
     }
@@ -718,37 +722,42 @@ fn drain(addr: SocketAddrV4, core: usize) {
     });
 }
 
-/// `load gnb N2 GNB DN UES CTL CORE`.
+/// A list of cores: `8,9,24`.
+fn cores(list: &str) -> Vec<usize> {
+    list.split(',').map(|c| c.parse().expect("a core number")).collect()
+}
+
+/// `load gnb N2 GNB DN UES CTL CORE SENDERS`.
 fn bench_gnb(args: &[String]) {
-    let [n2, gnb, dn, ues, ctl, core] = args else { panic!("usage: load gnb N2 GNB DN UES CTL CORE") };
+    let [n2, gnb, dn, ues, ctl, core, sending] = args else { panic!("usage: load gnb N2 GNB DN UES CTL CORE SENDERS") };
     let (n2, gnb): (SocketAddr, Ipv4Addr) = (n2.parse().unwrap(), gnb.parse().unwrap());
     let (dn, ues, core): (Ipv4Addr, usize, usize) = (dn.parse().unwrap(), ues.parse().unwrap(), core.parse().unwrap());
     GNB_N3.set(gnb.octets()).unwrap();
     let setup =
         std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../proto/ngap/tests/vectors/free5gc/ci0000.bin")).unwrap();
-    pin(core + 1);
+    pin(core);
     // Kept to the end: its association is N2, and the UEs' connection.
-    let mut ran = Gnb::connect(n2, core + 1, &setup);
+    let mut ran = Gnb::connect(n2, core, &setup);
     let (_, sessions) = ran.register(0, ues, 64);
     let list: String = sessions.iter().map(|s| format!("{}\n", Ipv4Addr::from(s.ue_ip))).collect();
     std::fs::write(format!("{ctl}.ues"), list).unwrap();
     println!("registered {} UEs", sessions.len());
-    drain(SocketAddrV4::new(gnb, GTPU_PORT), core + 1);
+    drain(SocketAddrV4::new(gnb, GTPU_PORT), core);
     // The UPF's N3 is on the AMF's address here.
     let SocketAddr::V4(n2) = n2 else { panic!("IPv4") };
     let n3 = SocketAddrV4::new(*n2.ip(), GTPU_PORT);
     senders(
         ctl,
-        core + 2,
+        cores(sending),
         gnb,
         |l| l.up,
         move |size| sessions.iter().map(|s| (g_pdu(s.ul_teid, &ipv4_udp(s.ue_ip, dn.octets(), size)), n3)).collect(),
     );
 }
 
-/// `load dn DN CTL CORE`.
+/// `load dn DN CTL CORE SENDERS`.
 fn bench_dn(args: &[String]) {
-    let [dn, ctl, core] = args else { panic!("usage: load dn DN CTL CORE") };
+    let [dn, ctl, core, sending] = args else { panic!("usage: load dn DN CTL CORE SENDERS") };
     let (dn, core): (Ipv4Addr, usize) = (dn.parse().unwrap(), core.parse().unwrap());
     let ues = loop {
         if let Ok(list) = std::fs::read_to_string(format!("{ctl}.ues")) {
@@ -756,11 +765,11 @@ fn bench_dn(args: &[String]) {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    pin(core + 1);
-    drain(SocketAddrV4::new(dn, 5001), core + 1);
+    pin(core);
+    drain(SocketAddrV4::new(dn, 5001), core);
     senders(
         ctl,
-        core + 2,
+        cores(sending),
         dn,
         |l| l.down,
         move |size| ues.iter().map(|ue| (vec![0u8; size - 28], SocketAddrV4::new(Ipv4Addr::from(*ue), 5001))).collect(),

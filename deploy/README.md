@@ -63,9 +63,9 @@ removed when it stops. It needs `NET_ADMIN` and `/dev/net/tun`, and
 `BPF` and `PERFMON` for the UPF's fast path, nothing more (not
 privileged).
 
-**The fast path**: the kernel carries the UEs' uplink (XDP, on the
-interface of `LIBRECN_ADDRESS`), about twice the packets of the UPF alone
-on half the cores. It needs a loose reverse path filter on that interface
+**The fast path**: the kernel carries the UEs' traffic both ways (XDP on
+the interface of `LIBRECN_ADDRESS`, TC on `upf0`), several times the
+packets of the UPF alone. It needs a loose reverse path filter on that interface
 (`rp_filter` 0 or 2, the default on Ubuntu and Debian; 1 on Red Hat
 systems): `sudo sysctl -w net.ipv4.conf.all.rp_filter=2
 net.ipv4.conf.<interface>.rp_filter=2`. Without it, or without the

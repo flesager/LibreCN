@@ -3,7 +3,7 @@
 # Built by scripts/ueransim/user-plane.sh, which stages the binaries.
 FROM ubuntu:26.04
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl iperf3 iproute2 iputils-ping libsctp1 libstdc++6 \
+ && apt-get install -y --no-install-recommends curl ethtool iperf3 iproute2 iputils-ping libsctp1 libstdc++6 \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /etc/iproute2 \
  && { cp /usr/share/iproute2/rt_tables /etc/iproute2/ 2>/dev/null || printf '255\tlocal\n254\tmain\n253\tdefault\n0\tunspec\n' > /etc/iproute2/rt_tables; }

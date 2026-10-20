@@ -12,47 +12,70 @@ AMF pages the UE, whose Service Request brings the tunnel back, and the
 parked packets go first. 64 packets are kept in all (2 KiB at most each,
 preallocated: 128 KiB), the oldest dropped when full.
 
-## Fast path (XDP)
+## Fast path (XDP and TC)
 
 On by default (`fast_path = false` turns it off): the kernel carries the
-uplink of the sessions it can before the UPF sees it. A program
-([`bpf/upf.bpf.c`](bpf/upf.bpf.c), XDP) on the interface of the N3 address
-takes each G-PDU to the UPF whose TEID is a session's, checks that its
-inner source is the session's UE, polices the session AMBR uplink (the
-same GCRA as `qos.rs`), strips the outer IPv4, UDP and GTP-U headers and
-lets the UE's packet go on into the kernel's stack, which routes it out
-(NAT included). The UPF's socket, its userspace and the TUN device are
-skipped.
+sessions it can, both ways, before the UPF sees them
+([`bpf/upf.bpf.c`](bpf/upf.bpf.c)).
 
-Everything else reaches the UPF's socket untouched, as without the fast
-path (the fallback): echo, unknown TEIDs, a wrong source, other GTP-U
-layouts (the program takes no optional field, or a 4-byte PDU Session
-Container on the default flow), and sessions with PCC rules (extra QoS
-flows: `fast.rs` does not give them to the kernel). The downlink is the
-UPF's for now.
+- **Uplink**: XDP on the interface of the N3 address takes each G-PDU to
+  the UPF whose TEID is a session's, checks that its inner source is the
+  session's UE, polices the session AMBR uplink (the same GCRA as
+  `qos.rs`), strips the outer IPv4, UDP and GTP-U headers and lets the UE's
+  packet go on into the kernel's stack, which routes it out (NAT
+  included).
+- **Downlink**: TC on the egress of the N6 device (`upf0`: the UE pool is
+  routed there, after NAT) takes each packet to a UE whose session has its
+  gNB's tunnel, polices the session AMBR downlink, adds Ethernet, IPv4, UDP
+  and GTP-U headers (the default flow, as the UPF writes them) and sends it
+  out of the N3 interface to the gNB's next hop, as the kernel's routing
+  and neighbours give it.
 
-- The UPF gives each session to the kernel's map at establishment (again
-  when its cell changes) and removes it with the session; every second it
-  adds the kernel's counts to its own (`uplink_packets`, `uplink_bytes`,
-  `rate_limited_packets`, the cells'), and `fast_path_packets` says how
-  many uplink packets the kernel carried.
+The UPF's socket, its userspace and the TUN device are skipped. Everything
+else goes as without the fast path (the fallback), to the UPF's socket or
+the TUN device:
+- echo, unknown TEIDs, a wrong source, other GTP-U layouts (the program
+  takes no optional field, or a 4-byte PDU Session Container on the
+  default flow);
+- sessions with PCC rules (extra QoS flows: `fast.rs` does not give them
+  to the kernel), and idle UEs (no tunnel: the UPF parks their packets and
+  the UE is paged);
+- downlink packets the program cannot tunnel: a gNB whose next hop is not
+  resolved yet (the UPF's send resolves it), larger than N3's MTU with the
+  tunnel's 44 bytes (the kernel fragments the UPF's), fragments, GSO
+  aggregates (TCP from the internet when the N6 card aggregates it, GRO:
+  GTP-U's length field would be wrong in each segment; the kernel cuts them
+  for the TUN device), and TCP or UDP whose checksum is still due (the
+  host's own packets, or a container's on the same host: the kernel fills
+  it in after the program's hook, and only a network card would fill in a
+  tunnelled one; it does so for the TUN device). The internet's packets
+  come with their checksum.
+
+- The UPF gives each session to the kernel's maps at establishment and
+  modification (the downlink while the gNB's tunnel is known, after the
+  parked packets are sent) and removes it with the session; every second
+  it adds the kernel's counts to its own (`uplink_packets`, `uplink_bytes`,
+  `downlink_packets`, `downlink_bytes`, `rate_limited_packets`, the
+  cells'), and `fast_path_packets` says how many packets the kernel
+  carried, both ways.
 - It needs `CAP_BPF`, `CAP_PERFMON` and `CAP_NET_ADMIN`, and a loose
   reverse path filter on the N3 interface (`rp_filter` 0 or 2: the UE's
   packets come in there, while their addresses are routed to N6). Without
   them, the UPF logs why, raises a MINOR alarm and runs without it. The
-  program is attached through a BPF link: it goes when the UPF's process
-  goes.
+  programs are attached through BPF links: they go when the UPF's process
+  goes (TC, before Linux 6.6: through a qdisc, whose filter a new UPF
+  removes before attaching its own).
 - The program is C, built by [`bpf/build.sh`](bpf/build.sh) (clang, in
   Docker if the host has none) into `bpf/upf.bpf.o`, which is checked in:
   cargo needs no clang. `aya` loads it.
 
 Measured with the whole core as deployed by `scripts/upf-bench.sh`
-([`BENCHMARKS.md`](../../BENCHMARKS.md), "The user plane as deployed"):
-on one core, the uplink goes from 2.1 Gbit/s of 1400-byte packets (the UPF
-alone) to 6.7 (210 to 700 kpps), the UPF's own core left free; with the
-uplink in the kernel, the downlink gets more of the core when both flow
-(1.1 to 1.8 Gbit/s each way on one core, 1.8 to 3.2 on two). veth copies
-each packet for XDP, a network card's driver does not: these are a floor.
+([`BENCHMARKS.md`](../../BENCHMARKS.md), "The user plane as deployed"),
+1400-byte packets: on one core, 6.2 Gbit/s uplink (the UPF alone: 2.0),
+5.6 downlink (2.3), 2.9 each way both at once (0.9 to 1.1); on two cores,
+5.5 each way (1.7), the kernel's receive work on both. The UPF's own core
+stays free. veth copies each packet for XDP, a network card's driver does
+not: these are a floor.
 
 ## Batches
 

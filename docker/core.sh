@@ -8,5 +8,4 @@ ip addr add 10.45.0.1/16 dev upf0
 ip addr add 10.46.0.1/16 dev upf0   # the second DNN (ims, core.toml)
 ip link set upf0 up
 iperf3 -s -D -B 10.45.0.1   # user-plane.sh measures the session AMBR
-iperf3 -s -D -B 10.46.0.1 -p 5202   # and the second session's, in the fast path
 exec librecn --config "${1:-/etc/librecn/core.toml}"

@@ -57,13 +57,13 @@ What LibreCN carries for the number of cores given to it.
 
 | Cores for LibreCN | Uplink alone | Downlink alone | Both ways at once, each way |
 |---|---|---|---|
-| 1 | 6.7 Gbit/s (2.1) | 2.5 Gbit/s (2.4) | 1.8 Gbit/s (1.1) |
-| 2, one pool | 6.6 Gbit/s (3.0) | 4.2 Gbit/s (4.2) | 2.8 Gbit/s (1.8) |
-| **2: the UPF on one, the rest on the other** | 6.5 Gbit/s (3.0) | 4.2 Gbit/s (4.3) | **3.2 Gbit/s (1.8)** |
+| 1 | 6.2 Gbit/s (2.0) | 5.6 Gbit/s (2.3) | 2.9 Gbit/s (0.9 to 1.1) |
+| **2** | 6.4 Gbit/s (3.0) | 5.6 Gbit/s (4.1) | **5.5 Gbit/s (1.7)** |
 
-- **The fast path** (XDP, on when the kernel allows it; the Docker deployment gives it the rights) carries the uplink in the kernel: three times the UPF alone on one core. The downlink is still the UPF's (its fast path is next), so it is the limit both ways.
-- The limit is in packets, not bytes: with 84-byte packets, the same packets per second (700 000 uplink in the fast path, 250 000 downlink per core), so a fifteenth of the Gbit/s.
-- The kernel's receive work for LibreCN's interfaces runs on LibreCN's cores (with two cores split, on the one that is not the UPF's): on a real host, the network card's interrupts go there.
+- **The fast path** (XDP and TC, on when the kernel allows it; the Docker deployment gives it the rights) carries the traffic in the kernel, both ways: about three times the UPF alone per core, the UPF's own core left free.
+- **Two cores**: with the fast path, the network card's interrupts on both (the pools do not matter: the kernel does the work); without it, the UPF in a pool of its own and the interrupts on the other core. One direction alone takes one core's worth with one receive queue; a card with several, and several gNBs, spreads it.
+- The limit is in packets, not bytes: with 84-byte packets, about the same packets per second (500 000 to 680 000 in the fast path), so a seventeenth of the Gbit/s.
+- TCP from the internet aggregated by the card (GRO), the host's own traffic, and sessions with PCC rules go through the UPF (BENCHMARKS.md, `nf/upf/README.md`).
 
 **Registrations** (`scripts/load.sh`: every function in one pool, test gNBs on loopback).
 

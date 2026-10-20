@@ -78,56 +78,73 @@ Two runs agree within 5 %. Every run registered all its UEs. "Busy" is the pool'
 The `librecn` binary on its configuration, a gNB with 100 UEs and a data network (`load.rs`'s `gnb` and `dn` roles), each in its own network namespace (containers), linked directly by veth pairs: N3 from the gNB to LibreCN, N6 from LibreCN to the data network. The UEs register over N2, then traffic flows; the control plane is idle (registrations: above).
 
 - **Deployments**: LibreCN on 1 core; on 2 cores in one pool; on 2 cores, the UPF's pool on one (core 3) and the rest on the other (core 2).
-- **Paths**: the UPF's fast path (XDP, the uplink in the kernel), or its fallback (the UPF alone).
-- **The kernel's receive work** for LibreCN's interfaces (veth's NAPI, in a thread) runs on LibreCN's cores: on its core, on both, or, split, on the one that is not the UPF's (on the UPF's, it starves the fallback while the other core idles). veth has that thread only with XDP, so the fallback runs with the program attached but carrying nothing (tens of ns per packet). The gNB's and data network's receive work runs on their own cores.
-- **The figure** is RFC 2544's throughput: the highest rate each way with at most 1 % lost, found by bisection (2 s per step) below what the senders give flat out; "≥": the senders' own limit, reached without loss. Flooded, the fallback carries less (on one core, uplink: 100 kpps against 210): the kernel's receive work starves the UPF.
-- **LibreCN's cores busy**: at that rate, cores 2 and 3 (`/proc/stat`).
+- **Paths**: the UPF's fast path (the kernel carries both ways: XDP uplink, TC downlink), or its fallback (the UPF alone).
+- **The kernel's receive work** for LibreCN's two interfaces (veth's NAPI, one thread each) runs on LibreCN's cores, in real time as softirq runs ahead of threads: on its core; on both; split, on the core that is not the UPF's (second table: on both). veth has that thread only with XDP, so the fallback runs with the program attached but carrying nothing (tens of ns per packet). The gNB's and data network's receive work runs on their own cores; six senders on each side, short bursts (4 packets) when paced.
+- **The figure** is RFC 2544's throughput: the highest rate each way with at most 1 % lost (veth's drops when its ring is full counted as lost), found by bisection (2 s per step) below what the senders give flat out (2.5 Mpps). Flooded, the fallback carries less (on one core, uplink: 100 kpps against 175): the kernel's receive work starves the UPF; the fast path does not (it drops what it cannot take before working on it).
+- **Two runs**: one figure where they agree within 10 %, the range where they do not (the fallback's, where the UPF and the kernel's threads share cores). LibreCN's cores busy: the first run's.
 
-AMD Ryzen 9 5950X, Linux 7.0, 2026-10-20, two runs within 5 to 8 %:
+AMD Ryzen 9 5950X, Linux 7.0, 2026-10-20:
 
 | Deployment | Path | Traffic | Packet | Uplink | Downlink | LibreCN's cores busy |
 |---|---|---|---|---|---|---|
-| 1 core | fast path | uplink | 84 B | ≥ 710 kpps, 0.48 Gbit/s | - | 100 % |
-| 1 core | fast path | uplink | 1400 B | ≥ 597 kpps, 6.69 Gbit/s | - | 100 % |
-| 1 core | fast path | downlink | 84 B | - | 248 kpps, 0.17 Gbit/s | 100 % |
-| 1 core | fast path | downlink | 1400 B | - | 222 kpps, 2.49 Gbit/s | 100 % |
-| 1 core | fast path | both ways | 84 B | 177 kpps, 0.12 Gbit/s | 176 kpps, 0.12 Gbit/s | 100 % |
-| 1 core | fast path | both ways | 1400 B | 158 kpps, 1.78 Gbit/s | 157 kpps, 1.77 Gbit/s | 99 % |
-| 1 core | fallback | uplink | 84 B | 210 kpps, 0.14 Gbit/s | - | 98 % |
-| 1 core | fallback | uplink | 1400 B | 191 kpps, 2.14 Gbit/s | - | 99 % |
-| 1 core | fallback | downlink | 84 B | - | 247 kpps, 0.17 Gbit/s | 100 % |
-| 1 core | fallback | downlink | 1400 B | - | 216 kpps, 2.42 Gbit/s | 100 % |
-| 1 core | fallback | both ways | 84 B | 121 kpps, 0.08 Gbit/s | 121 kpps, 0.08 Gbit/s | 100 % |
-| 1 core | fallback | both ways | 1400 B | 101 kpps, 1.14 Gbit/s | 101 kpps, 1.14 Gbit/s | 100 % |
-| 2 cores, one pool | fast path | uplink | 84 B | ≥ 701 kpps, 0.47 Gbit/s | - | 100 %, 0 % |
-| 2 cores, one pool | fast path | uplink | 1400 B | ≥ 592 kpps, 6.63 Gbit/s | - | 100 %, 1 % |
-| 2 cores, one pool | fast path | downlink | 84 B | - | 411 kpps, 0.28 Gbit/s | 87 %, 82 % |
-| 2 cores, one pool | fast path | downlink | 1400 B | - | 371 kpps, 4.17 Gbit/s | 84 %, 86 % |
-| 2 cores, one pool | fast path | both ways | 84 B | 270 kpps, 0.18 Gbit/s | 271 kpps, 0.18 Gbit/s | 79 %, 79 % |
-| 2 cores, one pool | fast path | both ways | 1400 B | 246 kpps, 2.76 Gbit/s | 248 kpps, 2.78 Gbit/s | 81 %, 81 % |
-| 2 cores, one pool | fallback | uplink | 84 B | 292 kpps, 0.20 Gbit/s | - | 64 %, 71 % |
-| 2 cores, one pool | fallback | uplink | 1400 B | 271 kpps, 3.04 Gbit/s | - | 70 %, 80 % |
-| 2 cores, one pool | fallback | downlink | 84 B | - | 403 kpps, 0.27 Gbit/s | 87 %, 83 % |
-| 2 cores, one pool | fallback | downlink | 1400 B | - | 376 kpps, 4.21 Gbit/s | 84 %, 88 % |
-| 2 cores, one pool | fallback | both ways | 84 B | 174 kpps, 0.12 Gbit/s | 173 kpps, 0.12 Gbit/s | 74 %, 84 % |
-| 2 cores, one pool | fallback | both ways | 1400 B | 163 kpps, 1.83 Gbit/s | 163 kpps, 1.83 Gbit/s | 79 %, 86 % |
-| 2 cores: UPF, the rest | fast path | uplink | 84 B | ≥ 683 kpps, 0.46 Gbit/s | - | 100 %, 0 % |
-| 2 cores: UPF, the rest | fast path | uplink | 1400 B | ≥ 576 kpps, 6.45 Gbit/s | - | 100 %, 0 % |
-| 2 cores: UPF, the rest | fast path | downlink | 84 B | - | 411 kpps, 0.28 Gbit/s | 73 %, 100 % |
-| 2 cores: UPF, the rest | fast path | downlink | 1400 B | - | 370 kpps, 4.15 Gbit/s | 73 %, 100 % |
-| 2 cores: UPF, the rest | fast path | both ways | 84 B | 306 kpps, 0.21 Gbit/s | 306 kpps, 0.21 Gbit/s | 95 %, 79 % |
-| 2 cores: UPF, the rest | fast path | both ways | 1400 B | 285 kpps, 3.20 Gbit/s | 284 kpps, 3.18 Gbit/s | 100 %, 82 % |
-| 2 cores: UPF, the rest | fallback | uplink | 84 B | 300 kpps, 0.20 Gbit/s | - | 48 %, 100 % |
-| 2 cores: UPF, the rest | fallback | uplink | 1400 B | 267 kpps, 3.00 Gbit/s | - | 49 %, 100 % |
-| 2 cores: UPF, the rest | fallback | downlink | 84 B | - | 413 kpps, 0.28 Gbit/s | 66 %, 100 % |
-| 2 cores: UPF, the rest | fallback | downlink | 1400 B | - | 383 kpps, 4.30 Gbit/s | 76 %, 100 % |
-| 2 cores: UPF, the rest | fallback | both ways | 84 B | 173 kpps, 0.12 Gbit/s | 173 kpps, 0.12 Gbit/s | 52 %, 100 % |
-| 2 cores: UPF, the rest | fallback | both ways | 1400 B | 161 kpps, 1.81 Gbit/s | 161 kpps, 1.81 Gbit/s | 64 %, 96 % |
+| 1 core | fast path | uplink | 84 B | 679 kpps, 0.46 Gbit/s | - | 100 % |
+| 1 core | fast path | uplink | 1400 B | 557 kpps, 6.2 Gbit/s | - | 100 % |
+| 1 core | fast path | downlink | 84 B | - | 544 kpps, 0.37 Gbit/s | 100 % |
+| 1 core | fast path | downlink | 1400 B | - | 502 kpps, 5.6 Gbit/s | 100 % |
+| 1 core | fast path | both ways | 84 B | 284 kpps, 0.19 Gbit/s | 284 kpps, 0.19 Gbit/s | 100 % |
+| 1 core | fast path | both ways | 1400 B | 261 kpps, 2.9 Gbit/s | 262 kpps, 2.9 Gbit/s | 100 % |
+| 1 core | fallback | uplink | 84 B | 174 kpps, 0.12 Gbit/s | - | 84 % |
+| 1 core | fallback | uplink | 1400 B | 176 kpps, 2.0 Gbit/s | - | 93 % |
+| 1 core | fallback | downlink | 84 B | - | 148–189 kpps, 0.10–0.13 Gbit/s | 78 % |
+| 1 core | fallback | downlink | 1400 B | - | 204 kpps, 2.3 Gbit/s | 100 % |
+| 1 core | fallback | both ways | 84 B | 86–110 kpps, 0.06–0.07 Gbit/s | 86–107 kpps, 0.06–0.07 Gbit/s | 92 % |
+| 1 core | fallback | both ways | 1400 B | 78–96 kpps, 0.87–1.1 Gbit/s | 78–96 kpps, 0.87–1.1 Gbit/s | 87 % |
+| 2 cores, one pool | fast path | uplink | 84 B | 672 kpps, 0.45 Gbit/s | - | 2 %, 100 % |
+| 2 cores, one pool | fast path | uplink | 1400 B | 571 kpps, 6.4 Gbit/s | - | 1 %, 100 % |
+| 2 cores, one pool | fast path | downlink | 84 B | - | 544 kpps, 0.37 Gbit/s | 5 %, 100 % |
+| 2 cores, one pool | fast path | downlink | 1400 B | - | 500 kpps, 5.6 Gbit/s | 2 %, 100 % |
+| 2 cores, one pool | fast path | both ways | 84 B | 540 kpps, 0.36 Gbit/s | 540 kpps, 0.36 Gbit/s | 89 %, 100 % |
+| 2 cores, one pool | fast path | both ways | 1400 B | 494 kpps, 5.5 Gbit/s | 494 kpps, 5.5 Gbit/s | 94 %, 100 % |
+| 2 cores, one pool | fallback | uplink | 84 B | 149–237 kpps, 0.10–0.16 Gbit/s | - | 46 %, 39 % |
+| 2 cores, one pool | fallback | uplink | 1400 B | 224 kpps, 2.5 Gbit/s | - | 70 %, 54 % |
+| 2 cores, one pool | fallback | downlink | 84 B | - | 230 kpps, 0.15 Gbit/s | 99 %, 7 % |
+| 2 cores, one pool | fallback | downlink | 1400 B | - | 212 kpps, 2.4 Gbit/s | 12 %, 98 % |
+| 2 cores, one pool | fallback | both ways | 84 B | 107 kpps, 0.07 Gbit/s | 107 kpps, 0.07 Gbit/s | 57 %, 52 % |
+| 2 cores, one pool | fallback | both ways | 1400 B | 95–113 kpps, 1.1–1.3 Gbit/s | 95–113 kpps, 1.1–1.3 Gbit/s | 52 %, 79 % |
+| 2 cores: UPF, the rest | fast path | uplink | 84 B | 672 kpps, 0.45 Gbit/s | - | 100 %, 2 % |
+| 2 cores: UPF, the rest | fast path | uplink | 1400 B | 561 kpps, 6.3 Gbit/s | - | 100 %, 2 % |
+| 2 cores: UPF, the rest | fast path | downlink | 84 B | - | 544 kpps, 0.37 Gbit/s | 100 %, 1 % |
+| 2 cores: UPF, the rest | fast path | downlink | 1400 B | - | 494 kpps, 5.5 Gbit/s | 100 %, 1 % |
+| 2 cores: UPF, the rest | fast path | both ways | 84 B | 293 kpps, 0.20 Gbit/s | 293 kpps, 0.20 Gbit/s | 100 %, 2 % |
+| 2 cores: UPF, the rest | fast path | both ways | 1400 B | 250 kpps, 2.8 Gbit/s | 250 kpps, 2.8 Gbit/s | 100 %, 4 % |
+| 2 cores: UPF, the rest | fallback | uplink | 84 B | 300 kpps, 0.20 Gbit/s | - | 47 %, 100 % |
+| 2 cores: UPF, the rest | fallback | uplink | 1400 B | 265 kpps, 3.0 Gbit/s | - | 46 %, 100 % |
+| 2 cores: UPF, the rest | fallback | downlink | 84 B | - | 388 kpps, 0.26 Gbit/s | 66 %, 100 % |
+| 2 cores: UPF, the rest | fallback | downlink | 1400 B | - | 367 kpps, 4.1 Gbit/s | 71 %, 100 % |
+| 2 cores: UPF, the rest | fallback | both ways | 84 B | 146–174 kpps, 0.10–0.12 Gbit/s | 145–169 kpps, 0.10–0.11 Gbit/s | 57 %, 99 % |
+| 2 cores: UPF, the rest | fallback | both ways | 1400 B | 155 kpps, 1.7 Gbit/s | 155 kpps, 1.7 Gbit/s | 58 %, 100 % |
 
-**Reading the table**:
-- **The fast path triples the uplink on one core** (6.7 against 2.1 Gbit/s of 1400-byte packets; 700 against 210 kpps), and leaves the UPF's core free: on two cores, the senders are the limit.
-- **The downlink is the same on both paths**: its fast path is not done yet. It is the limit both ways: with the uplink in the kernel, the downlink gets more of the core (1 core, both ways: 158 against 101 kpps; split: 285 against 161).
-- **Two cores split are a little better than one pool both ways** (285 against 246 kpps): the UPF's core is its own, the kernel's receive work on the other.
+The split deployment with the kernel's receive work on both cores, two runs:
+
+| Deployment | Path | Traffic | Packet | Uplink | Downlink | LibreCN's cores busy |
+|---|---|---|---|---|---|---|
+| 2 cores: UPF, the rest, receive on both | fast path | uplink | 84 B | 669 kpps, 0.45 Gbit/s | - | 4 %, 100 % |
+| 2 cores: UPF, the rest, receive on both | fast path | uplink | 1400 B | 571 kpps, 6.4 Gbit/s | - | 2 %, 100 % |
+| 2 cores: UPF, the rest, receive on both | fast path | downlink | 84 B | - | 546 kpps, 0.37 Gbit/s | 0 %, 100 % |
+| 2 cores: UPF, the rest, receive on both | fast path | downlink | 1400 B | - | 501 kpps, 5.6 Gbit/s | 100 %, 4 % |
+| 2 cores: UPF, the rest, receive on both | fast path | both ways | 84 B | 529 kpps, 0.36 Gbit/s | 529 kpps, 0.36 Gbit/s | 92 %, 100 % |
+| 2 cores: UPF, the rest, receive on both | fast path | both ways | 1400 B | 488 kpps, 5.5 Gbit/s | 486 kpps, 5.4 Gbit/s | 100 %, 99 % |
+| 2 cores: UPF, the rest, receive on both | fallback | uplink | 84 B | 259–302 kpps, 0.17–0.20 Gbit/s | - | 48 %, 99 % |
+| 2 cores: UPF, the rest, receive on both | fallback | uplink | 1400 B | 178 kpps, 2.0 Gbit/s | - | 1 %, 94 % |
+| 2 cores: UPF, the rest, receive on both | fallback | downlink | 84 B | - | 191–337 kpps, 0.13–0.23 Gbit/s | 60 %, 98 % |
+| 2 cores: UPF, the rest, receive on both | fallback | downlink | 1400 B | - | 176–197 kpps, 2.0–2.2 Gbit/s | 2 %, 96 % |
+| 2 cores: UPF, the rest, receive on both | fallback | both ways | 84 B | 108 kpps, 0.07 Gbit/s | 108 kpps, 0.07 Gbit/s | 25 %, 81 % |
+| 2 cores: UPF, the rest, receive on both | fallback | both ways | 1400 B | 95 kpps, 1.1 Gbit/s | 95 kpps, 1.1 Gbit/s | 22 %, 87 % |
+
+**Reading the tables**:
+- **The fast path carries about three times the UPF alone, per core**: on one core, 6.2 Gbit/s uplink (2.0 alone), 5.6 downlink (2.3), 2.9 each way both at once (0.9 to 1.1), at 500 to 680 kpps whatever the size. It is the kernel's work: the UPF's core stays free.
+- **With the fast path, two cores take the kernel's receive work on both**: 5.5 Gbit/s each way both at once, in one pool or split (the pools no longer matter: the UPF does nothing). One direction alone stays at one core's worth: each interface has one receive queue here (a network card with several, and several gNBs, spreads it).
+- **The UPF alone wants its core to itself**: split, the kernel's receive work on the other core, it carries 1.7 Gbit/s each way both at once (3.0 uplink, 4.1 downlink); with the receive work on its core too (one pool, or split on both), less (1.1 to 1.3).
 - **Packets, not bytes, are the limit**: 84-byte packets go at about the same packets per second.
 - **N3's socket buffer is 8 MiB**: with the default (208 KiB, 90 datagrams of 1400 bytes), bursts were lost while the UPF was away, 2 to 4 % at any rate.
 - veth copies each packet for XDP (its packets have no room in front for it); a network card's driver does not, so the fast path's figures are a floor.
