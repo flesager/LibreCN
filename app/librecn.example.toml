@@ -52,7 +52,7 @@ n3 = "127.0.0.2"              # GTP-U address for the gNBs (not UERANSIM's 127.0
 # n6 = "upf0"                 # TUN device: forwarding on (see docker/core.sh)
 mode = "event"                # or "poll", "hybrid": see nf/upf/README.md
 max_sessions = 1024
-fast_path = true              # the kernel carries the uplink (XDP), if it allows it: see nf/upf/README.md
+fast_path = true              # the kernel carries the traffic (XDP, TC), if it allows it: see nf/upf/README.md
 
 [[nf]]
 kind = "pcf"

@@ -236,6 +236,6 @@ The gNB is configured with AMF 192.168.1.10:38412, PLMN 001/01 and SST 1.
 
 ## 8. Docker
 
-LibreCN's image, `ghcr.io/flesager/librecn` (amd64 and arm64), runs with Docker Compose: see [`deploy/README.md`](deploy/README.md). It shares the host's network (N2 and N3 must be reachable by the gNB on the host's address, §3), writes its configuration from a few `.env` settings (or takes yours), and prepares N6 itself (§4: `upf0`, NAT), undone at stop.
+LibreCN's image, `ghcr.io/flesager/librecn` (amd64 and arm64), runs with Docker Compose: see [`deploy/README.md`](deploy/README.md). It shares the host's network (N2 and N3 must be reachable by the gNB on the host's address, §3), writes its configuration from a few `.env` settings (or takes yours), and prepares N6 itself (§4: `upf0`, NAT; GRO off for the fast path), undone at stop.
 
 The image in [`docker/`](docker/) is another one: LibreCN with UERANSIM, for the interop checks only.

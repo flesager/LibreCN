@@ -1,5 +1,5 @@
 # LibreCN's image, built from source for amd64 and arm64: a static binary
-# (musl) on Alpine, about 23 MB. Rust is compiled on the build machine's own
+# (musl) on Alpine, about 26 MB. Rust is compiled on the build machine's own
 # architecture (no emulation: fast); only the small runtime stage runs on
 # the target's. musl's allocator costs about a third of the registration
 # rate (BENCHMARKS.md): accepted for a small core (the owner's choice).
