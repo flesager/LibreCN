@@ -20,26 +20,27 @@ sessions it can, both ways, before the UPF sees them
 
 - **Uplink**: XDP on the interface of the N3 address takes each G-PDU to
   the UPF whose TEID is a session's, checks that its inner source is the
-  session's UE, polices the session AMBR uplink (the same GCRA as
-  `qos.rs`), strips the outer IPv4, UDP and GTP-U headers and lets the UE's
-  packet go on into the kernel's stack, which routes it out (NAT
+  session's UE and its QoS flow one of the session's, polices it (as
+  `qos.rs`: the flow's MBR, and the session AMBR unless the flow is GBR;
+  the same GCRA), strips the outer IPv4, UDP and GTP-U headers and lets the
+  UE's packet go on into the kernel's stack, which routes it out (NAT
   included).
 - **Downlink**: TC on the egress of the N6 device (`upf0`: the UE pool is
   routed there, after NAT) takes each packet to a UE whose session has its
-  gNB's tunnel, polices the session AMBR downlink, adds Ethernet, IPv4, UDP
-  and GTP-U headers (the default flow, as the UPF writes them) and sends it
-  out of the N3 interface to the gNB's next hop, as the kernel's routing
-  and neighbours give it.
+  gNB's tunnel, puts it on its QoS flow (the first PCC rule with a filter
+  it matches, else the default flow), polices it, adds Ethernet, IPv4, UDP
+  and GTP-U headers (its QFI, as the UPF writes them) and sends it out of
+  the N3 interface to the gNB's next hop, as the kernel's routing and
+  neighbours give it. Classifying costs 3 to 4 % at worst (4 rules of 4
+  filters, none matching).
 
 The UPF's socket, its userspace and the TUN device are skipped. Everything
 else goes as without the fast path (the fallback), to the UPF's socket or
 the TUN device:
-- echo, unknown TEIDs, a wrong source, other GTP-U layouts (the program
-  takes no optional field, or a 4-byte PDU Session Container on the
-  default flow);
-- sessions with PCC rules (extra QoS flows: `fast.rs` does not give them
-  to the kernel), and idle UEs (no tunnel: the UPF parks their packets and
-  the UE is paged);
+- echo, unknown TEIDs and QoS flows, a wrong source, other GTP-U layouts
+  (the program takes no optional field, or one 4-byte PDU Session
+  Container);
+- idle UEs (no tunnel: the UPF parks their packets and the UE is paged);
 - downlink packets the program cannot tunnel: a gNB whose next hop is not
   resolved yet (the UPF's send resolves it), larger than N3's MTU with the
   tunnel's 44 bytes (the kernel fragments the UPF's), fragments, GSO

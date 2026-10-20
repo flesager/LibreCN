@@ -289,6 +289,7 @@ impl Upf {
             ctx.count(DOWNLINK_BYTES, c.down_bytes);
             ctx.count(FAST_PATH, c.up_packets + c.down_packets);
             ctx.count(RATE_LIMITED, c.rate_limited);
+            ctx.count(EXTRA_FLOW, c.down_extra);
             if let Some(t) = slot.and_then(|i| traffic.get_mut(i)) {
                 let [ub, up, db, dp] = &mut t.1;
                 (*ub, *up, *db, *dp) = (*ub + c.up_bytes, *up + c.up_packets, *db + c.down_bytes, *dp + c.down_packets);

@@ -51,7 +51,7 @@ impl Amf {
         let slice = session.snssai;
         self.holders.insert(result.sm_ctx, Holder::Connected(amf_id));
         self.with_mm(ctx, amf_id, |mm, _, _, port| {
-            let mut nas = [0u8; 512];
+            let mut nas = [0u8; crate::mm::SEALED_MAX];
             if let Some(n) = mm.seal_session(psi, n1, &mut nas, port) {
                 let ran_id = port.ids.1;
                 let request = n2::pdu_session_resource_setup_request(
@@ -147,7 +147,7 @@ impl Amf {
         let Some(Some(session)) = ue.sessions.get(usize::from(psi)).copied() else { return false };
         let slice = session.snssai;
         self.with_mm(ctx, amf_id, |mm, _, _, port| {
-            let mut sealed = [0u8; 512];
+            let mut sealed = [0u8; crate::mm::SEALED_MAX];
             let nas = match n1 {
                 [] => None,
                 n1 => mm.seal_session(psi, n1, &mut sealed, port).map(|n| &sealed[..n]),

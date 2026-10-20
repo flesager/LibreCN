@@ -69,7 +69,7 @@ gNB ──N2──► amf-1 ──► ausf ──► udm      (authentication, s
 
 The PCF is required: without it, registrations go on with no UE-AMBR, but every PDU session is refused.
 
-**Pools and cores**: put every function in one pool pinned to the cores you give LibreCN. The [README](README.md#capacity) tells how many: 2 for the full capacity. The OAM functions always run in a pool named `oam`, added with one worker if the file has none. They are light, so they can share one of these cores:
+**Pools and cores**: the [README](README.md#capacity) tells how many cores: 2 for the full capacity. The OAM functions always run in a pool named `oam`, added with one worker if the file has none. They are light, so they can share a core. With the UPF's fast path (on when the kernel allows it: the UPF's ready line says `fast path on ...`), put every function in one pool pinned to the cores you give LibreCN, and the network card's interrupts on the same cores (the kernel carries the traffic there):
 
 ```toml
 [[runtime.pools]]
@@ -80,6 +80,24 @@ cores = [2, 3]
 name = "oam"
 cores = [2]
 ```
+
+Without the fast path, give the UPF a core of its own (`pool = "up"` in its `[[nf]]`), and the card's interrupts the other one:
+
+```toml
+[[runtime.pools]]
+name = "cp"
+cores = [2]
+
+[[runtime.pools]]
+name = "up"
+cores = [3]
+
+[[runtime.pools]]
+name = "oam"
+cores = [2]
+```
+
+The card's interrupts: `grep <card> /proc/interrupts` lists them, `echo 2,3 | sudo tee /proc/irq/<n>/smp_affinity_list` places one (`irqbalance`, if it runs, spreads them over every core).
 
 ## 3. The interfaces
 

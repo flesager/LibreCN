@@ -146,6 +146,7 @@ The split deployment with the kernel's receive work on both cores, two runs:
 - **With the fast path, two cores take the kernel's receive work on both**: 5.5 Gbit/s each way both at once, in one pool or split (the pools no longer matter: the UPF does nothing). One direction alone stays at one core's worth: each interface has one receive queue here (a network card with several, and several gNBs, spreads it).
 - **The UPF alone wants its core to itself**: split, the kernel's receive work on the other core, it carries 1.7 Gbit/s each way both at once (3.0 uplink, 4.1 downlink); with the receive work on its core too (one pool, or split on both), less (1.1 to 1.3).
 - **Packets, not bytes, are the limit**: 84-byte packets go at about the same packets per second.
+- **The PCF's QoS flows cost little in the fast path**: with every session holding 4 PCC rules of 4 filters that match nothing (16 filters checked per packet, `RULES=1`), one core's downlink goes from 536 to 516 kpps (84 B), 484 to 470 (1400 B).
 - **N3's socket buffer is 8 MiB**: with the default (208 KiB, 90 datagrams of 1400 bytes), bursts were lost while the UPF was away, 2 to 4 % at any rate.
 - veth copies each packet for XDP (its packets have no room in front for it); a network card's driver does not, so the fast path's figures are a floor.
 

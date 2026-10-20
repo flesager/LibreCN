@@ -10,9 +10,11 @@
 # (UERANSIM's gNB limits the downlink to the UE-AMBR only), the uplink both
 # do. (UDP: the rates are policed, and TCP over this sub-millisecond RTT
 # gets about half of them, see nf/README.md.) The gNB
-# The internet session has a PCC rule, so the UPF carries it (the fallback);
-# the ims session has none, so the kernel carries it (the fast path: XDP
-# uplink, TC downlink): its AMBR (10 Mbit/s up, 20 down) is measured too,
+# The internet session's downlink comes from the core's own container, so
+# the UPF carries it (the fallback: the kernel leaves the host's packets);
+# so does the ims session, in the kernel (the fast path: XDP uplink, TC
+# downlink): its AMBR (10 Mbit/s up, 20 down) is measured too, and the MBR
+# of its PCC rule's flow (UDP from port 5203: 5 Mbit/s, classified there),
 # with a data network in a third container (the kernel leaves the core's
 # own packets to the UPF), which the core reaches through its one
 # interface, as a host with one network card; it sends complete checksums,
@@ -34,7 +36,8 @@ cd "$(dirname "$0")/../.."
 opts="--sysctl net.ipv4.ip_forward=1"
 run librecn-core 10.210.0.10 /etc/librecn/core.sh
 opts=""
-run librecn-dn 10.210.0.30 sh -c 'ethtool -K eth0 tx off >/dev/null && ip route add 10.46.0.0/16 via 10.210.0.10 && exec iperf3 -s -p 5202'
+run librecn-dn 10.210.0.30 sh -c 'ethtool -K eth0 tx off >/dev/null && ip route add 10.46.0.0/16 via 10.210.0.10 \
+  && iperf3 -s -D -p 5203 && exec iperf3 -s -p 5202'
 wait_for librecn-core "AMF amf-1 ready"
 run librecn-ran 10.210.0.20 sh -c 'nr-gnb -c /etc/librecn/gnb.yaml > /tmp/gnb.log 2>&1 & sleep 1; exec nr-ue -c /etc/librecn/ue.yaml'
 wait_for librecn-ran "TUN interface\[uesimtun0" || true
@@ -55,11 +58,12 @@ downlink=$(mbps -b 30M -R)
 # UE address is the second session's (10.46.0.x), read from uesimtun1.
 ims_ue=$(docker exec librecn-ran ip -4 -o addr show uesimtun1 | awk '{ split($4, a, "/"); print a[1] }')
 ims_mbps() {
-  docker exec librecn-ran iperf3 -c 10.210.0.30 -p 5202 -B "$ims_ue" -t 4 -f m -u "$@" 2>&1 \
+  docker exec librecn-ran iperf3 -c 10.210.0.30 -B "$ims_ue" -t 4 -f m -u "$@" 2>&1 \
     | awk '/receiver/ { for (i = 2; i <= NF; i++) if ($i == "Mbits/sec") print $(i - 1) }'
 }
-ims_uplink=$(ims_mbps -b 15M)
-ims_downlink=$(ims_mbps -b 30M -R)
+ims_uplink=$(ims_mbps -p 5202 -b 15M)
+ims_downlink=$(ims_mbps -p 5202 -b 30M -R)
+ims_flow=$(ims_mbps -p 5203 -b 15M -R)
 release
 wait_for librecn-core "deactivated (the UE is idle)" || true
 idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
@@ -83,7 +87,7 @@ echo "--- ping after idle"; echo "$idle_ping"
 echo "--- ping of the idle UE (paging)"; echo "$paged_ping"
 echo "--- iperf3, UDP at 15 up and 30 down (Mbit/s; session AMBR 10 up, 20 down)"; echo "uplink ${uplink:-none}, downlink ${downlink:-none}"
 echo "--- iperf3 on ims, in the fast path, UDP at 15 up and 30 down (session AMBR 10 up, 20 down)"
-echo "uplink ${ims_uplink:-none}, downlink ${ims_downlink:-none}"
+echo "uplink ${ims_uplink:-none}, downlink ${ims_downlink:-none}; its PCC rule's flow (MBR 5), at 15 down: ${ims_flow:-none}"
 echo "--- UPF counters"; echo "$metrics"
 # within RATE AMBR FLOOR: at most the AMBR, 5 % for the 100 ms bursts, at
 # least FLOOR of it. The uplink is policed by UERANSIM's gNB too, its own way.
@@ -105,6 +109,6 @@ echo "$ping" | grep -q " 0% packet loss" \
   && echo "$core" | grep -q "1 extra flow(s)" \
   && echo "$core" | grep -q "fast path on eth0" \
   && echo "$metrics" | grep -Eq 'counter="fast_path_packets"} [1-9][0-9]{3}' \
-  && within "$ims_uplink" 10 0.8 && within "$ims_downlink" 20 0.9 \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s; in the fast path: $ims_uplink / $ims_downlink), before and after idle; pinged while idle: paged; periodic registration" \
+  && within "$ims_uplink" 10 0.8 && within "$ims_downlink" 20 0.9 && within "$ims_flow" 5 0.9 \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s; in the fast path: $ims_uplink / $ims_downlink, its flow's MBR $ims_flow), before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

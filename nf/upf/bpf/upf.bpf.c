@@ -3,19 +3,24 @@
  * The UPF's fast path: the kernel carries the sessions it can, the UPF the
  * rest (the fallback, as without it).
  *
+ * Rates and flows are the UPF's (qos.rs): a session's PCC rules (`rules`,
+ * by UE address) are QoS flows 2 to 5, the default flow 1; a packet beyond
+ * its flow's MBR, or beyond the session AMBR on a non-GBR flow, is dropped.
+ *
  * Uplink (upf_uplink): XDP on the N3 interface. A G-PDU to the UPF's N3
- * address whose TEID is in `uplink`, from the session's UE, on the default
- * QoS flow and within the session's uplink AMBR, loses its outer IPv4, UDP
- * and GTP-U headers and goes on into the kernel's stack, which routes the
- * UE's packet (NAT included): the UPF's socket, its userspace and the TUN
- * device are skipped. Anything else goes on untouched to the UPF's socket:
- * echo, unknown TEIDs, other header layouts, other flows, a spoofed source.
+ * address whose TEID is in `uplink`, from the session's UE, on one of its
+ * QoS flows and within its rates, loses its outer IPv4, UDP and GTP-U
+ * headers and goes on into the kernel's stack, which routes the UE's packet
+ * (NAT included): the UPF's socket, its userspace and the TUN device are
+ * skipped. Anything else goes on untouched to the UPF's socket: echo,
+ * unknown TEIDs and flows, other header layouts, a spoofed source.
  *
  * Downlink (upf_downlink): TC on the egress of the N6 device (the TUN
  * device the UE addresses are routed to, after NAT). A packet to a UE in
- * `downlink` (a session with its gNB's tunnel), within the session's
- * downlink AMBR, gets Ethernet, IPv4, UDP and GTP-U headers (the default
- * flow) and leaves by the N3 interface, to the gNB's next hop as the
+ * `downlink` (a session with its gNB's tunnel) goes on the flow of the
+ * first PCC rule with a filter it matches, else the default flow; within
+ * its rates, it gets Ethernet, IPv4, UDP and GTP-U headers (its flow) and
+ * leaves by the N3 interface, to the gNB's next hop as the
  * kernel's routing and neighbours give it: the TUN device and the UPF are
  * skipped. Anything else goes on to the TUN device: idle UEs (parked, the
  * UE paged), a next hop not yet resolved, too large for N3's MTU, a GSO
@@ -24,8 +29,8 @@
  * and those from its virtual interfaces, such as a container's), which
  * the kernel completes for the TUN device.
  *
- * The UPF (nf/upf/src/fast.rs) fills `uplink` and `downlink` from its
- * sessions and reads `counts`. Built by build.sh into upf.bpf.o, which is
+ * The UPF (nf/upf/src/fast.rs) fills `uplink`, `downlink` and `rules` from
+ * its sessions and reads `counts`. Built by build.sh into upf.bpf.o, which is
  * checked in.
  */
 #include <linux/bpf.h>
@@ -42,6 +47,9 @@
 #define MAX_CELLS 1024
 #define BURST_NS 100000000ULL
 #define DEFAULT_QFI 1
+/* librecn_sbi::policy: PCC rules per session, packet filters per rule. */
+#define MAX_RULES 4
+#define MAX_FILTERS 4
 
 /* GTP-U (TS 29.281): version 1, protocol type GTP; the optional fields. */
 #define GTP_FLAGS 0x30
@@ -80,6 +88,33 @@ struct downlink {
 	__u64 done;
 };
 
+/* A packet filter, downlink (the UPF gives those only): the remote end is
+ * the packet's source. */
+struct filter {
+	__u32 remote; /* network order, masked */
+	__u32 mask; /* network order; 0: any address */
+	__u16 remote_ports[2]; /* first, last; 0, 0: any port, even none */
+	__u16 local_ports[2];
+	__u8 protocol; /* 0: any */
+	__u8 pad[3];
+};
+
+/* A PCC rule: its QoS flow's rates, its filters. */
+struct rule {
+	__u64 mbr[2]; /* uplink, downlink, bit/s; 0: none */
+	__u64 done[2];
+	__u32 gbr; /* a GBR flow: held to its MBR only, outside the AMBR */
+	__u32 filters;
+	struct filter f[MAX_FILTERS];
+};
+
+/* A session's PCC rules, by its UE's address, in precedence order. */
+struct rules {
+	__u32 count;
+	__u32 pad;
+	struct rule r[MAX_RULES];
+};
+
 /* Per cell slot, and per CPU: what the fast path carried and dropped (the
  * UEs' packets: their bytes without the tunnel's headers). */
 struct counts {
@@ -88,6 +123,7 @@ struct counts {
 	__u64 down_packets;
 	__u64 down_bytes;
 	__u64 rate_limited;
+	__u64 down_extra; /* downlink packets on a PCC rule's flow */
 };
 
 struct {
@@ -105,6 +141,14 @@ struct {
 } downlink SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(map_flags, BPF_F_NO_PREALLOC); /* few sessions have rules */
+	__uint(max_entries, 1024); /* max_sessions, set at load */
+	__type(key, __u32);
+	__type(value, struct rules);
+} rules SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, MAX_CELLS + 1);
 	__type(key, __u32);
@@ -112,25 +156,58 @@ struct {
 } counts SEC(".maps");
 
 /*
- * The session's rate limit, a GCRA as in qos.rs: a packet conforms unless
- * the traffic let through would take more than BURST_NS beyond now; if it
- * does, its share is taken. Another CPU may take a share at the same time:
- * compare and swap, once more if it lost, then let the packet through.
+ * A rate limit, a GCRA as in qos.rs: a packet conforms unless the traffic
+ * let through would take more than BURST_NS beyond now at `rate` (0: no
+ * limit); `state` is when it is done.
  */
-static __always_inline int allow(__u64 rate, __u64 *state, __u64 bytes)
+static __always_inline int conforms(__u64 rate, __u64 *state, __u64 now)
+{
+	return !rate || *(volatile __u64 *)state <= now + BURST_NS;
+}
+
+/* The packet's share taken. Another CPU may take one at the same time:
+ * compare and swap, once more if it lost, then let it be. */
+static __always_inline void take(__u64 rate, __u64 *state, __u64 now, __u64 bytes)
 {
 	if (!rate)
-		return 1;
-	__u64 now = bpf_ktime_get_ns();
+		return;
 	__u64 cost = bytes * 8 * 1000000000ULL / rate;
 	for (int i = 0; i < 2; i++) {
 		__u64 done = *(volatile __u64 *)state;
-		if (done > now + BURST_NS)
-			return 0;
-		__u64 next = (done > now ? done : now) + cost;
-		if (__sync_val_compare_and_swap(state, done, next) == done)
-			return 1;
+		if (__sync_val_compare_and_swap(state, done, (done > now ? done : now) + cost) == done)
+			return;
 	}
+}
+
+/* The PCC rule of QoS flow `qfi` (none: the default flow). */
+static __always_inline struct rule *rule_of(struct rules *rs, __u8 qfi)
+{
+	__u32 i = (__u32)qfi - 2;
+	return rs && qfi >= 2 && i < MAX_RULES && i < rs->count ? &rs->r[i] : 0;
+}
+
+/*
+ * Whether a packet of `bytes` on rule `r`'s flow (none: the default one),
+ * `way` (0 uplink, 1 downlink), may go: its flow's MBR, and the session
+ * AMBR (`ambr`, `ambr_state`) unless the flow is GBR; if so, its share is
+ * taken of both.
+ */
+static __always_inline int allow(struct rule *r, int way, __u64 ambr, __u64 *ambr_state, __u64 bytes)
+{
+	__u64 now = bpf_ktime_get_ns();
+	if (r && way == 0 && !conforms(r->mbr[0], &r->done[0], now))
+		return 0;
+	if (r && way == 1 && !conforms(r->mbr[1], &r->done[1], now))
+		return 0;
+	int in_ambr = !r || !r->gbr;
+	if (in_ambr && !conforms(ambr, ambr_state, now))
+		return 0;
+	if (r && way == 0)
+		take(r->mbr[0], &r->done[0], now, bytes);
+	if (r && way == 1)
+		take(r->mbr[1], &r->done[1], now, bytes);
+	if (in_ambr)
+		take(ambr, ambr_state, now, bytes);
 	return 1;
 }
 
@@ -160,17 +237,19 @@ int upf_uplink(struct xdp_md *ctx)
 		return XDP_PASS;
 
 	/* The layouts taken: no optional field; or the optional ones, with
-	 * no extension header or one PDU Session Container of 4 bytes, the
-	 * last, on the default flow. */
+	 * no extension header (the default flow) or one PDU Session Container
+	 * of 4 bytes, the last (its flow). */
 	__u8 flags = gtp[0];
 	__u32 hdr;
+	__u8 qfi = DEFAULT_QFI;
 	if (flags == GTP_FLAGS) {
 		hdr = 8;
 	} else if ((flags & ~(GTP_S | GTP_PN)) == GTP_FLAGS) {
 		hdr = 12;
 	} else if ((flags & ~(GTP_S | GTP_PN)) == (GTP_FLAGS | GTP_E) && gtp[11] == PDU_SESSION_CONTAINER &&
-		   gtp[12] == 1 && (gtp[14] & 0x3f) == DEFAULT_QFI && gtp[15] == 0) {
+		   gtp[12] == 1 && gtp[15] == 0) {
 		hdr = 16;
+		qfi = gtp[14] & 0x3f;
 	} else {
 		return XDP_PASS;
 	}
@@ -189,10 +268,17 @@ int upf_uplink(struct xdp_md *ctx)
 	if ((void *)(inner + 1) > end || inner->version != 4 || inner->saddr != s->ue_ip)
 		return XDP_PASS;
 
+	/* One of the session's flows, else the UPF's (it drops it). */
+	struct rule *r = 0;
+	if (qfi != DEFAULT_QFI) {
+		r = rule_of(bpf_map_lookup_elem(&rules, &s->ue_ip), qfi);
+		if (!r)
+			return XDP_PASS;
+	}
 	struct counts *c = counts_of(s->cell);
 	if (!c)
 		return XDP_PASS;
-	if (!allow(s->rate, &s->done, bytes)) {
+	if (!allow(r, 0, s->rate, &s->done, bytes)) {
 		c->rate_limited++;
 		return XDP_DROP;
 	}
@@ -253,6 +339,37 @@ static __always_inline int checksum_due(struct __sk_buff *skb, const struct iphd
 	return (__u16)sum == field;
 }
 
+static __always_inline int in_range(const __u16 range[2], int known, __u16 port)
+{
+	return (range[0] == 0 && range[1] == 0) || (known && port >= range[0] && port <= range[1]);
+}
+
+/*
+ * The QoS flow of downlink packet `ip` (a first fragment or whole): the
+ * first rule in `rs` with a filter it matches, else the default flow.
+ */
+static __always_inline __u8 classify(struct __sk_buff *skb, const struct iphdr *ip, struct rules *rs)
+{
+	__u16 ports[2] = {};
+	int known = (ip->protocol == IPPROTO_TCP || ip->protocol == IPPROTO_UDP || ip->protocol == 132) &&
+		    !bpf_skb_load_bytes(skb, ip->ihl * 4, ports, sizeof(ports));
+	__u16 remote = bpf_ntohs(ports[0]), local = bpf_ntohs(ports[1]);
+	for (int i = 0; i < MAX_RULES; i++) {
+		if (i >= (int)rs->count)
+			break;
+		struct rule *r = &rs->r[i];
+		for (int j = 0; j < MAX_FILTERS; j++) {
+			if (j >= (int)r->filters)
+				break;
+			struct filter *f = &r->f[j];
+			if ((!f->protocol || f->protocol == ip->protocol) && !((ip->saddr ^ f->remote) & f->mask) &&
+			    in_range(f->remote_ports, known, remote) && in_range(f->local_ports, known, local))
+				return i + 2;
+		}
+	}
+	return DEFAULT_QFI;
+}
+
 SEC("classifier")
 int upf_downlink(struct __sk_buff *skb)
 {
@@ -280,7 +397,9 @@ int upf_downlink(struct __sk_buff *skb)
 	struct counts *c = counts_of(s->cell);
 	if (!c)
 		return TC_ACT_OK;
-	if (!allow(s->rate, &s->done, len)) {
+	struct rules *rs = bpf_map_lookup_elem(&rules, &inner.daddr);
+	__u8 qfi = rs ? classify(skb, &inner, rs) : DEFAULT_QFI;
+	if (!allow(rule_of(rs, qfi), 1, s->rate, &s->done, len)) {
 		c->rate_limited++;
 		return TC_ACT_SHOT;
 	}
@@ -317,12 +436,13 @@ int upf_downlink(struct __sk_buff *skb)
 	__builtin_memcpy(&h.gtp[4], &s->teid, 4);
 	h.gtp[11] = PDU_SESSION_CONTAINER;
 	h.gtp[12] = 1;
-	h.gtp[14] = DEFAULT_QFI;
+	h.gtp[14] = qfi;
 
 	if (bpf_skb_change_head(skb, ENCAP, 0) || bpf_skb_store_bytes(skb, 0, &h, sizeof(h), 0))
 		return TC_ACT_SHOT;
 	c->down_packets++;
 	c->down_bytes += len;
+	c->down_extra += qfi != DEFAULT_QFI;
 	return bpf_redirect(fib.ifindex, 0);
 }
 

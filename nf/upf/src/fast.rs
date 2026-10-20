@@ -9,12 +9,14 @@
 //! N6); without them, or on a kernel without XDP, the UPF says why and runs
 //! without it.
 //!
-//! The UPF copies each session without extra QoS flows into the kernel's
-//! `uplink` map (its TEID, UE address, cell slot, uplink AMBR) and, while
-//! the gNB's tunnel is known, `downlink` (its UE address, the gNB's address
-//! and TEID, cell slot, downlink AMBR); removes them with the session (the
-//! downlink when the UE goes idle: its packets reach the UPF, which parks
-//! them); and folds the kernel's counts into its own.
+//! The UPF copies each session into the kernel's `uplink` map (its TEID, UE
+//! address, cell slot, uplink AMBR), while the gNB's tunnel is known into
+//! `downlink` (its UE address, the gNB's address and TEID, cell slot,
+//! downlink AMBR), and its PCC rules into `rules` (their MBRs, GBR or not,
+//! their downlink filters: the kernel classifies as [`crate::qos`] does);
+//! removes them with the session (the downlink when the UE goes idle: its
+//! packets reach the UPF, which parks them); and folds the kernel's counts
+//! into its own.
 
 use std::net::Ipv4Addr;
 
@@ -22,6 +24,7 @@ use aya::maps::{HashMap, MapData, PerCpuArray};
 use aya::programs::tc::{self, SchedClassifier, TcAttachType};
 use aya::programs::{Xdp, XdpMode};
 use aya::{EbpfLoader, Pod};
+use librecn_sbi::policy::{MAX_FILTERS, MAX_RULES, PccRule, direction};
 
 use crate::MAX_CELLS;
 use crate::sessions::Session;
@@ -65,6 +68,74 @@ struct Downlink {
 // SAFETY: integers only, without padding (4 * 4 + 8 + 8 bytes).
 unsafe impl Pod for Downlink {}
 
+/// `struct filter`: a downlink packet filter.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Filter {
+    /// Network order, masked.
+    remote: u32,
+    mask: u32,
+    remote_ports: [u16; 2],
+    local_ports: [u16; 2],
+    protocol: u8,
+    pad: [u8; 3],
+}
+
+/// `struct rule`: a PCC rule's QoS flow.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Rule {
+    /// Uplink, downlink, bit/s.
+    mbr: [u64; 2],
+    done: [u64; 2],
+    gbr: u32,
+    filters: u32,
+    f: [Filter; MAX_FILTERS],
+}
+
+/// `struct rules`: a session's PCC rules, in precedence order.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Rules {
+    count: u32,
+    pad: u32,
+    r: [Rule; MAX_RULES],
+}
+
+// SAFETY: integers only, without padding (20, 120 and 488 bytes, aligned).
+unsafe impl Pod for Filter {}
+// SAFETY: as above.
+unsafe impl Pod for Rule {}
+// SAFETY: as above.
+unsafe impl Pod for Rules {}
+
+impl Rules {
+    /// The kernel's copy of `rules`: their downlink filters only (the
+    /// kernel classifies the downlink alone).
+    fn of(rules: &[PccRule]) -> Rules {
+        let mut out = Rules { count: rules.len() as u32, ..Rules::default() };
+        for (r, rule) in out.r.iter_mut().zip(rules) {
+            r.mbr = [rule.mbr.uplink, rule.mbr.downlink];
+            r.gbr = u32::from(!rule.gbr.is_zero());
+            let downlink = rule.filters().iter().filter(|f| f.direction & direction::DOWNLINK != 0);
+            for (f, filter) in r.f.iter_mut().zip(downlink) {
+                let prefix = u32::from(filter.remote_prefix.min(32));
+                let mask = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
+                *f = Filter {
+                    remote: (u32::from_be_bytes(filter.remote) & mask).to_be(),
+                    mask: mask.to_be(),
+                    remote_ports: filter.remote_ports,
+                    local_ports: filter.local_ports,
+                    protocol: filter.protocol,
+                    pad: [0; 3],
+                };
+                r.filters += 1;
+            }
+        }
+        out
+    }
+}
+
 /// `struct counts`: what the kernel carried and dropped, for one cell slot
 /// (the UEs' packets, their bytes without the tunnel's headers).
 #[repr(C)]
@@ -75,6 +146,8 @@ pub struct Counts {
     pub down_packets: u64,
     pub down_bytes: u64,
     pub rate_limited: u64,
+    /// Downlink packets on a PCC rule's flow.
+    pub down_extra: u64,
 }
 
 // SAFETY: integers only, without padding.
@@ -88,6 +161,7 @@ impl Counts {
             down_packets: f(self.down_packets, other.down_packets),
             down_bytes: f(self.down_bytes, other.down_bytes),
             rate_limited: f(self.rate_limited, other.rate_limited),
+            down_extra: f(self.down_extra, other.down_extra),
         }
     }
 }
@@ -99,6 +173,7 @@ pub struct FastPath {
     interface: String,
     uplink: HashMap<MapData, u32, Uplink>,
     downlink: HashMap<MapData, u32, Downlink>,
+    rules: HashMap<MapData, u32, Rules>,
     counts: PerCpuArray<MapData, Counts>,
     /// What [`take`](Self::take) has given so far, per slot.
     given: Vec<Counts>,
@@ -129,6 +204,7 @@ impl FastPath {
             .override_global("n3_mtu", &mtu, true)
             .map_max_entries("uplink", max)
             .map_max_entries("downlink", max)
+            .map_max_entries("rules", max)
             .load(OBJECT)
             .map_err(|e| format!("loading ({RIGHTS}): {e}"))?;
         let program: &mut Xdp =
@@ -149,9 +225,10 @@ impl FastPath {
         let mut map = |name: &str| ebpf.take_map(name).ok_or(format!("no map {name}"));
         let uplink = HashMap::try_from(map("uplink")?).map_err(|e| e.to_string())?;
         let downlink = HashMap::try_from(map("downlink")?).map_err(|e| e.to_string())?;
+        let rules = HashMap::try_from(map("rules")?).map_err(|e| e.to_string())?;
         let counts = PerCpuArray::try_from(map("counts")?).map_err(|e| e.to_string())?;
         let given = vec![Counts::default(); MAX_CELLS + 1];
-        Ok(FastPath { _ebpf: ebpf, interface, uplink, downlink, counts, given })
+        Ok(FastPath { _ebpf: ebpf, interface, uplink, downlink, rules, counts, given })
     }
 
     /// The interface it is attached to.
@@ -159,16 +236,20 @@ impl FastPath {
         &self.interface
     }
 
-    /// Session `s` carried by the kernel, if it can be (no extra QoS
-    /// flows) and there is room: its uplink, and its downlink while its
-    /// gNB's tunnel is known; again after a change (tunnel, cell).
+    /// Session `s` carried by the kernel, if there is room: its PCC rules,
+    /// its uplink, and its downlink while its gNB's tunnel is known; again
+    /// after a change (tunnel, cell).
     pub fn add(&mut self, s: &Session) -> bool {
-        if !s.qos.rules().is_empty() {
-            return false;
-        }
         let (ue_ip, cell) = (u32::from(s.ue_ip).to_be(), s.cell.map_or(MAX_CELLS as u32, u32::from));
+        let mut added = match s.qos.rules() {
+            [] => {
+                let _ = self.rules.remove(&ue_ip);
+                true
+            }
+            rules => self.rules.insert(ue_ip, Rules::of(rules), 0).is_ok(),
+        };
         let up = Uplink { ue_ip, cell, rate: s.qos.uplink_ambr(), done: 0 };
-        let mut added = self.uplink.insert(s.ul_teid.to_be(), up, 0).is_ok();
+        added &= self.uplink.insert(s.ul_teid.to_be(), up, 0).is_ok();
         match s.dl {
             Some((gnb, teid)) => {
                 let (gnb, teid) = (u32::from(*gnb.ip()).to_be(), teid.to_be());
@@ -184,8 +265,10 @@ impl FastPath {
 
     /// Session `s`, now gone.
     pub fn remove(&mut self, s: &Session) {
+        let ue_ip = u32::from(s.ue_ip).to_be();
         let _ = self.uplink.remove(&s.ul_teid.to_be());
-        let _ = self.downlink.remove(&u32::from(s.ue_ip).to_be());
+        let _ = self.downlink.remove(&ue_ip);
+        let _ = self.rules.remove(&ue_ip);
     }
 
     /// What the kernel carried since the last call, for the cell slots
@@ -285,10 +368,34 @@ mod tests {
     }
 
     #[test]
+    fn the_kernel_gets_the_rules_downlink_filters() {
+        use librecn_sbi::policy::{PacketFilter, Rates};
+        use zerocopy::FromZeros;
+        let sip = PacketFilter::new(direction::BOTH, 17, ([10, 10, 3, 4], 16), [5060, 5061], [0, 0]);
+        let up_only = PacketFilter::new(direction::UPLINK, 6, ([0; 4], 0), [0, 0], [80, 80]);
+        let mut voice = PccRule::new_zeroed();
+        voice.set_filters(&[up_only, sip]);
+        (voice.mbr, voice.gbr) = (Rates { uplink: 1, downlink: 2 }, Rates { uplink: 1, downlink: 1 });
+        let any = PccRule::new_zeroed();
+        let k = Rules::of(&[voice, any]);
+        assert_eq!((k.count, k.r[0].mbr, k.r[0].gbr, k.r[0].filters, k.r[1].gbr), (2, [1, 2], 1, 1, 0));
+        let f = k.r[0].f[0];
+        assert_eq!((f.protocol, f.remote_ports, f.local_ports), (17, [5060, 5061], [0, 0]));
+        assert_eq!((u32::from_be(f.remote), u32::from_be(f.mask)), (0x0a0a_0000, 0xffff_0000), "masked");
+        let all = PacketFilter::new(direction::DOWNLINK, 0, ([1, 2, 3, 4], 0), [0, 0], [0, 0]);
+        let mut r = PccRule::new_zeroed();
+        r.set_filters(&[all]);
+        assert_eq!((Rules::of(&[r]).r[0].f[0].remote, Rules::of(&[r]).r[0].f[0].mask), (0, 0), "any address");
+    }
+
+    #[test]
     fn counts_are_given_once() {
-        let a = Counts { up_packets: 5, up_bytes: 500, down_packets: 1, down_bytes: 90, rate_limited: 1 };
-        let b = Counts { up_packets: 7, up_bytes: 900, down_packets: 4, down_bytes: 290, rate_limited: 1 };
-        let new = Counts { up_packets: 2, up_bytes: 400, down_packets: 3, down_bytes: 200, rate_limited: 0 };
+        let a =
+            Counts { up_packets: 5, up_bytes: 500, down_packets: 1, down_bytes: 90, rate_limited: 1, down_extra: 0 };
+        let b =
+            Counts { up_packets: 7, up_bytes: 900, down_packets: 4, down_bytes: 290, rate_limited: 1, down_extra: 2 };
+        let new =
+            Counts { up_packets: 2, up_bytes: 400, down_packets: 3, down_bytes: 200, rate_limited: 0, down_extra: 2 };
         assert_eq!(b.plus(a, u64::wrapping_sub), new);
         assert_eq!(a.plus(new, u64::wrapping_add), b);
     }

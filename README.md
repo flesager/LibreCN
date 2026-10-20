@@ -63,7 +63,7 @@ What LibreCN carries for the number of cores given to it.
 - **The fast path** (XDP and TC, on when the kernel allows it; the Docker deployment gives it the rights) carries the traffic in the kernel, both ways: about three times the UPF alone per core, the UPF's own core left free.
 - **Two cores**: with the fast path, the network card's interrupts on both (the pools do not matter: the kernel does the work); without it, the UPF in a pool of its own and the interrupts on the other core. One direction alone takes one core's worth with one receive queue; a card with several, and several gNBs, spreads it.
 - The limit is in packets, not bytes: with 84-byte packets, about the same packets per second (500 000 to 680 000 in the fast path), so a seventeenth of the Gbit/s.
-- TCP from the internet aggregated by the card (GRO), the host's own traffic, and sessions with PCC rules go through the UPF (BENCHMARKS.md, `nf/upf/README.md`).
+- The fast path carries the PCF's QoS flows too (classification costs 3 to 4 % at worst). TCP from the internet aggregated by the card (GRO) and the host's own traffic go through the UPF (`nf/upf/README.md`).
 
 **Registrations** (`scripts/load.sh`: every function in one pool, test gNBs on loopback).
 
@@ -75,9 +75,12 @@ What LibreCN carries for the number of cores given to it.
 | 4 | 9 000 | as with 2 cores |
 
 **Choosing the number of cores**:
-- **2 cores give the full capacity**, both planes loaded at once: the AMF uses one core, the UPF the other, and the other functions fit in what is left. For the user plane, the UPF in a pool of its own is a little better (above).
-- **1 core** suits a lab or a light load: the two planes share it. With 500 Mbit/s each way of user traffic, 5 400 registrations per second remain.
-- **3 or 4 cores add no capacity**, only headroom. Each function is one instance, and an instance uses one core at a time: a larger pool for the UPF would stay idle.
+- **2 cores give the full capacity.** How to lay them out depends on the UPF's fast path (on by default, and in the Docker deployment):
+  - **With the fast path**: every function in one pool on both cores, and the network card's interrupts on both cores (where its receive work, and so the fast path, runs; `irqbalance` spreads them). The kernel carries the traffic (5.5 Gbit/s each way), the AMF takes a core when registrations come.
+  - **Without it** (no rights for it): the UPF in a pool of its own on one core, the other functions and the card's interrupts on the other: 1.7 Gbit/s each way, against 1.1 to 1.3 with the UPF sharing its core.
+- **1 core** suits a lab or a light load: everything shares it. With the fast path, 2.9 Gbit/s each way, or 9 000 registrations per second; without it, 0.9 to 1.1 Gbit/s, and with 500 Mbit/s each way of user traffic, 5 400 registrations per second remain.
+- **3 or 4 cores add no capacity to the functions**: each is one instance, and an instance uses one core at a time (a larger pool for the UPF would stay idle). With the fast path, more cores can take more of the kernel's receive work, if the card has several receive queues and the traffic comes from several gNBs (not measured: the benchmark's links have one queue each).
+- Registrations and traffic at once were measured without the fast path (`scripts/load.sh`); with it, the UPF's core is free for the AMF.
 
 **Memory (RAM)**: plan **20 MiB, plus 5 KiB per UE** (each UE registered with its PDU session).
 

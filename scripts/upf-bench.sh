@@ -33,9 +33,10 @@
 #
 #   scripts/upf-bench.sh            # UES=100 SECONDS=2 (per measure), about 15 minutes
 #   ONLY="one true" LOG=info scripts/upf-bench.sh   # one deployment and path, the core's log kept
+#   RULES=1 ...                     # every session with 4 PCC rules that match nothing
 set -eu
 cd "$(dirname "$0")/.."
-cargo build -q --release -p librecn -p librecn --example load
+cargo build -q --release -p librecn --bin librecn --example load
 ues=${UES:-100}
 seconds=${SECONDS:-2}
 dir=$(mktemp -d)
@@ -86,6 +87,17 @@ xdp librecn-bench-gnb n3g && napi librecn-bench-gnb n3g 6
 xdp librecn-bench-dn n6d && napi librecn-bench-dn n6d 11
 xdp librecn-bench-core n6
 
+# rules: with RULES=1, every session has 4 PCC rules of 4 downlink filters
+# that no packet matches: classification's worst case.
+rules() {
+  for _ in 1 2 3 4; do
+    echo '[[nf.params.default.sessions.flows]]'
+    echo 'five_qi = 9'
+    echo 'filters = [{ direction = "downlink", remote = "192.0.2.1", protocol = 6, remote_ports = "1-2" },'
+    echo '  { direction = "downlink", remote = "192.0.2.0/24", protocol = 17, local_ports = "9" },'
+    echo '  { direction = "downlink", remote = "198.51.100.0/24" }, { direction = "downlink", protocol = 1 }]'
+  done
+}
 # config POOLS UPF_POOL FAST: LibreCN's configuration.
 config() {
   cat <<TOML
@@ -121,6 +133,7 @@ name = "pcf"
 pool = "cp"
 [[nf.params.default.sessions]]
 ambr_mbps = { uplink = 100000, downlink = 100000 }   # no limit here
+$([ -z "${RULES:-}" ] || rules)
 [[nf]]
 kind = "smf"
 name = "smf"

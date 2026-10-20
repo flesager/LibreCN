@@ -33,8 +33,8 @@ Deliberately left out of this release, to be added when a step needs them:
   paged once per downlink data report, the UPF reporting again at most every
   10 s while the UE stays away.
 - **User plane extras**: IPv6, Error Indication for unknown TEIDs; in the
-  fast path, the sessions with PCC rules and GSO aggregates (TCP from a
-  card with GRO): the UPF carries them, see `upf/README.md`.
+  fast path, GSO aggregates (TCP from a card with GRO): the UPF carries
+  them, see `upf/README.md`.
 - **Network-requested PDU session modification** (QoS, AMBR): UERANSIM
   supports neither the Modification Command nor PDU Session Resource Modify,
   so nothing could prove it; a UE's modification request is rejected (#31).

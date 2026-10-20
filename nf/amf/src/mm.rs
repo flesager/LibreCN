@@ -45,8 +45,12 @@ use librecn_security::kdf;
 
 use crate::config::AmfConfig;
 
-/// Largest plain NAS message the AMF sends.
-const DOWNLINK_MAX: usize = 256;
+/// Largest plain NAS message the AMF sends: a DL NAS Transport around the
+/// largest 5GSM message the SMF sends (its N1 container: a PDU Session
+/// Establishment Accept with the most PCC rules and filters passes 256).
+const DOWNLINK_MAX: usize = librecn_sbi::pdu_session::CONTAINER + 16;
+/// Largest protected NAS message the AMF sends.
+pub const SEALED_MAX: usize = DOWNLINK_MAX + 7;
 /// T3550, T3560, T3570 (§10.2).
 pub const T_NAS: Duration = Duration::from_secs(6);
 /// Retransmissions before a procedure is aborted (§5.4, §5.5).
@@ -629,7 +633,7 @@ impl Mm {
         let held = from_idle.and_then(|(_, held)| held);
         let both = held.map(|h| SessionSet(fx.sessions().0 & h.0));
         let accept = Downlink::RegistrationAccept { guti, tai, allowed, sessions: both, t3512: config.t3512 };
-        let mut pdu = [0u8; DOWNLINK_MAX + 7];
+        let mut pdu = [0u8; SEALED_MAX];
         if let Some(n) = self.seal(accept, &mut pdu, fx) {
             fx.setup_context(&pdu[..n], &context, "Registration Accept in Initial Context Setup");
         }
@@ -734,7 +738,7 @@ impl Mm {
             return fx.release(Release::Normal);
         };
         let held_by_both = SessionSet(sessions.0 & held.map_or(u16::MAX, |h| h.0));
-        let mut pdu = [0u8; DOWNLINK_MAX + 7];
+        let mut pdu = [0u8; SEALED_MAX];
         if let Some(n) = self.seal(Downlink::ServiceAccept { sessions: held_by_both }, &mut pdu, fx) {
             fx.setup_context(&pdu[..n], &context, "Service Accept in Initial Context Setup");
         }
@@ -808,7 +812,7 @@ impl Mm {
 
     /// Sends `message`, protected once a security context exists.
     fn send(&mut self, message: Downlink<'_>, fx: &mut impl Effects) {
-        let mut pdu = [0u8; DOWNLINK_MAX + 7];
+        let mut pdu = [0u8; SEALED_MAX];
         if let Some(n) = self.seal(message, &mut pdu, fx) {
             fx.send(&pdu[..n], name(message.kind()));
         }
@@ -1182,6 +1186,18 @@ mod tests {
         mm.on_uplink(&config, tai(), &mut ue.protect(Header::IntegrityCiphered, &hex("7e0043")), &mut fx);
         assert_eq!(mm.state(), State::Registered);
         (config, mm, Recorder::default(), ue)
+    }
+
+    #[test]
+    fn the_largest_5gsm_message_of_the_smf_reaches_the_ue() {
+        let (_, mut mm, mut fx, ue) = registered();
+        let container = vec![0x2e; librecn_sbi::pdu_session::CONTAINER];
+        mm.send_session(1, &container, &mut fx);
+        let plain = ue.open(&fx.sent.pop().expect("sent"), 2);
+        assert!(plain.windows(container.len()).any(|w| w == container), "the whole container");
+        let mut sealed = [0u8; SEALED_MAX];
+        assert!(mm.seal_session(1, &container, &mut sealed, &mut fx).is_some(), "and in PDU Session Resource Setup");
+        assert!(fx.logs.is_empty(), "{:?}", fx.logs);
     }
 
     /// The Service Request of an idle UE: data for PDU session 1, holding 1.

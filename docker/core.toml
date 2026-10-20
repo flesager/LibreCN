@@ -44,8 +44,12 @@ five_qi = 7
 filters = [{ direction = "downlink", remote = "10.45.0.1", protocol = 1 }]
 
 [[nf.params.policies.sessions]]
-dnn = "ims"                   # no extra flow: the UPF's fast path carries it both ways
+dnn = "ims"                   # the UPF's fast path carries it both ways
 ambr_mbps = { uplink = 10, downlink = 20 }   # user-plane.sh measures it, policed in the kernel
+[[nf.params.policies.sessions.flows]]  # and this flow's MBR, classified and policed in the kernel
+five_qi = 6
+mbr_mbps = { uplink = 5, downlink = 5 }
+filters = [{ direction = "downlink", remote = "10.210.0.30", protocol = 17, remote_ports = "5203" }]
 
 [[nf]]
 kind = "smf"
