@@ -12,6 +12,63 @@ AMF pages the UE, whose Service Request brings the tunnel back, and the
 parked packets go first. 64 packets are kept in all (2 KiB at most each,
 preallocated: 128 KiB), the oldest dropped when full.
 
+## Fast path (XDP)
+
+On by default (`fast_path = false` turns it off): the kernel carries the
+uplink of the sessions it can before the UPF sees it. A program
+([`bpf/upf.bpf.c`](bpf/upf.bpf.c), XDP) on the interface of the N3 address
+takes each G-PDU to the UPF whose TEID is a session's, checks that its
+inner source is the session's UE, polices the session AMBR uplink (the
+same GCRA as `qos.rs`), strips the outer IPv4, UDP and GTP-U headers and
+lets the UE's packet go on into the kernel's stack, which routes it out
+(NAT included). The UPF's socket, its userspace and the TUN device are
+skipped.
+
+Everything else reaches the UPF's socket untouched, as without the fast
+path (the fallback): echo, unknown TEIDs, a wrong source, other GTP-U
+layouts (the program takes no optional field, or a 4-byte PDU Session
+Container on the default flow), and sessions with PCC rules (extra QoS
+flows: `fast.rs` does not give them to the kernel). The downlink is the
+UPF's for now.
+
+- The UPF gives each session to the kernel's map at establishment (again
+  when its cell changes) and removes it with the session; every second it
+  adds the kernel's counts to its own (`uplink_packets`, `uplink_bytes`,
+  `rate_limited_packets`, the cells'), and `fast_path_packets` says how
+  many uplink packets the kernel carried.
+- It needs `CAP_BPF`, `CAP_PERFMON` and `CAP_NET_ADMIN`, and a loose
+  reverse path filter on the N3 interface (`rp_filter` 0 or 2: the UE's
+  packets come in there, while their addresses are routed to N6). Without
+  them, the UPF logs why, raises a MINOR alarm and runs without it. The
+  program is attached through a BPF link: it goes when the UPF's process
+  goes.
+- The program is C, built by [`bpf/build.sh`](bpf/build.sh) (clang, in
+  Docker if the host has none) into `bpf/upf.bpf.o`, which is checked in:
+  cargo needs no clang. `aya` loads it.
+
+Measured by `scripts/upf-fast.sh` (the `fast_path` example): the UPF in
+one container, a gNB's three senders in another, over veth (where XDP runs
+natively); the receive path of the N3 interface (veth's NAPI, in a thread)
+pinned to its own core, the UPF to another, the UEs' packets forwarded out
+of a dummy device standing for the data network. "Fallback": the same
+sessions with a PCC rule, so the program passes them to the UPF. AMD Ryzen
+9 5950X, Linux 7.0, 2026-10-20, 100 UEs (1000: the same), two runs within
+2 %:
+
+| uplink | packet | carried | UPF core | receive core |
+|---|---|---|---|---|
+| fast path | 84 B | 700 kpps, 0.47 Gbit/s | 1 % | 100 % |
+| fallback | 84 B | 361 kpps, 0.24 Gbit/s | 100 % | 100 % |
+| fast path | 1400 B | 637 kpps, 7.1 Gbit/s | 2 % | 100 % |
+| fallback | 1400 B | 357 kpps, 4.0 Gbit/s | 100 % | 100 % |
+
+- **One core instead of two, and 1.8 times the packets**: the fast path is
+  bound by the receive core alone (about 1.5 µs per packet: veth's receive,
+  the program, the kernel's forwarding); the UPF's core stays free.
+- veth copies each packet for XDP (its packets have no room in front for
+  it); a network card's driver runs XDP on the packet as received, so
+  these figures are a floor.
+
 ## Batches
 
 N3 moves datagrams in batches: up to 32 received with one `recvmmsg`, up

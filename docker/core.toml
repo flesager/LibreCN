@@ -43,6 +43,10 @@ ambr_mbps = { uplink = 10, downlink = 20 }   # user-plane.sh measures it with ip
 five_qi = 7
 filters = [{ direction = "downlink", remote = "10.45.0.1", protocol = 1 }]
 
+[[nf.params.policies.sessions]]
+dnn = "ims"                   # no extra flow: the UPF's fast path carries its uplink
+ambr_mbps = { uplink = 10, downlink = 20 }   # user-plane.sh measures the uplink, policed in the kernel
+
 [[nf]]
 kind = "smf"
 name = "smf"

@@ -112,6 +112,11 @@ impl Qos {
         Qos { ambr: limits(rule.ambr), flows }
     }
 
+    /// The session AMBR uplink, bit/s (0: none).
+    pub fn uplink_ambr(&self) -> u64 {
+        self.ambr[0].rate
+    }
+
     /// The session's PCC rules.
     pub fn rules(&self) -> &[PccRule] {
         self.flows.as_ref().map_or(&[], |f| f.rule.rules())

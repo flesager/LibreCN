@@ -59,8 +59,18 @@ It shares the host's network: the gNBs reach it on the host's address,
 and the UEs' traffic leaves through the host. While it runs, the host has
 a TUN device `upf0` (the UE pool's first address, 10.45.0.1) and, with
 `LIBRECN_NAT=yes`, NAT and forwarding rules for the UE pool; they are
-removed when it stops. It needs `NET_ADMIN` and `/dev/net/tun`, nothing
-more (not privileged).
+removed when it stops. It needs `NET_ADMIN` and `/dev/net/tun`, and
+`BPF` and `PERFMON` for the UPF's fast path, nothing more (not
+privileged).
+
+**The fast path**: the kernel carries the UEs' uplink (XDP, on the
+interface of `LIBRECN_ADDRESS`), about twice the packets of the UPF alone
+on half the cores. It needs a loose reverse path filter on that interface
+(`rp_filter` 0 or 2, the default on Ubuntu and Debian; 1 on Red Hat
+systems): `sudo sysctl -w net.ipv4.conf.all.rp_filter=2
+net.ipv4.conf.<interface>.rp_filter=2`. Without it, or without the
+capabilities, the core runs without the fast path, says why in its logs
+and raises a MINOR alarm (the GUI's System panel).
 
 The host must:
 - forward IP packets, for the NAT: `sudo sysctl -w net.ipv4.ip_forward=1`,

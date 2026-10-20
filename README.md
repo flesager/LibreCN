@@ -46,6 +46,7 @@ scripts/ueransim/demo.sh           # in Docker: gNBs and UEs kept busy, to watch
 scripts/free-ran-ue/check.sh       # in Docker: free-ran-ue (free5GC's codecs) pings through LibreCN, then 1000 UEs
 scripts/load.sh                    # capacity on 1 to 4 cores, control and user plane (BENCHMARKS.md)
 scripts/upf-modes.sh               # the UPF alone: modes, number of UEs, packet size (BENCHMARKS.md)
+scripts/upf-fast.sh                # the UPF's fast path (XDP) against its fallback, in Docker (BENCHMARKS.md)
 ```
 
 ## Capacity
@@ -81,12 +82,13 @@ What LibreCN carries for the number of cores given to it. Every network function
 **What the figures mean**:
 - **A registration** is a UE's whole Initial Registration with its PDU session: 5G AKA, NAS security (NIA2, NEA2), Initial Context Setup, PDU Session Establishment.
 - **The user plane** is 1400-byte packets, uplink and downlink at the same time.
-  - The UPF's limit is in packets: about 100 000 per second each way, whatever their size.
-  - With 84-byte packets, that is 70 Mbit/s each way.
+  - The UPF's limit is in packets: about 115 000 per second each way, whatever their size.
+  - With 84-byte packets, that is 80 Mbit/s each way.
+  - The UPF's fast path (XDP, on when the kernel allows it: Docker gives it the rights) carries the uplink in the kernel: 7 Gbit/s of 1400-byte packets on one core, the UPF's own core left free (BENCHMARKS.md §2). The table does not include it yet (the downlink is next).
 - **Latency**:
   - With no load, a registration with its PDU session takes 0.22 ms.
   - At full load, a registration takes about 28 ms: that is queueing, with 256 registrations in flight.
-  - A packet's round trip through the UPF, uplink then downlink, takes 28 µs, or 19 µs in polling mode.
+  - A packet's round trip through the UPF, uplink then downlink, takes 29 µs, or 20 µs in polling mode.
 - **Scale**: tested with 40 000 UEs and their sessions. The number of UEs does not change the user-plane throughput. With UERANSIM, 2000 UEs over 8 gNBs.
 
 Measured on an AMD Ryzen 9 5950X (2026-10-17), over loopback, with logs at `error`. A real network card and TUN device will give somewhat different figures.

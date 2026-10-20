@@ -10,6 +10,9 @@
 # (UERANSIM's gNB limits the downlink to the UE-AMBR only), the uplink both
 # do. (UDP: the rates are policed, and TCP over this sub-millisecond RTT
 # gets about half of them, see nf/README.md.) The gNB
+# The internet session has a PCC rule, so the UPF carries it (the fallback);
+# the ims session has none, so the kernel carries its uplink (the fast
+# path, XDP): its AMBR (10 Mbit/s up) is measured too. The gNB
 # then releases the UE (idle): the next ping brings it back with a Service
 # Request, its session reactivated (UERANSIM may drop the packet that woke
 # it: one answer at least is expected). Released again, the UE is then
@@ -40,6 +43,11 @@ mbps() {
 }
 uplink=$(mbps -b 15M)
 downlink=$(mbps -b 30M -R)
+# The ims session's uplink, in the fast path. Its UE address is the second
+# session's (10.46.0.x), read from uesimtun1.
+ims_ue=$(docker exec librecn-ran ip -4 -o addr show uesimtun1 | awk '{ split($4, a, "/"); print a[1] }')
+ims_uplink=$(docker exec librecn-ran iperf3 -c 10.46.0.1 -p 5202 -B "$ims_ue" -t 4 -f m -u -b 15M 2>&1 \
+  | awk '/receiver/ { for (i = 2; i <= NF; i++) if ($i == "Mbits/sec") print $(i - 1) }')
 release
 wait_for librecn-core "deactivated (the UE is idle)" || true
 idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
@@ -62,6 +70,7 @@ echo "--- ping on the second DNN"; echo "$ims_ping"
 echo "--- ping after idle"; echo "$idle_ping"
 echo "--- ping of the idle UE (paging)"; echo "$paged_ping"
 echo "--- iperf3, UDP at 15 up and 30 down (Mbit/s; session AMBR 10 up, 20 down)"; echo "uplink ${uplink:-none}, downlink ${downlink:-none}"
+echo "--- iperf3 on ims, in the fast path, UDP at 15 up (session AMBR 10 up)"; echo "uplink ${ims_uplink:-none}"
 echo "--- UPF counters"; echo "$metrics"
 # within RATE AMBR FLOOR: at most the AMBR, 5 % for the 100 ms bursts, at
 # least FLOOR of it. The uplink is policed by UERANSIM's gNB too, its own way.
@@ -81,5 +90,8 @@ echo "$ping" | grep -q " 0% packet loss" \
   && within "$uplink" 10 0.8 && within "$downlink" 20 0.95 \
   && echo "$metrics" | grep -Eq 'counter="rate_limited_packets"} [1-9]' \
   && echo "$core" | grep -q "1 extra flow(s)" \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s), before and after idle; pinged while idle: paged; periodic registration" \
+  && echo "$core" | grep -q "fast path on eth0" \
+  && echo "$metrics" | grep -Eq 'counter="fast_path_packets"} [1-9]' \
+  && within "$ims_uplink" 10 0.8 \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s; in the fast path: $ims_uplink Mbit/s up), before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

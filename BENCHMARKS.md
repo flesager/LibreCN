@@ -102,7 +102,22 @@ With 2, 10 and 100 UEs, the figures are the same within 5 %.
 - **Downlink is slower than uplink**: on loopback, the UPF's send to the gNB also runs the gNB's receiving side of the kernel, on the UPF's core.
 - **Both directions at once share the UPF's core**, hence the 115 kpps each way of part 1.
 - **N3 goes in batches** of up to 32 datagrams per system call (`recvmmsg`/`sendmmsg`): 23 % more packets than one system call each (303 to 374 kpps uplink, 187 to 228 kpps downlink; 97 to 116 kpps each way in part 1), for about 1 µs more per round trip. The TUN device (N6) still takes one system call per packet.
-- More would need the TUN device's offloads, several UPFs, or a kernel bypass (eBPF).
+- More needs fewer passes through the kernel per packet: the fast path below (eBPF/XDP).
+
+### The fast path (XDP), uplink (`scripts/upf-fast.sh`)
+
+The UPF and a gNB's senders in two containers over veth (XDP runs natively there): the receive path of the UPF's N3 interface (veth's NAPI, in a thread) on its own core, the UPF on another, the UEs' packets forwarded by the kernel out of a dummy device standing for the data network. "Fallback": sessions the program leaves to the UPF (they have a PCC rule). 100 UEs (1000: the same); two runs within 2 %. Details in [`nf/upf/README.md`](nf/upf/README.md#fast-path-xdp).
+
+| Uplink | Packet | Carried | UPF core | Receive core |
+|---|---|---|---|---|
+| fast path | 84 B | 700 kpps, 0.47 Gbit/s | 1 % | 100 % |
+| fallback | 84 B | 361 kpps, 0.24 Gbit/s | 100 % | 100 % |
+| fast path | 1400 B | 637 kpps, 7.1 Gbit/s | 2 % | 100 % |
+| fallback | 1400 B | 357 kpps, 4.0 Gbit/s | 100 % | 100 % |
+
+- **The fast path carries 1.8 times the packets on one core instead of two**: the kernel's receive core is its only limit (about 1.5 µs per packet), the UPF's core stays free.
+- veth copies each packet for XDP; a network card's driver does not, so these are a floor.
+- The whole core's figures (part 1) do not include it: there, N6 is a socket pair and the gNBs are on loopback.
 
 ## 3. Scale with UERANSIM (`scripts/ueransim/scale.sh`)
 

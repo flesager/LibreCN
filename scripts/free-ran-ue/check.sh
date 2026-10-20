@@ -9,7 +9,9 @@
 #    session within 60 s, and no error in the core's log.
 # free-ran-ue waits for a Configuration Update Command after registering and
 # reads GSM 7-bit network names only: the core sends its names. Its slice
-# has an SD (010203), which the core serves.
+# has an SD (010203), which the core serves. The core runs without the
+# rights for its fast path (BPF): the UPF says so and carries everything
+# itself (the fallback), with a MINOR alarm and no error.
 #
 # free-ran-ue is expected next to this repository, built (no Go needed):
 #   git clone https://github.com/free-ran-ue/free-ran-ue ../free-ran-ue
@@ -134,6 +136,7 @@ ue_yaml 0000000001 false > "$cfg/ue-one.yaml"
 ue_yaml 0000000002 true > "$cfg/ue-many.yaml"
 
 opts="-v $cfg:/frue:ro"
+fast_caps=""
 run librecn-core 10.210.0.10 /etc/librecn/core.sh /frue/core.toml
 opts="-v $frue:/usr/local/bin/free-ran-ue:ro -v $cfg:/frue:ro"
 run librecn-frue 10.210.0.20 sleep infinity
@@ -183,5 +186,6 @@ echo "$core" | grep -q "registered: imsi-999700000000001" \
   && echo "$core" | grep -q "imsi-999700000000001: PDU session 4 to internet" \
   && echo "$ping" | grep -q " 0% packet loss" \
   && [ "$held" -ge "$n" ] && [ "$errors" -eq 0 ] \
+  && echo "$core" | grep -q "fast path unavailable" \
   && echo "OK: free-ran-ue's UE registered, got its PDU session and pinged through LibreCN; $n UEs registered with their session in ${took} s" \
   || { echo "FAILED"; exit 1; }

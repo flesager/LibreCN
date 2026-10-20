@@ -29,6 +29,7 @@
 //!
 //! - [`sessions`], the session table;
 //! - [`batch`], N3's datagrams in batches (`recvmmsg`, `sendmmsg`);
+//! - [`fast`], the fast path: the kernel carries the uplink (XDP);
 //!
 //! Traffic is also counted per cell (`GET cells` on the web API: a gNB's
 //! is the sum of its cells), by the UE's cell the SMF gives with each
@@ -40,6 +41,7 @@
 //! - [`tun`], the N6 device.
 
 pub mod batch;
+pub mod fast;
 pub mod parked;
 pub mod qos;
 pub mod sessions;
@@ -48,6 +50,7 @@ pub mod tun;
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::time::Duration;
 
 use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
@@ -71,6 +74,10 @@ use sessions::{Refusal, Sessions};
 const PACKETS_PER_TURN: usize = 64;
 /// Alarm raised while the user plane cannot run.
 const ALARM_USER_PLANE: u32 = 0;
+/// Alarm raised while the fast path cannot run (the user plane is slower).
+const ALARM_FAST_PATH: u32 = 1;
+/// How often the fast path's counts are folded into the UPF's.
+const FOLD_PERIOD: Duration = Duration::from_secs(1);
 /// Cells whose traffic is counted apart; the others' only in the totals.
 pub const MAX_CELLS: usize = 1024;
 /// Hybrid mode: polls in a row without a packet before the UPF sleeps.
@@ -95,11 +102,13 @@ struct Params {
     n6: Option<String>,
     max_sessions: usize,
     mode: Mode,
+    /// The kernel carries what it can (see [`fast`]).
+    fast_path: bool,
 }
 
 impl Default for Params {
     fn default() -> Self {
-        Params { n3: Ipv4Addr::new(127, 0, 0, 2), n6: None, max_sessions: 1024, mode: Mode::Event }
+        Params { n3: Ipv4Addr::new(127, 0, 0, 2), n6: None, max_sessions: 1024, mode: Mode::Event, fast_path: true }
     }
 }
 
@@ -112,6 +121,7 @@ const COUNTERS: &[&str] = &[
     "dropped_packets",
     "extra_flow_packets",
     "rate_limited_packets",
+    "fast_path_packets",
 ];
 const UPLINK_PACKETS: usize = 0;
 const UPLINK_BYTES: usize = 1;
@@ -122,6 +132,8 @@ const DROPPED: usize = 4;
 const EXTRA_FLOW: usize = 5;
 /// Packets dropped beyond the session AMBR or their flow's MBR.
 const RATE_LIMITED: usize = 6;
+/// Uplink packets the kernel carried (the fast path), also in UPLINK_PACKETS.
+const FAST_PATH: usize = 7;
 
 /// The UPF EO.
 pub struct Upf {
@@ -135,6 +147,10 @@ pub struct Upf {
     /// GTP-U socket and N6 device, once open; their epoll tokens, unless polled.
     n3_socket: Option<(UdpSocket, Option<IoToken>)>,
     n6: Option<(File, Option<IoToken>)>,
+    /// Whether the fast path is wanted; the fast path, once running.
+    fast_path: bool,
+    fast: Option<fast::FastPath>,
+    max_sessions: usize,
     /// N3's datagrams in batches: received (uplink), to send (downlink).
     rx: Batch<()>,
     tx: Batch<Sent>,
@@ -150,8 +166,9 @@ pub struct Upf {
 
 impl Upf {
     /// From deployment `params`: `n3` (default 127.0.0.2), `n6` (a TUN
-    /// device name, default none), `max_sessions` (1024) and `mode`
-    /// (`event`, `poll` or `hybrid`; default `event`).
+    /// device name, default none), `max_sessions` (1024), `mode`
+    /// (`event`, `poll` or `hybrid`; default `event`) and `fast_path`
+    /// (default true).
     pub fn new(name: &str, params: &serde_json::Value) -> Result<Self, String> {
         let p: Params = if params.is_null() {
             Params::default()
@@ -163,7 +180,10 @@ impl Upf {
             n3: p.n3,
             n6_name: p.n6,
             sessions: Sessions::new(p.max_sessions),
+            max_sessions: p.max_sessions,
             mode: p.mode,
+            fast_path: p.fast_path,
+            fast: None,
             empty_polls: 0,
             n3_socket: None,
             n6: None,
@@ -183,17 +203,19 @@ impl Upf {
     }
 
     /// N4 messages are small, but N4Establish (the session's rule); web
-    /// API requests 8 KiB; N3 and N6 are two I/O registrations; the packet
-    /// counters.
+    /// API requests 8 KiB; N3 and N6 are two I/O registrations; one timer
+    /// folds the fast path's counts; the packet counters.
     pub fn eo_config(name: &str) -> EoConfig {
         let buffers = [(256, 1024), (512, 1024), (8 * 1024, 2)];
-        EoConfig::new(name).max_io(2).max_timers(0).buffers(&buffers).counters(COUNTERS)
+        EoConfig::new(name).max_io(2).max_timers(1).buffers(&buffers).counters(COUNTERS)
     }
 
     /// N6 on an already open, non-blocking packet device instead of the
-    /// `n6` TUN (tests: one end of a datagram socket pair).
+    /// `n6` TUN (tests: one end of a datagram socket pair), without the
+    /// fast path (it would hand the uplink to the kernel, not the device).
     pub fn with_n6(mut self, device: File) -> Self {
         self.n6 = Some((device, None));
+        self.fast_path = false;
         self
     }
 
@@ -218,6 +240,50 @@ impl Upf {
             *token = Some(ctx.register_io(&*device, Interest::READABLE).map_err(|e| format!("N6: {e}"))?);
         }
         Ok(())
+    }
+
+    /// The fast path, if wanted: on, or the reason it is not (an alarm:
+    /// the user plane runs, slower, in the UPF alone).
+    fn start_fast_path(&mut self, ctx: &mut Context<'_>) {
+        if !self.fast_path {
+            return;
+        }
+        match fast::FastPath::start(self.n3, self.max_sessions) {
+            Ok(f) => {
+                log!(self.log, ctx, Info, "fast path on {}: the kernel carries the uplink", f.interface());
+                self.fast = Some(f);
+                if let Err(e) = ctx.arm_timer(FOLD_PERIOD, 0) {
+                    log!(self.log, ctx, Error, "fast path counts not folded: {e}");
+                }
+            }
+            Err(e) => {
+                log!(self.log, ctx, Info, "fast path unavailable ({e}): the user plane runs in the UPF alone");
+                let text = format!("fast path unavailable: {e}");
+                self.alarms.raise(ctx, ALARM_FAST_PATH, Severity::Minor, &text);
+            }
+        }
+    }
+
+    /// Session `seid` given to the fast path, if it runs (again after a
+    /// change).
+    fn carry(&mut self, seid: u64) {
+        if let (Some(f), Some(s)) = (&mut self.fast, self.sessions.get(seid)) {
+            f.add(s);
+        }
+    }
+
+    /// The fast path's counts since the last fold, added to the UPF's.
+    fn fold(&mut self, ctx: &mut Context<'_>) {
+        let (Some(f), traffic) = (&mut self.fast, &mut self.traffic) else { return };
+        f.take(traffic.len(), |slot, c| {
+            ctx.count(UPLINK_PACKETS, c.packets);
+            ctx.count(FAST_PATH, c.packets);
+            ctx.count(UPLINK_BYTES, c.bytes);
+            ctx.count(RATE_LIMITED, c.rate_limited);
+            if let Some(t) = slot.and_then(|i| traffic.get_mut(i)) {
+                (t.1[0], t.1[1]) = (t.1[0] + c.bytes, t.1[1] + c.packets);
+            }
+        });
     }
 
     /// GTP-U datagrams from the gNBs, read in batches; how many were read.
@@ -350,6 +416,9 @@ impl Upf {
             }
             Err(e) => log!(self.log, ctx, Error, "session {:#x} refused: {e:?}", request.seid),
         }
+        if result.is_ok() {
+            self.carry(request.seid);
+        }
         let (n3, seid) = (self.n3, request.seid);
         let sent = ctx.alloc::<N4EstablishResult>(msg.from()).and_then(|r| {
             let mut r = r.with_corr_id(msg.corr_id()).with_flags(flags::RESPONSE);
@@ -375,6 +444,7 @@ impl Upf {
         }
         let outcome = if self.sessions.modify(request.seid, dl) {
             let (seid, teid) = (request.seid, request.dl_teid);
+            self.carry(seid);
             match dl {
                 Some(_) => {
                     log!(self.log, ctx, Info, "session {seid:#x}: downlink to {} TEID {teid:#x}", gnb.ip());
@@ -516,6 +586,7 @@ impl ExecutionObject for Upf {
                 let n6 = self.n6_name.as_deref().unwrap_or("given device");
                 let (name, n3, mode) = (&self.name, self.n3, self.mode);
                 log!(self.log, ctx, Vip, "UPF {name} ready, N3 {n3}:{}, N6 {n6}, {mode:?} mode", librecn_gtpu::PORT);
+                self.start_fast_path(ctx);
             }
             Ok(()) => log!(self.log, ctx, Vip, "UPF {} ready, N3 {}, no N6: sessions only", self.name, self.n3),
             Err(e) => {
@@ -526,7 +597,10 @@ impl ExecutionObject for Upf {
     }
 
     fn on_message(&mut self, msg: &Message<'_>, ctx: &mut Context<'_>) {
-        if let Some(ready) = msg.io() {
+        if msg.timer().is_some() {
+            self.fold(ctx);
+            let _ = ctx.arm_timer(FOLD_PERIOD, 0);
+        } else if let Some(ready) = msg.io() {
             if self.n3_socket.as_ref().is_some_and(|(_, t)| *t == Some(ready.token)) {
                 self.on_n3(ctx);
             } else {
@@ -553,14 +627,18 @@ impl ExecutionObject for Upf {
         } else if let Some(request) = msg.body::<Manage>() {
             self.on_manage(ctx, msg, request);
         } else if let Some(request) = msg.body::<N4Delete>()
-            && self.sessions.delete(request.seid).is_some()
+            && let Some(session) = self.sessions.delete(request.seid)
         {
+            if let Some(f) = &mut self.fast {
+                f.remove(session.ul_teid);
+            }
             self.parked.release(request.seid, |_| ctx.count(DROPPED, 1));
             log!(self.log, ctx, Info, "session {:#x} deleted, {} left", request.seid, self.sessions.len());
         }
     }
 
     fn on_stop(&mut self, ctx: &mut Context<'_>) {
+        self.fold(ctx);
         let counters = ctx.stats(ctx.self_id()).map(|s| s.counters).unwrap_or_default();
         let get = |i: usize| counters.get(i).map_or(0, |c| c.1);
         log!(

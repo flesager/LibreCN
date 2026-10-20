@@ -90,10 +90,11 @@ TOML
 fi
 
 # The NAT rules: the UEs' packets leave with the host's address; FORWARD
-# lets them through (Docker sets its policy to DROP). nat_rules -I adds
-# them (once), nat_rules -D removes them.
+# lets them through (Docker sets its policy to DROP), by their source: they
+# come in on upf0, or on the N3 interface with the fast path. nat_rules -I
+# adds them (once), nat_rules -D removes them.
 nat_rules() {
-  for rule in "-t nat POSTROUTING -s $pool ! -o upf0 -j MASQUERADE" "FORWARD -i upf0 -j ACCEPT" \
+  for rule in "-t nat POSTROUTING -s $pool ! -o upf0 -j MASQUERADE" "FORWARD -s $pool -j ACCEPT" \
               "FORWARD -o upf0 -j ACCEPT"; do
     table=filter
     case $rule in -t*) table=nat rule=${rule#-t nat } ;; esac
