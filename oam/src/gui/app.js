@@ -417,14 +417,7 @@ const refreshUe = () => selected && view("ue-sessions", async () => {
   $("ue-guti").disabled = $("ue-deregister").disabled = !ue;
 });
 
-/* ---- Provisioning: subscribers and policies. ---- */
-
-const refreshSubscribers = () => view("subscribers", async () => {
-  const body = await nfGet("udm", "subscribers");
-  table($("subscribers"), [["SUPI"], ["Authentication"], ["AMF field"], ["SQN"], [""]], body.subscribers.map((s) =>
-    `<tr><td>${esc(s.supi)}</td><td>${esc(s.auth)}</td><td>${esc(s.amf)}</td><td>${esc(s.sqn)}</td>` +
-    `<td><button data-remove="${esc(s.supi)}">Remove</button></td></tr>`).concat(more(body.count, body.subscribers.length, 5)));
-});
+/* ---- Provisioning: UEs, their keys at the UDM, their policies at the PCF. ---- */
 
 // A policy's sessions in one line: "internet: 50 / 200, 5QI 9, 1 flow".
 function sessionPolicies(p) {
@@ -435,18 +428,120 @@ function sessionPolicies(p) {
 }
 
 let policies = {};
-const refreshPolicies = () => view("policies", async () => {
-  const body = await nfGet("pcf", "policies");
-  policies = Object.fromEntries(body.policies.map((p) => [p.supi, p]));
-  const row = (p, supi, source, remove) =>
-    `<tr><td>${supi}</td><td class="muted">${source}</td>` +
-    `<td class="num">${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}</td><td>${sessionPolicies(p)}</td>` +
-    `<td>${remove ? `<button data-edit="${esc(p.supi)}">Edit</button> <button data-remove="${esc(p.supi)}">Remove</button>` : ""}</td></tr>`;
-  table($("policies"), [["SUPI"], ["From"], ["UE-AMBR", "num"], ["Sessions"], [""]],
-    [row(body.default, "<i>default</i>", "configuration", false)]
-      .concat(body.policies.map((p) => row(p, esc(p.supi), p.provisioned ? "web API" : "configuration", true)),
-        more(body.count, body.policies.length, 5)));
+let defaultPolicy = null;
+const refreshProvisioning = () => view("ue-table", async () => {
+  const [subs, pols] = await Promise.all([nfGet("udm", "subscribers"), nfGet("pcf", "policies")]);
+  defaultPolicy = pols.default;
+  policies = Object.fromEntries(pols.policies.map((p) => [p.supi, p]));
+  const keys = Object.fromEntries(subs.subscribers.map((s) => [s.supi, s]));
+  const policy = (p) => `${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}; ${sessionPolicies(p)}`;
+  const rows = [...new Set([...Object.keys(keys), ...Object.keys(policies)])].sort().map((supi) => {
+    const k = keys[supi], p = policies[supi];
+    return `<tr><td>${esc(supi)}</td><td>${k ? esc(k.auth) : `<span class="bad">no keys</span>`}</td>` +
+      `<td>${k ? esc(k.sqn) : ""}</td><td>${p ? policy(p) : `<span class="muted">default</span>`}</td>` +
+      `<td><button data-policy="${esc(supi)}">Policy</button> <button data-remove="${esc(supi)}">Remove</button></td></tr>`;
+  });
+  table($("ue-table"), [["SUPI"], ["Authentication"], ["SQN"], ["Policy: UE-AMBR; sessions"], [""]],
+    [`<tr><td><i>default</i></td><td></td><td></td><td>${policy(pols.default)}</td><td class="muted">configuration</td></tr>`]
+      .concat(rows, more(subs.count, subs.subscribers.length, 5)));
 });
+
+// A request to the NF of `kind`: whether it succeeded, and its answer.
+async function call(kind, method, path, body) {
+  const r = await fetch(nfPath(kind, path), { method, body });
+  let answer = {};
+  try { answer = await r.json(); } catch { /* no body */ }
+  return { ok: r.ok, status: r.status, body: answer };
+}
+
+// Bit rates from `up` and `down` (text), the missing one from `base`.
+function bitRates(up, down, base) {
+  if (up === "" && down === "") return undefined;
+  return { uplink: Number(up || base.uplink), downlink: Number(down || base.downlink) };
+}
+
+// The default policy's session for `dnn` (else its first), for missing bit rates.
+const baseSession = (dnn) => (defaultPolicy.sessions.find((s) => s.dnn === dnn) || defaultPolicy.sessions[0]);
+
+// A session policy row of the form.
+function addSessionRow() {
+  const row = document.createElement("div");
+  row.className = "row session";
+  row.innerHTML = `<input data-f="dnn" placeholder="DNN: internet" required aria-label="DNN">` +
+    `<input data-f="up" type="number" min="1" placeholder="AMBR up: default" aria-label="Session AMBR uplink">` +
+    `<input data-f="down" type="number" min="1" placeholder="AMBR down: default" aria-label="Session AMBR downlink">` +
+    `<input data-f="flows" placeholder='flows (JSON): [{"five_qi": 1, "filters": [...]}]' aria-label="Flows (JSON)">` +
+    `<button type="button" data-drop>Remove</button>`;
+  $("ue-form-sessions").append(row);
+}
+
+// The UE of the form: what is filled in, its policy if any of it is.
+function formUe(form) {
+  const f = Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v !== ""));
+  const ue = { supi: f.supi, k: f.k, opc: f.opc };
+  for (const key of ["auth", "amf", "sqn"]) if (f[key]) ue[key] = f[key];
+  if (f.count) ue.count = Number(f.count);
+  const policy = {};
+  const ambr = bitRates(f.ambr_up || "", f.ambr_down || "", defaultPolicy.ue_ambr_mbps);
+  if (ambr) policy.ue_ambr_mbps = ambr;
+  const sessions = [...$("ue-form-sessions").querySelectorAll(".session")].map((row) => {
+    const v = (name) => row.querySelector(`[data-f="${name}"]`).value.trim();
+    const s = { dnn: v("dnn") };
+    const ambr = bitRates(v("up"), v("down"), baseSession(s.dnn).ambr_mbps);
+    if (ambr) s.ambr_mbps = ambr;
+    if (v("flows")) s.flows = JSON.parse(v("flows"));
+    return s;
+  });
+  if (sessions.length) policy.sessions = sessions;
+  if (Object.keys(policy).length) ue.policy = policy;
+  return ue;
+}
+
+// What is wrong with a UE to add, if anything (the UDM and PCF check the rest).
+function problem(ue) {
+  if (typeof ue !== "object" || ue === null || Array.isArray(ue)) return "not an object";
+  if (!/^imsi-[0-9]{5,15}$/.test(ue.supi || "")) return "supi: imsi- and 5 to 15 digits";
+  for (const key of ["k", "opc"]) if (!/^[0-9A-Fa-f]{32}$/.test(ue[key] || "")) return `${key}: 32 hex digits`;
+  if (ue.policy !== undefined && (typeof ue.policy !== "object" || ue.policy === null)) return "policy: an object";
+  return "";
+}
+
+// Adds or replaces `ues`: their keys at the UDM, then their policies at the
+// PCF (none given: back to the default). If the PCF refuses, the UEs added
+// now are removed again; those replaced keep their new keys.
+async function addUes(ues) {
+  const keys = ues.map(({ policy, ...k }) => k);
+  const udm = await call("udm", "POST", "subscribers?replace=yes", JSON.stringify(keys));
+  if (!udm.ok) return showResult(udm.body), false;
+  const set = ues.filter((u) => u.policy).map((u) => ({ supi: u.supi, count: u.count || 1, ...u.policy }));
+  const pcf = set.length ? await call("pcf", "POST", "policies", JSON.stringify(set)) : { ok: true, body: {} };
+  if (!pcf.ok) {
+    for (const supi of udm.body.added) await call("udm", "DELETE", `subscribers/${encodeURIComponent(supi)}`);
+    showResult({ error: `policies refused: ${pcf.body.error || pcf.status}`, removed_again: udm.body.added,
+      replaced_with_their_new_keys: udm.body.replaced });
+    return false;
+  }
+  for (const u of ues.filter((u) => !u.policy)) {
+    await call("pcf", "DELETE", `policies/${encodeURIComponent(u.supi)}?count=${u.count || 1}`);
+  }
+  showResult({ added: udm.body.added, replaced: udm.body.replaced, own_policies: pcf.body.set || [] });
+  return true;
+}
+
+// The UEs of an imported file, shown before they are added.
+let imported = [];
+function preview(ues) {
+  imported = ues;
+  const bad = ues.map(problem);
+  const policy = (p) => !p ? `<span class="muted">default</span>` : [p.ue_ambr_mbps ? `UE-AMBR ${p.ue_ambr_mbps.uplink} / ${p.ue_ambr_mbps.downlink}` : "",
+    p.sessions ? `${p.sessions.length} session polic${p.sessions.length > 1 ? "ies" : "y"}` : ""].filter(Boolean).join("; ");
+  table($("ue-preview"), [["SUPI"], ["Count", "num"], ["Authentication"], ["Policy"], ["Problem"]], ues.map((u, i) =>
+    `<tr><td>${esc(u?.supi ?? "")}</td><td class="num">${esc(u?.count ?? 1)}</td><td>${esc(u?.auth || "5g-aka")}</td>` +
+    `<td>${bad[i] ? "" : policy(u.policy)}</td><td class="bad">${esc(bad[i])}</td></tr>`));
+  $("ue-preview").hidden = false;
+  $("ue-import-actions").hidden = false;
+  $("ue-import").disabled = !ues.length || bad.some(Boolean);
+}
 
 /* ---- System: alarms, EOs, workers. ---- */
 
@@ -514,7 +609,7 @@ async function refresh() {
     switch (panel()) {
       case "overview": refreshOverview(); break;
       case "ues": refreshRan(); refreshSessions(); refreshUe(); break;
-      case "provisioning": refreshSubscribers(); refreshPolicies(); break;
+      case "provisioning": refreshProvisioning(); break;
       default: renderEos(eos); renderWorkers(workers, loads);
     }
     $("status").textContent = "updated " + new Date().toLocaleTimeString();
@@ -548,33 +643,57 @@ $("ue-deregister").addEventListener("click", async () => {
   refreshUe();
 });
 
-$("subscribers").addEventListener("click", async (ev) => {
-  const supi = ev.target.dataset.remove;
-  if (!supi || !confirm(`Remove ${supi}?`)) return;
-  await act("udm", "DELETE", `subscribers/${encodeURIComponent(supi)}`);
-  refreshSubscribers();
-});
-$("add-subscriber").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const fields = Object.fromEntries([...new FormData(ev.target)].filter(([, v]) => v.trim() !== ""));
-  if (await act("udm", "POST", "subscribers", JSON.stringify(fields))) ev.target.reset();
-  refreshSubscribers();
-});
-
-$("policies").addEventListener("click", async (ev) => {
-  const { edit, remove } = ev.target.dataset;
-  if (edit && policies[edit]) {
-    const { provisioned, ...policy } = policies[edit];
-    $("policy").value = JSON.stringify(policy, null, 2);
+$("ue-table").addEventListener("click", async (ev) => {
+  const { policy, remove } = ev.target.dataset;
+  if (policy) {
+    const { own, ...shown } = await nfGet("pcf", `policies/${encodeURIComponent(policy)}`);
+    $("policy").value = JSON.stringify(shown, null, 2);
+    $("policy").scrollIntoView({ block: "center" });
     return;
   }
-  if (!remove || !confirm(`Remove the policy of ${remove}? The default applies.`)) return;
-  await act("pcf", "DELETE", `policies/${encodeURIComponent(remove)}`);
-  refreshPolicies();
+  if (!remove || !confirm(`Remove ${remove}: its keys and its policy?`)) return;
+  const keys = await call("udm", "DELETE", `subscribers/${encodeURIComponent(remove)}`);
+  const own = await call("pcf", "DELETE", `policies/${encodeURIComponent(remove)}`);
+  showResult({ keys: keys.body, policy: own.status === 404 ? "the default" : own.body });
+  refreshProvisioning();
 });
+$("ue-add-session").addEventListener("click", addSessionRow);
+$("ue-form-sessions").addEventListener("click", (ev) => {
+  if (ev.target.dataset.drop !== undefined) ev.target.closest(".session").remove();
+});
+$("ue-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  let ue;
+  try { ue = formUe(ev.target); } catch (e) { return showResult({ error: `flows: ${e.message}` }); }
+  if (await addUes([ue])) {
+    ev.target.reset();
+    $("ue-form-sessions").replaceChildren();
+  }
+  refreshProvisioning();
+});
+$("ue-file").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  try {
+    const v = JSON.parse(await file.text());
+    preview(Array.isArray(v) ? v : [v]);
+  } catch (e) {
+    showResult({ error: `${file.name}: ${e.message}` });
+  }
+});
+const endImport = () => {
+  imported = [];
+  $("ue-file").value = "";
+  $("ue-preview").hidden = $("ue-import-actions").hidden = true;
+};
+$("ue-import").addEventListener("click", async () => {
+  if (await addUes(imported)) endImport();
+  refreshProvisioning();
+});
+$("ue-import-cancel").addEventListener("click", endImport);
 $("set-policy").addEventListener("click", async () => {
   await act("pcf", "POST", "policies", $("policy").value);
-  refreshPolicies();
+  refreshProvisioning();
 });
 
 $("eos").addEventListener("click", async (ev) => {

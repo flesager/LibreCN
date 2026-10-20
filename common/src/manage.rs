@@ -65,6 +65,11 @@ impl Manage {
         [Method::Get, Method::Post, Method::Delete].into_iter().find(|m| *m as u8 == self.method)
     }
 
+    /// The path with its query, as sent.
+    pub fn target(&self) -> &str {
+        self.str(0, usize::from(self.path_len))
+    }
+
     /// The path without its query, e.g. `subscribers/imsi-001010000000001`.
     pub fn path(&self) -> &str {
         let full = self.str(0, usize::from(self.path_len));

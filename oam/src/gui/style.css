@@ -29,6 +29,12 @@ input { font: 13px ui-monospace, monospace; padding: 3px 6px; border: 1px solid 
 input:invalid:not(:placeholder-shown) { border-color: var(--bad); }
 .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .row input { flex: 1 1 150px; }
+select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
+         background: var(--bg); color: var(--ink); }
+.session input[data-f="flows"] { flex: 3 1 300px; }
+details { margin-top: 8px; }
+summary { cursor: pointer; }
+code { font: 13px ui-monospace, monospace; }
 textarea.tall { min-height: 260px; }
 [hidden] { display: none !important; }
 

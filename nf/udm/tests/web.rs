@@ -66,7 +66,7 @@ fn subscribers_are_provisioned_listed_and_removed_on_the_web_api() {
     let subscriber = r#"{"supi": "imsi-999700000000001", "k": "465B5CE8B199B49FAA5F0A2EE238A6BC",
                          "opc": "E8ED289DEBA952E4283B54E88E6183CA"}"#;
     let (status, body) = http(&mut tb, addr, "POST", "/api/nfs/udm/subscribers", subscriber);
-    assert_eq!((status, body.as_str()), (201, r#"{"added":["imsi-999700000000001"]}"#));
+    assert_eq!((status, body.as_str()), (201, r#"{"added":["imsi-999700000000001"],"replaced":[]}"#));
     assert!(authenticates(&mut tb, udm, suci), "usable at once");
     assert!(log.lines().iter().any(|l| l.msg == "subscriber(s) added: imsi-999700000000001, 1 subscriber(s)"));
 

@@ -6,6 +6,7 @@
 //! | `GET policies/{supi}` | that subscriber's policy (its own, else the default) |
 //! | `POST policies` | sets one or an array (fields of `[[nf.params.policies]]`), replacing any: 200 |
 //! | `DELETE policies/{supi}` | the subscriber falls back to the default: 200, or 404 |
+//! | `DELETE policies/{supi}?count=N` | the same for the `N` subscribers from `supi` on: 200 (those that had one), or 404 |
 //!
 //! A subscriber's new UE-AMBR reaches its AMF, which modifies the UE's
 //! context; session policies apply to the sessions set up after.
@@ -74,13 +75,25 @@ pub fn view(p: &Policy) -> Value {
 }
 
 /// `removed`: the configuration's policies removed here (kept in the state file).
+/// The `count` SUPIs from `supi` on, its digits kept (`imsi-001` to `imsi-003`).
+fn range(supi: &str, count: u64) -> Option<Vec<String>> {
+    let digits = supi.strip_prefix("imsi-").filter(|d| !d.is_empty() && d.len() <= 19)?;
+    let first: u64 = digits.parse().ok()?;
+    let last = first.checked_add(count.checked_sub(1)?)?;
+    (last.to_string().len() <= digits.len())
+        .then(|| (first..=last).map(|n| format!("imsi-{n:0width$}", width = digits.len())).collect())
+}
+
+/// `target`: the path, with its query.
 pub fn handle(
     policies: &mut Policies,
     removed: &mut BTreeSet<String>,
     method: Method,
-    path: &str,
+    target: &str,
     body: &str,
 ) -> Answer {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let count = query.split('&').find_map(|pair| pair.strip_prefix("count=")).map_or(Some(1), |n| n.parse().ok());
     match (method, path.split_once('/').unwrap_or((path, ""))) {
         (Method::Get, ("policies", "")) => {
             let mut supis: Vec<_> = policies.by_supi.keys().collect();
@@ -119,20 +132,30 @@ pub fn handle(
             let change = Some(format!("policy(ies) set: {}", supis.join(", ")));
             Answer { status: 200, json: json!({ "set": supis }).to_string(), change, changed: supis }
         }
-        (Method::Delete, ("policies", supi)) if !supi.is_empty() => match policies.by_supi.remove(supi) {
-            Some(gone) => {
-                if !gone.provisioned {
-                    removed.insert(supi.to_string());
-                }
-                Answer {
-                    status: 200,
-                    json: json!({ "removed": supi }).to_string(),
-                    change: Some(format!("policy removed: {supi}, the default applies")),
-                    changed: vec![supi.to_string()],
-                }
+        (Method::Delete, ("policies", supi)) if !supi.is_empty() => {
+            let Some(supis) = count.and_then(|n| range(supi, n)) else {
+                return answer(400, json!({ "error": "count: 1 or more, within the SUPI's digits" }));
+            };
+            let gone: Vec<String> = supis
+                .into_iter()
+                .filter(|s| {
+                    let Some(entry) = policies.by_supi.remove(s) else { return false };
+                    if !entry.provisioned {
+                        removed.insert(s.clone());
+                    }
+                    true
+                })
+                .collect();
+            if gone.is_empty() {
+                return answer(404, json!({ "error": format!("no policy of {supi}") }));
             }
-            None => answer(404, json!({ "error": format!("no policy of {supi}") })),
-        },
+            Answer {
+                status: 200,
+                json: json!({ "removed": gone }).to_string(),
+                change: Some(format!("policy(ies) removed: {}, the default applies", gone.join(", "))),
+                changed: gone,
+            }
+        }
         _ => answer(404, json!({ "error": format!("no resource {path:?}") })),
     }
 }
@@ -160,5 +183,22 @@ mod tests {
         assert_eq!(posted.status, 200, "{}", posted.json);
         assert_eq!(policies.of("imsi-1"), &before);
         assert!(policies.by_supi["imsi-1"].provisioned);
+    }
+
+    #[test]
+    fn a_range_of_policies_is_removed() {
+        let mut policies = Policies::from_params(&json!({ "policies": [] })).unwrap();
+        let mut removed = BTreeSet::new();
+        let three = json!({ "supi": "imsi-0098", "count": 3, "ue_ambr_mbps": { "uplink": 5, "downlink": 10 } });
+        assert_eq!(handle(&mut policies, &mut removed, Method::Post, "policies", &three.to_string()).status, 200);
+        let gone = handle(&mut policies, &mut removed, Method::Delete, "policies/imsi-0099?count=5", "");
+        assert_eq!((gone.status, gone.json.as_str()), (200, r#"{"removed":["imsi-0099","imsi-0100"]}"#));
+        assert_eq!(policies.by_supi.keys().collect::<Vec<_>>(), ["imsi-0098"]);
+        let none = handle(&mut policies, &mut removed, Method::Delete, "policies/imsi-0099?count=5", "");
+        assert_eq!(none.status, 404);
+        let wide = handle(&mut policies, &mut removed, Method::Delete, "policies/imsi-9999?count=2", "");
+        assert_eq!(wide.status, 400, "beyond the SUPI's digits");
+        assert_eq!(range("imsi-1", 1).unwrap(), ["imsi-1"]);
+        assert!(range("imsi-1", 0).is_none() && range("x-1", 1).is_none());
     }
 }

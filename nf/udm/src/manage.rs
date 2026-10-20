@@ -5,6 +5,7 @@
 //! |---|---|
 //! | `GET subscribers` | `{"count", "subscribers": [{"supi", "amf", "sqn", "auth"}]}`, the first [`LISTED`] by SUPI |
 //! | `POST subscribers` | adds one subscriber or an array (fields of `[[nf.params.subscribers]]`): 201, or 409 if one exists |
+//! | `POST subscribers?replace=yes` | the same, those that exist replaced whole (their SQN the larger of theirs and the given one: the SIM's is not behind): 201, `{"added", "replaced"}` |
 //! | `DELETE subscribers/{supi}` | removes it: 200, or 404 |
 
 use std::collections::{BTreeSet, HashMap};
@@ -28,14 +29,17 @@ fn answer(status: u16, json: serde_json::Value) -> Answer {
     Answer { status, json: json.to_string(), change: None }
 }
 
-/// `removed`: the configuration's subscribers removed here (kept in the state file).
+/// `removed`: the configuration's subscribers removed here (kept in the
+/// state file). `target`: the path, with its query.
 pub fn handle(
     subscribers: &mut HashMap<String, Subscriber>,
     removed: &mut BTreeSet<String>,
     method: Method,
-    path: &str,
+    target: &str,
     body: &str,
 ) -> Answer {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let replace = query.split('&').any(|pair| pair == "replace=yes");
     match (method, path.split_once('/').unwrap_or((path, ""))) {
         (Method::Get, ("subscribers", "")) => {
             let mut list: Vec<_> = subscribers.iter().collect();
@@ -60,14 +64,21 @@ pub fn handle(
             if let Some(twice) = supis.windows(2).find(|w| w[0] == w[1]) {
                 return answer(400, json!({ "error": format!("subscriber {}: listed twice", twice[0]) }));
             }
-            let existing: Vec<_> = supis.iter().filter(|s| subscribers.contains_key(**s)).collect();
-            if !existing.is_empty() {
+            let existing: Vec<&str> = supis.iter().copied().filter(|s| subscribers.contains_key(*s)).collect();
+            if !existing.is_empty() && !replace {
                 return answer(409, json!({ "error": "subscribers exist already", "supis": existing }));
             }
-            let added = supis.join(", ");
-            let reply = json!({ "added": supis });
-            subscribers.extend(new.into_iter().map(|(supi, s)| (supi, Subscriber { provisioned: true, ..s })));
-            Answer { status: 201, json: reply.to_string(), change: Some(format!("subscriber(s) added: {added}")) }
+            let added: Vec<&str> = supis.iter().copied().filter(|s| !existing.contains(s)).collect();
+            let reply = json!({ "added": added, "replaced": existing });
+            let mut change = format!("subscriber(s) added: {}", added.join(", "));
+            if !existing.is_empty() {
+                change = format!("{change}; replaced: {}", existing.join(", "));
+            }
+            for (supi, s) in new {
+                let sqn = subscribers.get(&supi).map_or(s.sqn, |old| old.sqn.max(s.sqn));
+                subscribers.insert(supi, Subscriber { provisioned: true, sqn, ..s });
+            }
+            Answer { status: 201, json: reply.to_string(), change: Some(change) }
         }
         (Method::Delete, ("subscribers", supi)) if !supi.is_empty() => match subscribers.remove(supi) {
             Some(gone) => {
@@ -125,6 +136,15 @@ mod tests {
         assert_eq!(handle(&mut subs, &mut removed, Method::Post, "subscribers", &twice).status, 400);
         assert_eq!(handle(&mut subs, &mut removed, Method::Post, "subscribers", r#"{"supi": "imsi-4"}"#).status, 400);
         assert_eq!(subs.len(), 3, "a refused request adds nothing");
+
+        // Replaced whole, but for an SQN behind the stored one.
+        let keys = r#""k": "000102030405060708090A0B0C0D0E0F", "opc": "E8ED289DEBA952E4283B54E88E6183CA""#;
+        let both = format!(r#"[{{"supi": "imsi-2", {keys}, "auth": "eap-aka-prime"}}, {{"supi": "imsi-5", {K}}}]"#);
+        let replaced = handle(&mut subs, &mut removed, Method::Post, "subscribers?replace=yes", &both);
+        assert_eq!((replaced.status, replaced.json.as_str()), (201, r#"{"added":["imsi-5"],"replaced":["imsi-2"]}"#));
+        let two = &subs["imsi-2"];
+        assert_eq!((two.k[1], two.eap_aka_prime, two.sqn), (1, true, 0x20), "new keys, the SQN kept");
+        assert!(subs.remove("imsi-5").is_some());
 
         assert_eq!(handle(&mut subs, &mut removed, Method::Delete, "subscribers/imsi-2", "").status, 200);
         assert_eq!(handle(&mut subs, &mut removed, Method::Delete, "subscribers/imsi-2", "").status, 404);

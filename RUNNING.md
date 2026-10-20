@@ -147,9 +147,9 @@ The project's own checks only ping 10.45.0.1, the UPF's side of N6 (`scripts/uer
 | SUCI concealment | UDM: `[[nf.params.home_network_keys]]` with `id` and `private_key` (Profile A); its public key is logged at start | UE: `protectionScheme: 1`, `homeNetworkPublicKeyId`, `homeNetworkPublicKey`. With `protectionScheme: 0` (null scheme) no key is needed |
 | Data networks | SMF: `dnns = [{ dnn = "internet", pool = "10.45.0.0/16" }]`, several allowed, the first by default | UE: `sessions[].apn` |
 
-**QoS and bit rates** come from the PCF, per subscriber, with a `default` entry for the others (see `app/librecn.example.toml`): the UE-AMBR, and for each DNN the session AMBR, the default flow's 5QI and ARP, and extra QoS flows with their packet filters. What an entry leaves out comes from `default`, then from the built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way. The GUI's Policies view, or `POST /api/nfs/pcf/policies`, changes them while LibreCN runs. The UPF enforces the session AMBR and the flows' MBRs.
+**QoS and bit rates** come from the PCF, per subscriber, with a `default` entry for the others (see `app/librecn.example.toml`): the UE-AMBR, and for each DNN the session AMBR, the default flow's 5QI and ARP, and extra QoS flows with their packet filters. What an entry leaves out comes from `default`, then from the built-in values: 5QI 9, ARP 8, 1000 Mbit/s each way. The GUI's Provisioning panel, or `POST /api/nfs/pcf/policies`, changes them while LibreCN runs. The UPF enforces the session AMBR and the flows' MBRs.
 
-Subscribers can also be added while LibreCN runs: the GUI's Subscribers view, or `POST /api/nfs/udm/subscribers`. With `[oam] state_dir` set (for example `/var/lib/librecn`), they survive restarts:
+Subscribers can also be added while LibreCN runs: the GUI's Provisioning panel (one UE with its policy, or many from a JSON file), or `POST /api/nfs/udm/subscribers`. With `[oam] state_dir` set (for example `/var/lib/librecn`), they survive restarts:
 - the UDM keeps what the web API changed (subscribers added and removed) and every subscriber's SQN in `<state_dir>/udm.json`, readable by its owner only (it holds keys);
 - it is written at most every 5 s when something changed, and at stop;
 - at start, the configuration is read first, then the state file on top of it; each SQN moves 1024 steps ahead, so none is used twice;

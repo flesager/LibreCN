@@ -155,7 +155,7 @@ impl Pcf {
 
     fn on_manage(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &Manage) {
         let Some(method) = request.method() else { return };
-        let answer = manage::handle(&mut self.policies, &mut self.removed, method, request.path(), request.body());
+        let answer = manage::handle(&mut self.policies, &mut self.removed, method, request.target(), request.body());
         if let Some(change) = &answer.change {
             self.dirty = true;
             log!(self.log, ctx, Info, "{change}");

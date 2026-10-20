@@ -18,7 +18,8 @@ Then:
 
 1. Open the GUI on the host: http://127.0.0.1:8080 (or through an SSH
    tunnel: `ssh -L 8080:127.0.0.1:8080 host`).
-2. Add your SIMs under **Provisioning** → Subscribers: IMSI, K and OPc.
+2. Add your SIMs under **Provisioning**: IMSI, K and OPc, and their policy if
+   not the default; or many at once from a JSON file (the page shows its format).
    They are kept across restarts and upgrades.
 3. Point the gNB's N2 at the host's address, port 38412 (SCTP). The core
    tells the gNB its N3 address (GTP-U 2152) itself.

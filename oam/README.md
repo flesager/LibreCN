@@ -82,12 +82,14 @@ server answers 503 at once. Today:
 | NF | Request | Answer |
 |---|---|---|
 | UDM | `GET subscribers` | `{"count", "subscribers": [{"supi", "amf", "sqn", "auth"}]}`, the first 64 by SUPI: keys never leave the UDM |
-| UDM | `POST subscribers` | adds one subscriber or an array, fields of the configuration (`supi`, `k`, `opc`, optional `amf`, `sqn`): 201, 409 if one exists |
+| UDM | `POST subscribers` | adds one subscriber or an array, fields of the configuration (`supi`, `k`, `opc`, optional `amf`, `sqn`, `auth`, `count`): 201 `{"added", "replaced"}`, 409 if one exists |
+| UDM | `POST subscribers?replace=yes` | the same, those that exist replaced whole, their SQN the larger of theirs and the given one (the SIM's is not behind) |
 | UDM | `DELETE subscribers/{supi}` | 200, or 404 |
 | PCF | `GET policies` | `{"default", "count", "policies": [...]}`: the default policy, the first 64 subscribers' |
 | PCF | `GET policies/{supi}` | that subscriber's policy (its own, else the default) |
 | PCF | `POST policies` | sets one or an array, fields of the configuration (`supi`, `count`, `ue_ambr_mbps`, `sessions`), replacing any: 200, 400; a new UE-AMBR reaches the UE's AMF (UE Context Modification), session policies apply to new sessions |
 | PCF | `DELETE policies/{supi}` | the subscriber falls back to the default: 200, or 404 |
+| PCF | `DELETE policies/{supi}?count=N` | the same for the `N` subscribers from `supi` on: 200 (those that had one), or 404 |
 | SMF | `GET dnns` | `[{"dnn", "pool", "sessions"}]` |
 | SMF | `GET sessions` | `{"count", "sessions": [...]}`, the first 64 by id (`id`, `supi`, `pdu_session_id`, `ue_ip`, `dnn`, `state`), `state` one of `setting up` (before the UPF answered), `active`, `idle` (no downlink tunnel: the UE idle, or the gNB yet to answer), `releasing`, and the session's `five_qi`, `ambr_mbps`, `flows` (extra QoS flows); `sessions?supi=...` only that subscriber's |
 | SMF | `DELETE sessions/{id}` | releases the session (the UE told through its AMF): 200, or 404 |
@@ -119,8 +121,16 @@ by kind (`GET /api/nfs`), not by name:
 - **UEs** (`#ues`, one UE at `#ues/{supi}`): gNBs, UEs, a UE's details (its
   gNB, state, UE-AMBR from its policy, sessions with their QoS; a new
   5G-GUTI, deregistration), PDU sessions with the UPF's throughput.
-- **Provisioning**: subscribers (UDM) and policies (PCF, edited as JSON, as
-  `GET policies` shows it).
+- **Provisioning**: the UEs, their keys at the UDM and their policies at the
+  PCF in one table. A UE is added or replaced in one form (keys, UE-AMBR,
+  session policies by DNN, flows as JSON) or many from a JSON file (a list
+  of the same fields, `policy` holding the PCF's; previewed first); empty
+  or missing fields take the defaults (AMF field 8000, SQN 0, 5G AKA, the
+  default policy's). A UE that exists is replaced whole: its keys
+  (`subscribers?replace=yes`) and its policy (none given: back to the
+  default). The keys go first; if the PCF refuses the policies, the UEs
+  just added are removed again. A UE's policy can be edited alone (as
+  `GET policies/{supi}` shows it).
 - **System**: alarms (also a badge on every panel), EOs, workers, the AMF's
   relative capacity, starting NFs.
 

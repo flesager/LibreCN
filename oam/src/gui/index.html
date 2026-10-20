@@ -74,34 +74,59 @@
 
 <div class="panel" id="provisioning" hidden>
   <section>
-    <h2>Subscribers</h2>
-    <p class="muted">Held by the UDM. Keys are write-only: they never leave the UDM.</p>
-    <div class="scroll"><table id="subscribers"></table></div>
-    <form id="add-subscriber" class="row">
-      <input name="supi" placeholder="imsi-999700000000001" required pattern="imsi-[0-9]{5,15}" aria-label="SUPI">
-      <input name="k" placeholder="K: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="K">
-      <input name="opc" placeholder="OPc: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="OPc">
-      <input name="amf" placeholder="AMF field: 8000" pattern="[0-9A-Fa-f]{4}" aria-label="AMF field">
-      <input name="sqn" placeholder="SQN: 000000000000" pattern="[0-9A-Fa-f]{12}" aria-label="SQN">
-      <button>Add</button>
+    <h2>UEs</h2>
+    <p class="muted">Each UE's keys are held by the UDM (write-only: they never leave it), its policy by the PCF
+      (none of its own: the default). Bit rates in Mbit/s, uplink / downlink.</p>
+    <div class="scroll"><table id="ue-table"></table></div>
+  </section>
+  <section>
+    <h2>Add or replace a UE</h2>
+    <p class="muted">A UE that exists is replaced whole: its keys, and its policy (none given: the default). Empty
+      fields take the defaults: AMF field 8000, SQN 0, 5G AKA, the default policy's bit rates.</p>
+    <form id="ue-form">
+      <div class="row">
+        <input name="supi" placeholder="imsi-999700000000001" required pattern="imsi-[0-9]{5,15}" aria-label="SUPI">
+        <input name="k" placeholder="K: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="K">
+        <input name="opc" placeholder="OPc: 32 hex digits" required pattern="[0-9A-Fa-f]{32}" aria-label="OPc">
+        <select name="auth" aria-label="Authentication"><option value="">5G AKA</option>
+          <option value="eap-aka-prime">EAP-AKA'</option></select>
+      </div>
+      <div class="row">
+        <input name="ambr_up" type="number" min="1" placeholder="UE-AMBR up: default" aria-label="UE-AMBR uplink">
+        <input name="ambr_down" type="number" min="1" placeholder="UE-AMBR down: default" aria-label="UE-AMBR downlink">
+      </div>
+      <div id="ue-form-sessions"></div>
+      <details>
+        <summary class="muted">Advanced</summary>
+        <div class="row">
+          <input name="amf" placeholder="AMF field: 8000" pattern="[0-9A-Fa-f]{4}" aria-label="AMF field">
+          <input name="sqn" placeholder="SQN: 000000000000" pattern="[0-9A-Fa-f]{12}" aria-label="SQN">
+          <input name="count" type="number" min="1" placeholder="count: 1 (SUPIs from this one on)" aria-label="Count">
+        </div>
+      </details>
+      <p class="row"><button type="button" id="ue-add-session">Add a session policy</button>
+        <button>Add or replace</button></p>
     </form>
   </section>
   <section>
-    <h2>Policies</h2>
-    <p class="muted">Held by the PCF, per subscriber; the others get the default. Bit rates in Mbit/s, uplink / downlink.
-      A new UE-AMBR reaches the UE at once, session policies apply to new sessions.</p>
-    <div class="scroll"><table id="policies"></table></div>
-    <textarea id="policy" class="tall" aria-label="Policy (JSON)">{
-  "supi": "imsi-999700000000001",
-  "ue_ambr_mbps": { "uplink": 100, "downlink": 500 },
-  "sessions": [{
-    "dnn": "internet",
-    "ambr_mbps": { "uplink": 50, "downlink": 200 },
-    "flows": [{ "five_qi": 1, "arp": 2, "precedence": 10,
-                "mbr_mbps": { "uplink": 1, "downlink": 1 }, "gbr_mbps": { "uplink": 1, "downlink": 1 },
-                "filters": [{ "remote": "10.10.0.0/16", "protocol": 17, "remote_ports": "5060-5061" }] }]
-  }]
-}</textarea>
+    <h2>Import UEs (JSON)</h2>
+    <p class="muted">A list of UEs with the form's fields; each is added or replaced as above, missing fields taking
+      the defaults; <code>policy</code> takes the PCF's fields (<code>ue_ambr_mbps</code>, <code>sessions</code> with
+      their <code>dnn</code>, <code>ambr_mbps</code>, <code>flows</code>).</p>
+    <pre class="muted">[{ "supi": "imsi-999700000000001", "k": "465B5CE8B199B49FAA5F0A2EE238A6BC", "opc": "E8ED289DEBA952E4283B54E88E6183CA" },
+ { "supi": "imsi-999700000000100", "count": 50, "k": "…", "opc": "…", "auth": "eap-aka-prime",
+   "policy": { "ue_ambr_mbps": { "uplink": 100, "downlink": 500 },
+               "sessions": [{ "dnn": "internet", "ambr_mbps": { "uplink": 50, "downlink": 200 } }] } }]</pre>
+    <p><input type="file" id="ue-file" accept=".json,application/json" aria-label="JSON file of UEs"></p>
+    <div class="scroll"><table id="ue-preview" hidden></table></div>
+    <p class="row" id="ue-import-actions" hidden><button id="ue-import">Add or replace them</button>
+      <button type="button" id="ue-import-cancel">Cancel</button></p>
+  </section>
+  <section>
+    <h2>A UE's policy</h2>
+    <p class="muted">Edit one from the table (Policy), then set it; a new UE-AMBR reaches the UE at once, session
+      policies apply to new sessions.</p>
+    <textarea id="policy" class="tall" aria-label="Policy (JSON)"></textarea>
     <p><button id="set-policy">Set</button></p>
   </section>
 </div>
