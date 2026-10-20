@@ -2,6 +2,8 @@
 
 How to get LibreCN running on a machine, and connect it to a gNB and a data network.
 
+**The quickest way is Docker**: one image, a `compose.yaml` and a `.env`, see [`deploy/README.md`](deploy/README.md). This page explains what is underneath, and running the binary yourself.
+
 ## 1. What runs
 
 LibreCN is **one process**, `librecn`, with **one configuration file**:
@@ -214,4 +216,6 @@ The gNB is configured with AMF 192.168.1.10:38412, PLMN 001/01 and SST 1.
 
 ## 8. Docker
 
-The image in [`docker/`](docker/) holds LibreCN together with UERANSIM, for the user-plane test only. There is no LibreCN-only image yet. To run LibreCN in a container today, use the host's network (`--network host`), because the N3 address must be reachable by the gNB (§3). Also give it `--cap-add NET_ADMIN --device /dev/net/tun`, with the TUN device prepared as in §4.
+LibreCN's image, `ghcr.io/flesager/librecn` (amd64 and arm64), runs with Docker Compose: see [`deploy/README.md`](deploy/README.md). It shares the host's network (N2 and N3 must be reachable by the gNB on the host's address, §3), writes its configuration from a few `.env` settings (or takes yours), and prepares N6 itself (§4: `upf0`, NAT), undone at stop.
+
+The image in [`docker/`](docker/) is another one: LibreCN with UERANSIM, for the interop checks only.

@@ -31,11 +31,18 @@ oam/        non-3GPP EOs: log, alarm, control, web server + GUI (librecn-oam)
 proto/      3GPP protocols: ngap, nas, gtpu, security (algorithms), sbi (NF-to-NF messages)
 nf/         3GPP NFs, one crate each: amf, ausf, udm, smf, upf
 app/        the `librecn` binary: config, runtime, OAM, NF factories
+deploy/     LibreCN's image (ghcr.io), compose.yaml and .env: the deployment for real gNBs
 docker/     one image with LibreCN and UERANSIM, for the user-plane interop check
 scripts/    stress.sh, ueransim/ (interop checks)
 ```
 
-Later: deployment. Dependencies point down only: `scheduler` ← `common` ← `oam`, `proto/*` ← `nf/*` ← `app`.
+Dependencies point down only: `scheduler` ← `common` ← `oam`, `proto/*` ← `nf/*` ← `app`.
+
+## Deployment decisions (`deploy/`)
+
+- **Docker, for someone with a real gNB** (the owner's choice): download `compose.yaml` and `env.example` (as `.env`), `docker compose up -d`. The image is `ghcr.io/flesager/librecn`, amd64 and arm64 (both: the owner's choice), built by `.github/workflows/image.yml` when the owner pushes a version tag (`v*`), tagged with the version and `latest`. Rust is cross-compiled on the build machine (arm64 not emulated); the runtime is Debian trixie slim with `ip` and `iptables`.
+- **Host networking**: gNBs reach N2/N3 on the host's address; the entrypoint creates `upf0` and, by default (`LIBRECN_NAT=yes`, the owner's choice: better for testing), NAT and FORWARD rules for the UE pool on the host, removed at stop. `NET_ADMIN` and `/dev/net/tun`, not privileged. The host must forward IP packets; SCTP's module is loaded by the kernel on demand.
+- **Configuration from `.env`** (the owner's choice): address (default: the host's main one), PLMN, slice, DNN, UE pool, NAT, GUI, log level; or a full configuration mounted at `/etc/librecn/librecn.toml`. Subscribers and policies are added in the GUI and kept in a named volume (`state_dir`). The GUI listens on 127.0.0.1 by default: the web API has no authentication yet.
 
 ## Scheduler decisions
 

@@ -1,0 +1,28 @@
+# LibreCN, a 5G core, for real gNBs: download this file and env.example
+# (saved as .env), adjust .env, then: docker compose up -d
+# The host needs SCTP and IP forwarding, once: see env.example.
+#
+# The container shares the host's network: gNBs reach N2 (SCTP 38412) and
+# N3 (GTP-U 2152) on the host's address, and the UEs' traffic goes out
+# through the host (NAT). While LibreCN runs, the host has a TUN device
+# upf0 and NAT rules for the UE pool; they are removed when it stops.
+name: librecn   # the volume is librecn_librecn-state, wherever these files are
+
+services:
+  librecn:
+    image: ghcr.io/flesager/librecn:${LIBRECN_VERSION:-latest}
+    network_mode: host
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - librecn-state:/var/lib/librecn
+      # Your own configuration instead of .env's (see app/librecn.example.toml):
+      # - ./librecn.toml:/etc/librecn/librecn.toml:ro
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+volumes:
+  librecn-state:

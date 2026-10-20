@@ -11,14 +11,17 @@ Open implementation of a 5GCore in Rust based on a pattern reactor scheduler and
 | [`proto/`](proto/) | 3GPP protocols: NGAP (ASN.1 APER), NAS, security algorithms, SBI messages; see [`proto/README.md`](proto/README.md) |
 | [`nf/`](nf/) | 3GPP network functions, one crate each: AMF, AUSF, UDM, SMF, UPF; see [`nf/README.md`](nf/README.md) |
 | [`app/`](app/) | the `librecn` binary: configuration, runtime, OAM, NFs |
-| [`docker/`](docker/) | an image with LibreCN and UERANSIM, for the user-plane check |
+| [`deploy/`](deploy/) | LibreCN's image (`ghcr.io/flesager/librecn`, amd64 and arm64) and its `compose.yaml` and `.env`, for real gNBs |
+| [`docker/`](docker/) | an image with LibreCN and UERANSIM, for the interop checks |
 | [`scripts/`](scripts/) | slow checks (`stress.sh`), interop checks with UERANSIM (`ueransim/`) |
 
 Dependencies point down only: `scheduler` ← `common` ← `oam`, `nf/*` ← `app`.
 
 ## Run
 
-Rust 1.88 or newer. Linux only (epoll, eventfd, CPU affinity).
+With Docker, for real gNBs: download [`deploy/compose.yaml`](deploy/compose.yaml) and [`deploy/env.example`](deploy/env.example) (as `.env`), then `docker compose up -d`; see [`deploy/README.md`](deploy/README.md).
+
+From source: Rust 1.88 or newer. Linux only (epoll, eventfd, CPU affinity).
 
 ```
 cargo run --release -p librecn -- --config app/librecn.example.toml
