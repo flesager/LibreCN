@@ -15,8 +15,10 @@
 //!   whose tunnel then comes back with the parked packets.
 //!
 //! Without `n6` the UPF keeps sessions and forwards nothing (no socket is
-//! opened). Forwarding uses one preallocated buffer: no allocation per
-//! packet.
+//! opened). Forwarding uses two preallocated batches of datagrams (see
+//! [`batch`]): no allocation per packet, one system call on N3 for up to
+//! 32 packets. A packet larger than a batch's slot (9216 bytes with its
+//! GTP-U header) is dropped: N6's MTU must stay under 9200.
 //!
 //! `mode` (see `README.md` for the measurements):
 //! - `event` (default): epoll wakes the UPF when N3 or N6 has packets;
@@ -26,6 +28,7 @@
 //!   a row find nothing, and sleeps on epoll again.
 //!
 //! - [`sessions`], the session table;
+//! - [`batch`], N3's datagrams in batches (`recvmmsg`, `sendmmsg`);
 //!
 //! Traffic is also counted per cell (`GET cells` on the web API: a gNB's
 //! is the sum of its cells), by the UE's cell the SMF gives with each
@@ -36,6 +39,7 @@
 //! - [`parked`], the downlink packets of idle UEs;
 //! - [`tun`], the N6 device.
 
+pub mod batch;
 pub mod parked;
 pub mod qos;
 pub mod sessions;
@@ -43,7 +47,7 @@ pub mod tun;
 
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
 use librecn_common::alarm::{Alarms, Severity};
 use librecn_common::log;
@@ -59,13 +63,12 @@ use librecn_sbi::policy::DEFAULT_QFI;
 use librecn_scheduler::{Context, EoConfig, EoId, ExecutionObject, Interest, IoToken, Message, system};
 use serde::Deserialize;
 
+use batch::Batch;
 use parked::{Parked, Parking};
 use sessions::{Refusal, Sessions};
 
 /// Packets moved per readiness, so one busy side cannot hold the worker.
 const PACKETS_PER_TURN: usize = 64;
-/// Largest packet: an IPv4 datagram, with room for the GTP-U header.
-const BUFFER: usize = G_PDU_HEADER + 65_535;
 /// Alarm raised while the user plane cannot run.
 const ALARM_USER_PLANE: u32 = 0;
 /// Cells whose traffic is counted apart; the others' only in the totals.
@@ -132,7 +135,9 @@ pub struct Upf {
     /// GTP-U socket and N6 device, once open; their epoll tokens, unless polled.
     n3_socket: Option<(UdpSocket, Option<IoToken>)>,
     n6: Option<(File, Option<IoToken>)>,
-    buffer: Box<[u8]>,
+    /// N3's datagrams in batches: received (uplink), to send (downlink).
+    rx: Batch<()>,
+    tx: Batch<Sent>,
     parked: Parked,
     /// The SMF, from its N4 messages: where downlink data reports go.
     smf: Option<EoId>,
@@ -162,7 +167,8 @@ impl Upf {
             empty_polls: 0,
             n3_socket: None,
             n6: None,
-            buffer: vec![0; BUFFER].into_boxed_slice(),
+            rx: Batch::new(),
+            tx: Batch::new(),
             parked: Parked::default(),
             smf: None,
             traffic: Vec::with_capacity(MAX_CELLS),
@@ -214,67 +220,81 @@ impl Upf {
         Ok(())
     }
 
-    /// GTP-U datagrams from the gNBs; how many were read.
+    /// GTP-U datagrams from the gNBs, read in batches; how many were read.
     fn on_n3(&mut self, ctx: &mut Context<'_>) -> usize {
         let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return 0 };
         let now = ctx.now();
-        for read in 0..PACKETS_PER_TURN {
-            let (n, from) = match socket.recv_from(&mut self.buffer) {
-                Ok(received) => received,
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return read,
+        let mut read = 0;
+        while read < PACKETS_PER_TURN {
+            let got = match self.rx.recv(socket) {
+                Ok(0) => break,
+                Ok(got) => got,
                 Err(e) => {
                     log!(self.log, ctx, Error, "N3 receive: {e}");
-                    return read;
+                    break;
                 }
             };
-            match librecn_gtpu::decode(&self.buffer[..n]) {
-                Ok(Gtp::GPdu { teid, qfi, payload }) => {
-                    // The inner source must be the session's UE (no spoofing).
-                    let session = self.sessions.by_teid(teid);
-                    let Some(s) = session.filter(|s| ipv4_src(payload) == Some(s.ue_ip) && s.qos.uplink_known(qfi))
-                    else {
-                        ctx.count(DROPPED, 1);
-                        continue;
-                    };
-                    if !s.qos.allow(qfi.unwrap_or(DEFAULT_QFI), false, now, payload.len()) {
-                        ctx.count(RATE_LIMITED, 1);
-                    } else if device.write(payload).is_ok() {
-                        ctx.count(UPLINK_PACKETS, 1);
-                        ctx.count(UPLINK_BYTES, payload.len() as u64);
-                        if let Some(t) = s.cell.and_then(|i| self.traffic.get_mut(usize::from(i))) {
-                            (t.1[0], t.1[1]) = (t.1[0] + payload.len() as u64, t.1[1] + 1);
+            read += got;
+            for i in 0..got {
+                let (datagram, from) = self.rx.datagram(i);
+                match librecn_gtpu::decode(datagram) {
+                    Ok(Gtp::GPdu { teid, qfi, payload }) => {
+                        // The inner source must be the session's UE (no spoofing).
+                        let session = self.sessions.by_teid(teid);
+                        let valid =
+                            |s: &&mut sessions::Session| ipv4_src(payload) == Some(s.ue_ip) && s.qos.uplink_known(qfi);
+                        let Some(s) = session.filter(valid) else {
+                            ctx.count(DROPPED, 1);
+                            continue;
+                        };
+                        if !s.qos.allow(qfi.unwrap_or(DEFAULT_QFI), false, now, payload.len()) {
+                            ctx.count(RATE_LIMITED, 1);
+                        } else if device.write(payload).is_ok() {
+                            ctx.count(UPLINK_PACKETS, 1);
+                            ctx.count(UPLINK_BYTES, payload.len() as u64);
+                            if let Some(t) = s.cell.and_then(|i| self.traffic.get_mut(usize::from(i))) {
+                                (t.1[0], t.1[1]) = (t.1[0] + payload.len() as u64, t.1[1] + 1);
+                            }
+                        } else {
+                            ctx.count(DROPPED, 1);
                         }
-                    } else {
-                        ctx.count(DROPPED, 1);
                     }
+                    Ok(Gtp::EchoRequest { seq }) => {
+                        let mut response = [0u8; 14];
+                        let len = librecn_gtpu::echo_response(seq, &mut response);
+                        let _ = socket.send_to(&response[..len], from);
+                    }
+                    Ok(Gtp::Other { .. }) | Err(_) => ctx.count(DROPPED, 1),
                 }
-                Ok(Gtp::EchoRequest { seq }) => {
-                    let mut response = [0u8; 14];
-                    let len = librecn_gtpu::echo_response(seq, &mut response);
-                    let _ = socket.send_to(&response[..len], from);
-                }
-                Ok(Gtp::Other { .. }) | Err(_) => ctx.count(DROPPED, 1),
             }
         }
-        PACKETS_PER_TURN
+        read
     }
 
-    /// IP packets from the data network, to the UEs; how many were read.
+    /// IP packets from the data network, to the UEs: each read into the next
+    /// slot of a batch, behind room for its GTP-U header, and sent with the
+    /// others; how many were read.
     fn on_n6(&mut self, ctx: &mut Context<'_>) -> usize {
         let (Some((socket, _)), Some((device, _))) = (&self.n3_socket, &mut self.n6) else { return 0 };
         let now = ctx.now();
-        for read in 0..PACKETS_PER_TURN {
-            // The packet lands after the room left for its GTP-U header.
-            let n = match device.read(&mut self.buffer[G_PDU_HEADER..]) {
-                Ok(0) => return read,
+        let mut read = 0;
+        while read < PACKETS_PER_TURN {
+            let n = match device.read(&mut self.tx.slot()[G_PDU_HEADER..]) {
+                Ok(0) => break,
                 Ok(n) => n,
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return read,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
                 Err(e) => {
                     log!(self.log, ctx, Error, "N6 read: {e}");
-                    return read;
+                    break;
                 }
             };
-            let packet = &self.buffer[G_PDU_HEADER..G_PDU_HEADER + n];
+            read += 1;
+            if G_PDU_HEADER + n == batch::SLOT {
+                // As large as the slot: maybe cut. The device's MTU is too large.
+                ctx.count(DROPPED, 1);
+                continue;
+            }
+            let packet = &self.tx.slot()[G_PDU_HEADER..G_PDU_HEADER + n];
             let Some((seid, session)) = ipv4_dst(packet).and_then(|dst| self.sessions.by_ue(dst)) else {
                 ctx.count(DROPPED, 1);
                 continue;
@@ -302,21 +322,16 @@ impl Upf {
                 ctx.count(RATE_LIMITED, 1);
                 continue;
             }
-            let header: &mut [u8; G_PDU_HEADER] = (&mut self.buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
+            let cell = session.cell;
+            let header: &mut [u8; G_PDU_HEADER] = (&mut self.tx.slot()[..G_PDU_HEADER]).try_into().expect("16 bytes");
             librecn_gtpu::write_g_pdu_header(header, teid, qfi, n);
-            match socket.send_to(&self.buffer[..G_PDU_HEADER + n], SocketAddr::V4(gnb)) {
-                Ok(_) => {
-                    ctx.count(DOWNLINK_PACKETS, 1);
-                    ctx.count(DOWNLINK_BYTES, n as u64);
-                    ctx.count(EXTRA_FLOW, u64::from(qfi != DEFAULT_QFI));
-                    if let Some(t) = session.cell.and_then(|i| self.traffic.get_mut(usize::from(i))) {
-                        (t.1[2], t.1[3]) = (t.1[2] + n as u64, t.1[3] + 1);
-                    }
-                }
-                Err(_) => ctx.count(DROPPED, 1),
+            self.tx.push(G_PDU_HEADER + n, gnb, Sent { cell, extra: qfi != DEFAULT_QFI });
+            if self.tx.is_full() {
+                send_batch(&mut self.tx, socket, ctx, &mut self.traffic);
             }
         }
-        PACKETS_PER_TURN
+        send_batch(&mut self.tx, socket, ctx, &mut self.traffic);
+        read
     }
 
     fn on_establish(&mut self, ctx: &mut Context<'_>, msg: &Message<'_>, request: &N4Establish) {
@@ -428,33 +443,52 @@ impl Upf {
     /// The packets parked for session `seid`, now that its tunnel is back
     /// (64 at most in all: outside the session's rates).
     fn send_parked(&mut self, ctx: &mut Context<'_>, seid: u64, gnb: SocketAddrV4, teid: u32) {
-        let (buffer, socket) = (&mut self.buffer, &self.n3_socket);
-        let Some((qos, slot)) = self.sessions.get(seid).map(|s| (&s.qos, s.cell)) else { return };
-        let mut traffic = slot.and_then(|i| self.traffic.get_mut(usize::from(i)));
+        let (Some((socket, _)), Some(session)) = (&self.n3_socket, self.sessions.get(seid)) else { return };
+        let (qos, cell, tx) = (&session.qos, session.cell, &mut self.tx);
         let mut sent = 0;
         self.parked.release(seid, |packet| {
             let n = packet.len();
-            buffer[G_PDU_HEADER..G_PDU_HEADER + n].copy_from_slice(packet);
+            let slot = tx.slot();
+            slot[G_PDU_HEADER..G_PDU_HEADER + n].copy_from_slice(packet);
             let qfi = qos.downlink(packet);
-            let header: &mut [u8; G_PDU_HEADER] = (&mut buffer[..G_PDU_HEADER]).try_into().expect("16 bytes");
+            let header: &mut [u8; G_PDU_HEADER] = (&mut slot[..G_PDU_HEADER]).try_into().expect("16 bytes");
             librecn_gtpu::write_g_pdu_header(header, teid, qfi, n);
-            let delivered = socket.as_ref().is_some_and(|(s, _)| s.send_to(&buffer[..G_PDU_HEADER + n], gnb).is_ok());
-            if delivered {
-                ctx.count(DOWNLINK_PACKETS, 1);
-                ctx.count(DOWNLINK_BYTES, n as u64);
-                ctx.count(EXTRA_FLOW, u64::from(qfi != DEFAULT_QFI));
-                if let Some(t) = traffic.as_mut() {
-                    (t.1[2], t.1[3]) = (t.1[2] + n as u64, t.1[3] + 1);
-                }
-                sent += 1;
-            } else {
-                ctx.count(DROPPED, 1);
+            tx.push(G_PDU_HEADER + n, gnb, Sent { cell, extra: qfi != DEFAULT_QFI });
+            sent += 1;
+            if tx.is_full() {
+                send_batch(tx, socket, ctx, &mut self.traffic);
             }
         });
+        send_batch(tx, socket, ctx, &mut self.traffic);
         if sent > 0 {
             log!(self.log, ctx, Info, "session {seid:#x}: {sent} parked packet(s) sent");
         }
     }
+}
+
+/// What the UPF keeps with each downlink datagram of a batch, to count it
+/// once sent.
+#[derive(Clone, Copy, Default)]
+struct Sent {
+    cell: Option<u16>,
+    extra: bool,
+}
+
+/// Sends a downlink batch, counting each datagram sent (its payload, behind
+/// the GTP-U header) or dropped.
+fn send_batch(tx: &mut Batch<Sent>, socket: &UdpSocket, ctx: &mut Context<'_>, traffic: &mut [(u64, [u64; 4])]) {
+    tx.send(socket, |sent, len, ok| {
+        if !ok {
+            return ctx.count(DROPPED, 1);
+        }
+        let n = (len - G_PDU_HEADER) as u64;
+        ctx.count(DOWNLINK_PACKETS, 1);
+        ctx.count(DOWNLINK_BYTES, n);
+        ctx.count(EXTRA_FLOW, u64::from(sent.extra));
+        if let Some(t) = sent.cell.and_then(|i| traffic.get_mut(usize::from(i))) {
+            (t.1[2], t.1[3]) = (t.1[2] + n, t.1[3] + 1);
+        }
+    });
 }
 
 /// Source address of an IPv4 packet.

@@ -164,6 +164,7 @@ Dependencies: `rustix` (epoll, eventfd, affinity), `zerocopy`, `thiserror`; test
 - *`MetricCollector`*: metrics are read in place by whoever needs them (§9); the collector survives as a test helper.
 - *`stop_self`*: `stop(ctx.self_id())`.
 - *"Poll I/O every 32 turns"*: readiness is polled once per tick and before sleeping.
+- *The UPF's 64 KiB packet buffer*: every packet, parked ones too, now goes through N3's batches (`nf/upf/src/batch.rs`), whose slots hold it with its GTP-U header.
 - *Duplicates*: the two EO-creation paths are now one (`Registry::create`, also behind `ctx.spawn`); `OutMsg` setters that duplicated the builders; public readiness bits that duplicated `IoReady`'s methods; `Time::elapsed_since_start`; public `raw()` on opaque handles.
 
 **Deliberately not done**

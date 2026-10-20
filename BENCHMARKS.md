@@ -1,6 +1,6 @@
 # LibreCN benchmarks
 
-The figures behind the capacity and memory tables of the [README](README.md#capacity), and how to measure them again. Measured on 2026-10-17.
+The figures behind the capacity and memory tables of the [README](README.md#capacity), and how to measure them again. Measured on 2026-10-17; parts 1 and 2 again on 2026-10-20, with N3 in batches (`recvmmsg`/`sendmmsg`).
 
 ## Conditions
 
@@ -36,36 +36,36 @@ Two runs agree within 5 %. Every run registered all its UEs. "Busy" is the pool'
 
 | Cores | Registrations alone | User plane alone, each way | Both: registrations | Both: user plane, each way |
 |---|---|---|---|---|
-| 1 | 8 930/s, p50 28 ms, p99 30 ms, busy 100 % | 97 kpps, 1.08 Gbit/s, busy 100 % | 3 400/s, p50 75 ms, p99 81 ms | 55 kpps, 0.62 Gbit/s, busy 100 % |
-| 2 | 9 330/s, p50 27 ms, p99 29 ms, busy 55 % | 96 kpps, 1.07 Gbit/s, busy 50 % | 8 890/s, p50 29 ms, p99 31 ms | 90 kpps, 1.00 Gbit/s, busy 100 % |
-| 3 | 9 270/s, p50 27 ms, p99 35 ms, busy 38 % | 96 kpps, 1.07 Gbit/s, busy 33 % | 8 890/s, p50 29 ms, p99 31 ms | 89 kpps, 1.00 Gbit/s, busy 69 % |
-| 4 | 9 010/s, p50 28 ms, p99 31 ms, busy 29 % | 97 kpps, 1.09 Gbit/s, busy 25 % | 8 740/s, p50 29 ms, p99 32 ms | 84 kpps, 0.94 Gbit/s, busy 52 % |
+| 1 | 8 670/s, p50 29 ms, p99 32 ms, busy 100 % | 116 kpps, 1.30 Gbit/s, busy 100 % | 4 020/s, p50 62 ms, p99 71 ms | 56 kpps, 0.62 Gbit/s, busy 100 % |
+| 2 | 8 980/s, p50 28 ms, p99 29 ms, busy 55 % | 115 kpps, 1.29 Gbit/s, busy 50 % | 8 740/s, p50 29 ms, p99 32 ms | 107 kpps, 1.20 Gbit/s, busy 100 % |
+| 3 | 9 010/s, p50 28 ms, p99 29 ms, busy 38 % | 116 kpps, 1.30 Gbit/s, busy 33 % | 8 510/s, p50 29 ms, p99 30 ms | 110 kpps, 1.23 Gbit/s, busy 69 % |
+| 4 | 8 930/s, p50 29 ms, p99 30 ms, busy 29 % | 116 kpps, 1.30 Gbit/s, busy 25 % | 8 500/s, p50 30 ms, p99 31 ms | 103 kpps, 1.16 Gbit/s, busy 52 % |
 
 ### 84-byte packets, flat out (`load ... up size=84`)
 
 | Cores | User plane alone, each way | Both: registrations | Both: user plane, each way |
 |---|---|---|---|
-| 1 | 103 kpps, 69 Mbit/s | 3 690/s, p99 78 ms | 56 kpps, 38 Mbit/s |
-| 2 | 104 kpps, 70 Mbit/s | 9 220/s, p99 30 ms | 98 kpps, 66 Mbit/s |
-| 3 | 104 kpps, 70 Mbit/s | 9 100/s, p99 29 ms | 98 kpps, 66 Mbit/s |
-| 4 | 104 kpps, 70 Mbit/s | 8 960/s, p99 32 ms | 91 kpps, 61 Mbit/s |
+| 1 | 122 kpps, 82 Mbit/s | 4 210/s, p99 67 ms | 58 kpps, 39 Mbit/s |
+| 2 | 120 kpps, 81 Mbit/s | 8 820/s, p99 32 ms | 111 kpps, 75 Mbit/s |
+| 3 | 121 kpps, 81 Mbit/s | 8 560/s, p99 31 ms | 117 kpps, 79 Mbit/s |
+| 4 | 121 kpps, 81 Mbit/s | 8 660/s, p99 31 ms | 110 kpps, 74 Mbit/s |
 
 ### 500 Mbit/s each way of 1400-byte packets (`load ... up=500`), and one UE at a time
 
 | Cores | Registrations with that traffic | Busy | One registration with no load, p50 / p99 |
 |---|---|---|---|
-| 1 | 4 950/s, p50 51 ms, p99 59 ms | 100 % | 0.22 / 0.29 ms |
-| 2 | 9 150/s, p50 27 ms, p99 30 ms | 77 % | 0.22 / 0.29 ms |
-| 3 | 9 180/s, p50 28 ms, p99 30 ms | 54 % | 0.25 / 0.30 ms |
-| 4 | 9 070/s, p50 28 ms, p99 31 ms | 41 % | 0.25 / 0.31 ms |
+| 1 | 5 390/s, p50 47 ms, p99 55 ms | 100 % | 0.22 / 0.25 ms |
+| 2 | 9 090/s, p50 28 ms, p99 30 ms | 74 % | 0.23 / 0.29 ms |
+| 3 | 8 830/s, p50 29 ms, p99 31 ms | 52 % | 0.26 / 0.31 ms |
+| 4 | 8 820/s, p50 29 ms, p99 30 ms | 40 % | 0.27 / 0.31 ms |
 
 ### Reading the tables
 
 - **Two cores are enough; more add nothing.** The AMF and the UPF are each one EO, and an EO runs on one core at a time.
   - With two cores, each gets its own; the AUSF, UDM, SMF and OAM EOs fit in what is left (under 10 % of a core).
   - A third and fourth core stay idle (69 % and 52 % busy). Beyond, it would take several AMF or UPF instances.
-- **One core is enough for either plane alone**, but they share it when both are loaded: 500 Mbit/s each way halves the registrations.
-- **The UPF is bound by packets, not bytes**: about 100 000 packets per second each way, whatever their size.
+- **One core is enough for either plane alone**, but they share it when both are loaded: 500 Mbit/s each way takes about 40 % of the registrations.
+- **The UPF is bound by packets, not bytes**: about 115 000 packets per second each way, whatever their size.
 - **Latency under load is queueing.** 256 registrations in flight at about 9 000 per second means about 28 ms each, by Little's law. One registration with its session takes 0.22 ms.
 - **Where the AMF's time goes**: about 110 µs per registration.
   - About 40 % is the kernel's SCTP: 8.3 µs to send and receive one message on loopback, about 4 µs on the AMF's side, for each of its 11 NGAP messages per UE.
@@ -81,27 +81,28 @@ The UPF on its own core, with a test gNB and data network, and no other NF. Its 
 
 | Mode | Round trip p50 / p99 | Sparse round trip p50 / p99 (1 ms gaps) | Idle CPU |
 |---|---|---|---|
-| `event` (default) | 27.5 / 34.2 µs | 45.1 / 61.3 µs | 0 % |
-| `poll` | 18.6 / 21.7 µs | 23.6 / 31.6 µs | 100 % of a core |
-| `hybrid` | 18.8 / 22.5 µs | 34.6 / 44.9 µs | 0 % |
+| `event` (default) | 28.9 / 36.7 µs | 46.3 / 56.4 µs | 0 % |
+| `poll` | 20.4 / 23.3 µs | 24.6 / 30.5 µs | 100 % of a core |
+| `hybrid` | 20.5 / 23.8 µs | 36.0 / 46.1 µs | 0 % |
 
 **One direction at a time**, `event` mode: three threads send as fast as they can, the UEs in turn.
 
 | UEs | Packet | Uplink | Downlink |
 |---|---|---|---|
-| 1 | 84 B | 303 kpps, 203 Mbit/s | 187 kpps, 126 Mbit/s |
-| 1 | 1400 B | 274 kpps, 3.1 Gbit/s | 176 kpps, 2.0 Gbit/s |
-| 1000 | 84 B | 283 kpps, 190 Mbit/s | 182 kpps, 123 Mbit/s |
-| 1000 | 1400 B | 261 kpps, 2.9 Gbit/s | 178 kpps, 2.0 Gbit/s |
+| 1 | 84 B | 374 kpps, 251 Mbit/s | 228 kpps, 153 Mbit/s |
+| 1 | 1400 B | 345 kpps, 3.9 Gbit/s | 211 kpps, 2.4 Gbit/s |
+| 1000 | 84 B | 372 kpps, 250 Mbit/s | 227 kpps, 153 Mbit/s |
+| 1000 | 1400 B | 335 kpps, 3.8 Gbit/s | 209 kpps, 2.3 Gbit/s |
 
 With 2, 10 and 100 UEs, the figures are the same within 5 %.
 
 **Reading the tables**:
-- **Polling cuts latency, not throughput**: 9 µs less per round trip, and half the latency for sparse traffic, but it spends a core even when idle.
+- **Polling cuts latency, not throughput**: 8 µs less per round trip, and half the latency for sparse traffic, but it spends a core even when idle.
 - **The number of UEs does not matter**: a session is found by a hash lookup.
 - **Downlink is slower than uplink**: on loopback, the UPF's send to the gNB also runs the gNB's receiving side of the kernel, on the UPF's core.
-- **Both directions at once share the UPF's core**, hence the 100 kpps each way of part 1.
-- More would need batched system calls (`recvmmsg`/`sendmmsg`), several UPFs, or a kernel bypass.
+- **Both directions at once share the UPF's core**, hence the 115 kpps each way of part 1.
+- **N3 goes in batches** of up to 32 datagrams per system call (`recvmmsg`/`sendmmsg`): 23 % more packets than one system call each (303 to 374 kpps uplink, 187 to 228 kpps downlink; 97 to 116 kpps each way in part 1), for about 1 µs more per round trip. The TUN device (N6) still takes one system call per packet.
+- More would need the TUN device's offloads, several UPFs, or a kernel bypass (eBPF).
 
 ## 3. Scale with UERANSIM (`scripts/ueransim/scale.sh`)
 

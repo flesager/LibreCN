@@ -54,14 +54,14 @@ What LibreCN carries for the number of cores given to it. Every network function
 
 | Cores for LibreCN | Registrations per second, no traffic | User plane, no registrations | Both at once |
 |---|---|---|---|
-| 1 | 9 000 | 1.1 Gbit/s each way | shared: 3 400 registrations/s and 0.6 Gbit/s each way |
-| **2** | 9 000 | 1.1 Gbit/s each way | **8 900 registrations/s and 1.0 Gbit/s each way** |
-| 3 | 9 000 | 1.1 Gbit/s each way | as with 2 cores |
-| 4 | 9 000 | 1.1 Gbit/s each way | as with 2 cores |
+| 1 | 9 000 | 1.3 Gbit/s each way | shared: 4 000 registrations/s and 0.6 Gbit/s each way |
+| **2** | 9 000 | 1.3 Gbit/s each way | **8 700 registrations/s and 1.2 Gbit/s each way** |
+| 3 | 9 000 | 1.3 Gbit/s each way | as with 2 cores |
+| 4 | 9 000 | 1.3 Gbit/s each way | as with 2 cores |
 
 **Choosing the number of cores**:
 - **2 cores give the full capacity**, both planes loaded at once: the AMF uses one core, the UPF the other, and the other functions fit in what is left.
-- **1 core** suits a lab or a light load: the two planes share it. With 500 Mbit/s each way of user traffic, 5 000 registrations per second remain.
+- **1 core** suits a lab or a light load: the two planes share it. With 500 Mbit/s each way of user traffic, 5 400 registrations per second remain.
 - **3 or 4 cores add no capacity**, only headroom. Each function is one instance, and an instance uses one core at a time.
 
 **Memory (RAM)**: plan **20 MiB, plus 5 KiB per UE** (each UE registered with its PDU session).
