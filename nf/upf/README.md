@@ -46,30 +46,22 @@ UPF's for now.
   Docker if the host has none) into `bpf/upf.bpf.o`, which is checked in:
   cargo needs no clang. `aya` loads it.
 
-Measured by `scripts/upf-fast.sh` (the `fast_path` example): the UPF in
-one container, a gNB's three senders in another, over veth (where XDP runs
-natively); the receive path of the N3 interface (veth's NAPI, in a thread)
-pinned to its own core, the UPF to another, the UEs' packets forwarded out
-of a dummy device standing for the data network. "Fallback": the same
-sessions with a PCC rule, so the program passes them to the UPF. AMD Ryzen
-9 5950X, Linux 7.0, 2026-10-20, 100 UEs (1000: the same), two runs within
-2 %:
-
-| uplink | packet | carried | UPF core | receive core |
-|---|---|---|---|---|
-| fast path | 84 B | 700 kpps, 0.47 Gbit/s | 1 % | 100 % |
-| fallback | 84 B | 361 kpps, 0.24 Gbit/s | 100 % | 100 % |
-| fast path | 1400 B | 637 kpps, 7.1 Gbit/s | 2 % | 100 % |
-| fallback | 1400 B | 357 kpps, 4.0 Gbit/s | 100 % | 100 % |
-
-- **One core instead of two, and 1.8 times the packets**: the fast path is
-  bound by the receive core alone (about 1.5 µs per packet: veth's receive,
-  the program, the kernel's forwarding); the UPF's core stays free.
-- veth copies each packet for XDP (its packets have no room in front for
-  it); a network card's driver runs XDP on the packet as received, so
-  these figures are a floor.
+Measured with the whole core as deployed by `scripts/upf-bench.sh`
+([`BENCHMARKS.md`](../../BENCHMARKS.md), "The user plane as deployed"):
+on one core, the uplink goes from 2.1 Gbit/s of 1400-byte packets (the UPF
+alone) to 6.7 (210 to 700 kpps), the UPF's own core left free; with the
+uplink in the kernel, the downlink gets more of the core when both flow
+(1.1 to 1.8 Gbit/s each way on one core, 1.8 to 3.2 on two). veth copies
+each packet for XDP, a network card's driver does not: these are a floor.
 
 ## Batches
+
+N3's socket has an 8 MiB receive buffer (`SO_RCVBUFFORCE` with
+`CAP_NET_ADMIN`, else up to `net.core.rmem_max`): the default, 208 KiB,
+held 90 datagrams of 1400 bytes, and bursts arriving while the UPF was away
+were lost (2 to 4 % at any rate, in `upf-bench.sh`). The kernel takes that
+memory as datagrams wait, not at start.
+
 
 N3 moves datagrams in batches: up to 32 received with one `recvmmsg`, up
 to 32 sent with one `sendmmsg` (`batch.rs`). A downlink packet is read from

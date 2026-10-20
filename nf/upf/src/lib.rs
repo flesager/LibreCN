@@ -76,6 +76,11 @@ const PACKETS_PER_TURN: usize = 64;
 const ALARM_USER_PLANE: u32 = 0;
 /// Alarm raised while the fast path cannot run (the user plane is slower).
 const ALARM_FAST_PATH: u32 = 1;
+/// N3's socket buffer: room for bursts while the UPF is away (about 5000
+/// datagrams of 1400 bytes; the default, 208 KiB, held 90). Taken as
+/// datagrams wait, not at start. Without `CAP_NET_ADMIN` the kernel caps it
+/// at `net.core.rmem_max`.
+const N3_RECEIVE_BUFFER: libc::c_int = 8 << 20;
 /// How often the fast path's counts are folded into the UPF's.
 const FOLD_PERIOD: Duration = Duration::from_secs(1);
 /// Cells whose traffic is counted apart; the others' only in the totals.
@@ -229,6 +234,7 @@ impl Upf {
         let socket = UdpSocket::bind(SocketAddrV4::new(self.n3, librecn_gtpu::PORT))
             .and_then(|s| s.set_nonblocking(true).map(|()| s))
             .map_err(|e| format!("N3 on {}:{}: {e}", self.n3, librecn_gtpu::PORT))?;
+        set_receive_buffer(&socket, N3_RECEIVE_BUFFER);
         if self.mode == Mode::Poll {
             self.n3_socket = Some((socket, None));
             ctx.set_polling(true);
@@ -250,7 +256,6 @@ impl Upf {
         }
         match fast::FastPath::start(self.n3, self.max_sessions) {
             Ok(f) => {
-                log!(self.log, ctx, Info, "fast path on {}: the kernel carries the uplink", f.interface());
                 self.fast = Some(f);
                 if let Err(e) = ctx.arm_timer(FOLD_PERIOD, 0) {
                     log!(self.log, ctx, Error, "fast path counts not folded: {e}");
@@ -569,6 +574,21 @@ fn ipv4_src(packet: &[u8]) -> Option<Ipv4Addr> {
     }
 }
 
+/// Asks for `bytes` of receive buffer on `socket`: beyond the system's cap
+/// if allowed (`SO_RCVBUFFORCE`), else up to it.
+fn set_receive_buffer(socket: &UdpSocket, bytes: libc::c_int) {
+    use std::os::fd::AsRawFd;
+    let set = |option| {
+        // SAFETY: one c_int, which outlives the call.
+        unsafe {
+            libc::setsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, option, (&bytes as *const libc::c_int).cast(), 4)
+        }
+    };
+    if set(libc::SO_RCVBUFFORCE) != 0 {
+        set(libc::SO_RCVBUF);
+    }
+}
+
 /// Destination address of an IPv4 packet.
 fn ipv4_dst(packet: &[u8]) -> Option<Ipv4Addr> {
     match packet {
@@ -583,10 +603,18 @@ impl ExecutionObject for Upf {
     fn on_start(&mut self, ctx: &mut Context<'_>) {
         match self.open_user_plane(ctx) {
             Ok(()) if self.n6.is_some() => {
+                self.start_fast_path(ctx);
                 let n6 = self.n6_name.as_deref().unwrap_or("given device");
                 let (name, n3, mode) = (&self.name, self.n3, self.mode);
-                log!(self.log, ctx, Vip, "UPF {name} ready, N3 {n3}:{}, N6 {n6}, {mode:?} mode", librecn_gtpu::PORT);
-                self.start_fast_path(ctx);
+                let fast =
+                    self.fast.as_ref().map_or("no fast path".into(), |f| format!("fast path on {}", f.interface()));
+                log!(
+                    self.log,
+                    ctx,
+                    Vip,
+                    "UPF {name} ready, N3 {n3}:{}, N6 {n6}, {mode:?} mode, {fast}",
+                    librecn_gtpu::PORT
+                );
             }
             Ok(()) => log!(self.log, ctx, Vip, "UPF {} ready, N3 {}, no N6: sessions only", self.name, self.n3),
             Err(e) => {

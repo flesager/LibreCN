@@ -20,13 +20,27 @@
 //! - Memory: the process's resident memory (and its peak) and heap in use,
 //!   empty, once LibreCN is ready, then after each batch of registrations;
 //!   and what each EO preallocated.
+//!
+//! Two more roles, for `scripts/upf-bench.sh`, around a LibreCN of its own
+//! (another network namespace): what traffic runs is read from the file
+//! `CTL` (`idle`, `up SIZE RATE`, `down SIZE RATE`, `both SIZE RATE`,
+//! `quit`; RATE in packets per second each way, 0: as fast as it goes).
+//! - `load gnb N2 GNB DN UES CTL CORE`: a gNB on address `GNB` registers
+//!   `UES` UEs with their session at the AMF on `N2`, writes their
+//!   addresses in `CTL.ues`, drains its downlink, and sends uplink G-PDUs
+//!   to the data network's `DN` (port 5001) from three threads.
+//! - `load dn DN CTL CORE`: the data network on `DN`: drains the uplink
+//!   and sends to the UEs of `CTL.ues` from three threads.
+//!
+//! Each role's threads run on `CORE + 1` (registration, draining) and the
+//! three after it (senders).
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixDatagram;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
-use std::sync::{Arc, Barrier, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::{Arc, Barrier, OnceLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -58,6 +72,9 @@ const GTPU_PORT: u16 = 2152;
 const PACKET: usize = 1400;
 /// How long the user plane is measured alone.
 const UP_ALONE: Duration = Duration::from_secs(2);
+/// The test gNB's GTP-U address, told to the core (127.0.0.1 unless the
+/// `gnb` role gives its own).
+static GNB_N3: OnceLock<[u8; 4]> = OnceLock::new();
 
 fn pin(core: usize) {
     // SAFETY: an all-zero cpu_set_t is a valid empty set.
@@ -132,7 +149,7 @@ fn context_setup_response(amf_id: u64, ran_id: u32) -> Vec<u8> {
 fn session_setup_response(amf_id: u64, ran_id: u32) -> Vec<u8> {
     use AnonymousPDUSessionResourceSetupResponseProtocolIEsCriticality::ignore;
     let tunnel = UPTransportLayerInformation::gTPTunnel(GTPTunnel::new(
-        TransportLayerAddress(BitString::from_slice(&[127, 0, 0, 1])),
+        TransportLayerAddress(BitString::from_slice(GNB_N3.get().unwrap_or(&[127, 0, 0, 1]))),
         GTPTEID(FixedOctetString::new(ran_id.to_be_bytes())),
         None,
     ));
@@ -567,9 +584,197 @@ fn memory() -> (f64, f64) {
     (kib("VmRSS:") / 1024.0, kib("VmHWM:") / 1024.0)
 }
 
+/// What the benchmark's traffic is now, from its control file.
+struct Load {
+    up: bool,
+    down: bool,
+    size: usize,
+    /// Packets per second; 0: as fast as it goes.
+    rate: u64,
+    quit: bool,
+}
+
+fn control(path: &str) -> Load {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut words = text.split_whitespace();
+    let mode = words.next().unwrap_or("idle");
+    let size = words.next().and_then(|s| s.parse().ok()).unwrap_or(PACKET);
+    let rate = words.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let (up, down) = (matches!(mode, "up" | "both"), matches!(mode, "down" | "both"));
+    Load { up, down, size, rate, quit: mode == "quit" }
+}
+
+/// An IPv4 and UDP packet of `size` bytes from `src` to `dst`, port 5001,
+/// its header checksum right (the core's kernel forwards it).
+fn ipv4_udp(src: [u8; 4], dst: [u8; 4], size: usize) -> Vec<u8> {
+    let mut p = ipv4(src, size);
+    p[16..20].copy_from_slice(&dst);
+    let mut sum: u32 = p[..20].chunks(2).map(|w| u32::from(u16::from_be_bytes([w[0], w[1]]))).sum();
+    while sum > 0xffff {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    p[10..12].copy_from_slice(&(!(sum as u16)).to_be_bytes());
+    p[20..26].copy_from_slice(&[0x13, 0x89, 0x13, 0x89, ((size - 20) >> 8) as u8, (size - 20) as u8]);
+    p
+}
+
+/// An uplink G-PDU with the PDU Session Container, QoS flow 1, as UERANSIM sends it.
+fn g_pdu(teid: u32, payload: &[u8]) -> Vec<u8> {
+    let mut d = [&[0x34, 0xff][..], &((8 + payload.len()) as u16).to_be_bytes(), &teid.to_be_bytes()].concat();
+    d.extend_from_slice(&[0, 0, 0, 0x85, 1, 0x10, 1, 0]);
+    d.extend_from_slice(payload);
+    d
+}
+
+/// The datagrams a sender sends in turn, for a packet size.
+type Datagrams = Vec<(Vec<u8>, SocketAddrV4)>;
+
+/// Three threads (cores `first` to `first + 2`), from `bind`, send what
+/// `build` gives for the size of the control file's load while `wanted`
+/// says so, 32 per system call, at its rate (a third each: they wait for
+/// their next batch spinning, on their own cores); until it says `quit`.
+fn senders(
+    ctl: &str,
+    first: usize,
+    bind: Ipv4Addr,
+    wanted: fn(&Load) -> bool,
+    build: impl Fn(usize) -> Datagrams + Send + Sync + 'static,
+) {
+    let size = Arc::new(AtomicUsize::new(0));
+    let rate = Arc::new(AtomicU64::new(0));
+    let build = Arc::new(build);
+    for t in 0..3 {
+        let (size, rate, build) = (size.clone(), rate.clone(), build.clone());
+        std::thread::spawn(move || {
+            pin(first + t);
+            let socket = UdpSocket::bind((bind, 0)).unwrap();
+            let (mut built, mut datagrams, mut next) = (0, Vec::new(), t);
+            let mut due = Instant::now();
+            loop {
+                let s = size.load(Relaxed);
+                if s == 0 {
+                    std::thread::sleep(Duration::from_millis(1));
+                    due = Instant::now();
+                    continue;
+                }
+                if let Some(period) = (32 * 1_000_000_000u64).checked_div(rate.load(Relaxed) / 3) {
+                    due += Duration::from_nanos(period);
+                    let now = Instant::now();
+                    if due < now - Duration::from_millis(10) {
+                        due = now; // behind: no burst to catch up
+                    }
+                    while Instant::now() < due {
+                        std::hint::spin_loop();
+                    }
+                }
+                if s != built {
+                    let names = |a: SocketAddrV4| libc::sockaddr_in {
+                        sin_family: libc::AF_INET as libc::sa_family_t,
+                        sin_port: a.port().to_be(),
+                        sin_addr: libc::in_addr { s_addr: u32::from(*a.ip()).to_be() },
+                        sin_zero: [0; 8],
+                    };
+                    datagrams = build(s).into_iter().map(|(d, a)| (d, names(a))).collect::<Vec<_>>();
+                    built = s;
+                }
+                let mut iovs = [libc::iovec { iov_base: std::ptr::null_mut(), iov_len: 0 }; 32];
+                // SAFETY: all-zero is a valid mmsghdr.
+                let mut msgs: [libc::mmsghdr; 32] = unsafe { std::mem::zeroed() };
+                for (iov, msg) in iovs.iter_mut().zip(msgs.iter_mut()) {
+                    let (d, name) = &datagrams[next % datagrams.len()];
+                    next += 1;
+                    *iov = libc::iovec { iov_base: d.as_ptr() as *mut _, iov_len: d.len() };
+                    msg.msg_hdr.msg_iov = iov;
+                    msg.msg_hdr.msg_iovlen = 1;
+                    msg.msg_hdr.msg_name = (name as *const libc::sockaddr_in).cast_mut().cast();
+                    msg.msg_hdr.msg_namelen = size_of::<libc::sockaddr_in>() as _;
+                }
+                let fd = std::os::fd::AsRawFd::as_raw_fd(&socket);
+                // SAFETY: the headers point to live datagrams and addresses.
+                unsafe { libc::sendmmsg(fd, msgs.as_mut_ptr(), 32, 0) };
+            }
+        });
+    }
+    loop {
+        let load = control(ctl);
+        if load.quit {
+            std::process::exit(0);
+        }
+        rate.store(load.rate, Relaxed);
+        size.store(if wanted(&load) { load.size } else { 0 }, Relaxed);
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Drains UDP datagrams to `addr`, on core `core`.
+fn drain(addr: SocketAddrV4, core: usize) {
+    let socket = UdpSocket::bind(addr).unwrap_or_else(|e| panic!("{addr}: {e}"));
+    std::thread::spawn(move || {
+        pin(core);
+        let mut buf = [0u8; 2048];
+        loop {
+            let _ = socket.recv(&mut buf);
+        }
+    });
+}
+
+/// `load gnb N2 GNB DN UES CTL CORE`.
+fn bench_gnb(args: &[String]) {
+    let [n2, gnb, dn, ues, ctl, core] = args else { panic!("usage: load gnb N2 GNB DN UES CTL CORE") };
+    let (n2, gnb): (SocketAddr, Ipv4Addr) = (n2.parse().unwrap(), gnb.parse().unwrap());
+    let (dn, ues, core): (Ipv4Addr, usize, usize) = (dn.parse().unwrap(), ues.parse().unwrap(), core.parse().unwrap());
+    GNB_N3.set(gnb.octets()).unwrap();
+    let setup =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../proto/ngap/tests/vectors/free5gc/ci0000.bin")).unwrap();
+    pin(core + 1);
+    // Kept to the end: its association is N2, and the UEs' connection.
+    let mut ran = Gnb::connect(n2, core + 1, &setup);
+    let (_, sessions) = ran.register(0, ues, 64);
+    let list: String = sessions.iter().map(|s| format!("{}\n", Ipv4Addr::from(s.ue_ip))).collect();
+    std::fs::write(format!("{ctl}.ues"), list).unwrap();
+    println!("registered {} UEs", sessions.len());
+    drain(SocketAddrV4::new(gnb, GTPU_PORT), core + 1);
+    // The UPF's N3 is on the AMF's address here.
+    let SocketAddr::V4(n2) = n2 else { panic!("IPv4") };
+    let n3 = SocketAddrV4::new(*n2.ip(), GTPU_PORT);
+    senders(
+        ctl,
+        core + 2,
+        gnb,
+        |l| l.up,
+        move |size| sessions.iter().map(|s| (g_pdu(s.ul_teid, &ipv4_udp(s.ue_ip, dn.octets(), size)), n3)).collect(),
+    );
+}
+
+/// `load dn DN CTL CORE`.
+fn bench_dn(args: &[String]) {
+    let [dn, ctl, core] = args else { panic!("usage: load dn DN CTL CORE") };
+    let (dn, core): (Ipv4Addr, usize) = (dn.parse().unwrap(), core.parse().unwrap());
+    let ues = loop {
+        if let Ok(list) = std::fs::read_to_string(format!("{ctl}.ues")) {
+            break list.lines().map(|l| l.parse::<Ipv4Addr>().unwrap().octets()).collect::<Vec<_>>();
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    pin(core + 1);
+    drain(SocketAddrV4::new(dn, 5001), core + 1);
+    senders(
+        ctl,
+        core + 2,
+        dn,
+        |l| l.down,
+        move |size| ues.iter().map(|ue| (vec![0u8; size - 28], SocketAddrV4::new(Ipv4Addr::from(*ue), 5001))).collect(),
+    );
+}
+
 fn main() {
     let empty = (memory().0, heap());
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("gnb") => return bench_gnb(&args[1..]),
+        Some("dn") => return bench_dn(&args[1..]),
+        _ => {}
+    }
     // `up`: user plane as fast as it goes (0); `up=MBPS`: that rate each way.
     let (mut up, mut size) = (None, PACKET);
     while let Some(option) = args.pop_if(|a| a.starts_with("up") || a.starts_with("size=")) {
