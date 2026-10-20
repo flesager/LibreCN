@@ -43,6 +43,7 @@ Every line is optional; [`env.example`](env.example) explains each one.
 | `LIBRECN_SST`, `LIBRECN_SD` | 1, none | the slice served |
 | `LIBRECN_DNN`, `LIBRECN_UE_POOL` | internet, 10.45.0.0/16 | the data network and the UEs' addresses |
 | `LIBRECN_NAT` | yes | the UEs reach the outside through the host |
+| `LIBRECN_GRO` | off | GRO off on the host's card while the core runs (`keep`: left as it is) |
 | `LIBRECN_GUI` | 127.0.0.1:8080 | the GUI and web API; `0.0.0.0:8080` opens them to the network (**no authentication yet**: trusted networks only) |
 | `LIBRECN_LOG` | info | log level: vip, fatal, error, info, debug |
 | `LIBRECN_VERSION` | latest | the image's version |
@@ -71,6 +72,13 @@ systems): `sudo sysctl -w net.ipv4.conf.all.rp_filter=2
 net.ipv4.conf.<interface>.rp_filter=2`. Without it, or without the
 capabilities, the core runs without the fast path, says why in its logs
 and raises a MINOR alarm (the GUI's System panel).
+
+**GRO**: the host's card aggregates incoming TCP (GRO), which the fast path
+cannot tunnel, so TCP downloads would go through the UPF (96 % of them,
+measured). The container turns GRO off on the card of the default route
+while the core runs and back on when it stops; the host's own TCP receives
+then cost a little more CPU. `LIBRECN_GRO=keep` leaves it (the UPF then
+raises a WARNING alarm).
 
 The host must:
 - forward IP packets, for the NAT: `sudo sysctl -w net.ipv4.ip_forward=1`,

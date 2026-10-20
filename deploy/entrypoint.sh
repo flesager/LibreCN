@@ -23,6 +23,7 @@ pool=${LIBRECN_UE_POOL:-10.45.0.0/16}
 nat=${LIBRECN_NAT:-yes}
 gui=${LIBRECN_GUI:-127.0.0.1:8080}
 log=${LIBRECN_LOG:-info}
+gro=${LIBRECN_GRO:-off}
 [ -n "$address" ] || fail "no address for N2 and N3: set LIBRECN_ADDRESS in .env"
 
 # What the host must give: a TUN device (N6), IP forwarding (NAT). SCTP (N2):
@@ -117,8 +118,25 @@ else
   say "N6: upf0 $gateway/$len, no NAT"
 fi
 
+# GRO on the card the internet's traffic comes in by aggregates TCP, which
+# the UPF's fast path cannot tunnel (those packets go through the UPF): off
+# while the core runs, back on at stop. LIBRECN_GRO=keep leaves it (a host
+# shared with other services: their TCP receives cost more without it).
+gro_device=$(default_device)
+gro_restore=no
+if [ "$gro" != keep ] && [ -n "$gro_device" ] \
+   && [ "$(ethtool -k "$gro_device" 2>/dev/null | awk '/^generic-receive-offload:/ { print $2 }')" = on ]; then
+  if ethtool -K "$gro_device" gro off 2>/dev/null; then
+    gro_restore=yes
+    say "GRO off on $gro_device while the core runs (the fast path tunnels TCP segments, not aggregates)"
+  else
+    say "GRO stays on $gro_device (it cannot be changed): TCP downloads go through the UPF"
+  fi
+fi
+
 undo() {
   [ "$nat" != yes ] || nat_rules -D
+  [ "$gro_restore" != yes ] || ethtool -K "$gro_device" gro on 2>/dev/null || true
   ip link del upf0 2>/dev/null || true
 }
 

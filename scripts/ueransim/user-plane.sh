@@ -15,6 +15,8 @@
 # so does the ims session, in the kernel (the fast path: XDP uplink, TC
 # downlink): its AMBR (10 Mbit/s up, 20 down) is measured too, and the MBR
 # of its PCC rule's flow (UDP from port 5203: 5 Mbit/s, classified there),
+# and a TCP download, which must not go through the UPF (GRO off on the
+# core's interface: the kernel tunnels segments, not aggregates),
 # with a data network in a third container (the kernel leaves the core's
 # own packets to the UPF), which the core reaches through its one
 # interface, as a host with one network card; it sends complete checksums,
@@ -64,6 +66,16 @@ ims_mbps() {
 ims_uplink=$(ims_mbps -p 5202 -b 15M)
 ims_downlink=$(ims_mbps -p 5202 -b 30M -R)
 ims_flow=$(ims_mbps -p 5203 -b 15M -R)
+# A TCP download on ims: the kernel tunnels it (GRO off on the core's
+# interface: segments, not aggregates); what goes through the UPF is what
+# upf0 transmits.
+downlink_packets() { docker exec librecn-core curl -s http://127.0.0.1:8080/metrics | awk '/eo="upf"/ && /"downlink_packets"/ { print $NF }'; }
+through_upf() { docker exec librecn-core cat /sys/class/net/upf0/statistics/tx_packets; }
+tcp_before="$(downlink_packets) $(through_upf)"
+ims_tcp=$(docker exec librecn-ran iperf3 -c 10.210.0.30 -p 5202 -B "$ims_ue" -t 4 -f m -R 2>&1 \
+  | awk '/receiver/ { for (i = 2; i <= NF; i++) if ($i == "Mbits/sec") print $(i - 1) }')
+sleep 1.5 # the kernel's counts reach the UPF's every second
+tcp_split=$(echo "$tcp_before $(downlink_packets) $(through_upf)" | awk '{ print $3 - $1, $4 - $2 }')
 release
 wait_for librecn-core "deactivated (the UE is idle)" || true
 idle_ping=$(docker exec librecn-ran ping -I uesimtun0 -c 3 -W 2 10.45.0.1 2>&1 || true)
@@ -88,6 +100,7 @@ echo "--- ping of the idle UE (paging)"; echo "$paged_ping"
 echo "--- iperf3, UDP at 15 up and 30 down (Mbit/s; session AMBR 10 up, 20 down)"; echo "uplink ${uplink:-none}, downlink ${downlink:-none}"
 echo "--- iperf3 on ims, in the fast path, UDP at 15 up and 30 down (session AMBR 10 up, 20 down)"
 echo "uplink ${ims_uplink:-none}, downlink ${ims_downlink:-none}; its PCC rule's flow (MBR 5), at 15 down: ${ims_flow:-none}"
+echo "--- TCP download on ims: ${ims_tcp:-none} Mbit/s; downlink packets, then those through the UPF: $tcp_split"
 echo "--- UPF counters"; echo "$metrics"
 # within RATE AMBR FLOOR: at most the AMBR, 5 % for the 100 ms bursts, at
 # least FLOOR of it. The uplink is policed by UERANSIM's gNB too, its own way.
@@ -110,5 +123,7 @@ echo "$ping" | grep -q " 0% packet loss" \
   && echo "$core" | grep -q "fast path on eth0" \
   && echo "$metrics" | grep -Eq 'counter="fast_path_packets"} [1-9][0-9]{3}' \
   && within "$ims_uplink" 10 0.8 && within "$ims_downlink" 20 0.9 && within "$ims_flow" 5 0.9 \
-  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s; in the fast path: $ims_uplink / $ims_downlink, its flow's MBR $ims_flow), before and after idle; pinged while idle: paged; periodic registration" \
+  && echo "$tcp_split" | awk '{ exit !($1 > 1000 && $2 * 20 < $1) }' \
+  && ! echo "$core" | grep -q "GRO on" \
+  && echo "OK: UERANSIM's UE pinged through LibreCN's user plane on two DNNs (answers on the PCF's extra flow, the session AMBR held: $uplink / $downlink Mbit/s; in the fast path: $ims_uplink / $ims_downlink, its flow's MBR $ims_flow, a TCP download $ims_tcp Mbit/s), before and after idle; pinged while idle: paged; periodic registration" \
   || { echo "FAILED"; exit 1; }

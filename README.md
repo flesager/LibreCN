@@ -63,7 +63,7 @@ What LibreCN carries for the number of cores given to it.
 - **The fast path** (XDP and TC, on when the kernel allows it; the Docker deployment gives it the rights) carries the traffic in the kernel, both ways: about three times the UPF alone per core, the UPF's own core left free.
 - **Two cores**: with the fast path, the network card's interrupts on both (the pools do not matter: the kernel does the work); without it, the UPF in a pool of its own and the interrupts on the other core. One direction alone takes one core's worth with one receive queue; a card with several, and several gNBs, spreads it.
 - The limit is in packets, not bytes: with 84-byte packets, about the same packets per second (500 000 to 680 000 in the fast path), so a seventeenth of the Gbit/s.
-- The fast path carries the PCF's QoS flows too (classification costs 3 to 4 % at worst). TCP from the internet aggregated by the card (GRO) and the host's own traffic go through the UPF (`nf/upf/README.md`).
+- The fast path carries the PCF's QoS flows too (classification costs 3 to 4 % at worst). The host's own traffic goes through the UPF, and so would TCP downloads if the card aggregates them (GRO): the Docker deployment turns GRO off while the core runs (`nf/upf/README.md`).
 
 **Registrations** (`scripts/load.sh`: every function in one pool, test gNBs on loopback).
 

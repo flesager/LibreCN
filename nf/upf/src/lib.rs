@@ -76,6 +76,9 @@ const PACKETS_PER_TURN: usize = 64;
 const ALARM_USER_PLANE: u32 = 0;
 /// Alarm raised while the fast path cannot run (the user plane is slower).
 const ALARM_FAST_PATH: u32 = 1;
+/// Alarm raised while GRO is on for the N3 interface (TCP from the data
+/// network, if it comes in there, goes through the UPF).
+const ALARM_GRO: u32 = 2;
 /// N3's socket buffer: room for bursts while the UPF is away (about 5000
 /// datagrams of 1400 bytes; the default, 208 KiB, held 90). Taken as
 /// datagrams wait, not at start. Without `CAP_NET_ADMIN` the kernel caps it
@@ -258,6 +261,15 @@ impl Upf {
         let n6 = self.n6_name.as_deref().unwrap_or_default();
         match fast::FastPath::start(self.n3, n6, self.max_sessions) {
             Ok(f) => {
+                if fast::gro_on(f.interface()) == Some(true) {
+                    let i = f.interface();
+                    let text = format!(
+                        "GRO on {i}: TCP from the data network coming in there is aggregated and goes through the \
+                         UPF, not the fast path (ethtool -K {i} gro off)"
+                    );
+                    log!(self.log, ctx, Info, "{text}");
+                    self.alarms.raise(ctx, ALARM_GRO, Severity::Warning, &text);
+                }
                 self.fast = Some(f);
                 if let Err(e) = ctx.arm_timer(FOLD_PERIOD, 0) {
                     log!(self.log, ctx, Error, "fast path counts not folded: {e}");

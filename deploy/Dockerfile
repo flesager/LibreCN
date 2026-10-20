@@ -32,8 +32,8 @@ RUN triple=$(cat /triple) \
  && cp "target/$triple/release/librecn" /librecn
 
 FROM alpine:3.22
-# ip (N6's TUN device), iptables (NAT to the outside).
-RUN apk add --no-cache iproute2 iptables
+# ip (N6's TUN device), iptables (NAT to the outside), ethtool (GRO off).
+RUN apk add --no-cache ethtool iproute2 iptables
 COPY --from=build /librecn /usr/local/bin/librecn
 COPY deploy/entrypoint.sh /usr/local/bin/librecn-entrypoint
 VOLUME /var/lib/librecn

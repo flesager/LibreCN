@@ -44,9 +44,10 @@ the TUN device:
 - downlink packets the program cannot tunnel: a gNB whose next hop is not
   resolved yet (the UPF's send resolves it), larger than N3's MTU with the
   tunnel's 44 bytes (the kernel fragments the UPF's), fragments, GSO
-  aggregates (TCP from the internet when the N6 card aggregates it, GRO:
-  GTP-U's length field would be wrong in each segment; the kernel cuts them
-  for the TUN device), and TCP or UDP whose checksum is still due (the
+  aggregates (TCP from the internet when the card it comes in by
+  aggregates it, GRO: GTP-U's length field would be wrong in each segment;
+  the kernel cuts them for the TUN device; see GRO below), and TCP or UDP
+  whose checksum is still due (the
   host's own packets, or a container's on the same host: the kernel fills
   it in after the program's hook, and only a network card would fill in a
   tunnelled one; it does so for the TUN device). The internet's packets
@@ -59,6 +60,13 @@ the TUN device:
   `downlink_packets`, `downlink_bytes`, `rate_limited_packets`, the
   cells'), and `fast_path_packets` says how many packets the kernel
   carried, both ways.
+- **GRO**: on the card the internet's traffic comes in by, GRO aggregates
+  TCP, so TCP downloads go through the UPF (96 % of them, measured). The
+  Docker deployment turns it off while the core runs (`LIBRECN_GRO`); a
+  deployment of its own does it (`ethtool -K <card> gro off`, RUNNING.md).
+  With the fast path on, the UPF checks its N3 interface (often the same
+  card) and, GRO on, says so and raises a WARNING alarm. `user-plane.sh`
+  checks that a TCP download goes through the kernel.
 - It needs `CAP_BPF`, `CAP_PERFMON` and `CAP_NET_ADMIN`, and a loose
   reverse path filter on the N3 interface (`rp_filter` 0 or 2: the UE's
   packets come in there, while their addresses are routed to N6). Without

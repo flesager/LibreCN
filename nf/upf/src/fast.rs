@@ -286,6 +286,38 @@ impl FastPath {
     }
 }
 
+/// Whether GRO is on for `interface` (none: the kernel does not say). On
+/// the interface the data network's traffic comes in by, it aggregates
+/// TCP, which the downlink program cannot tunnel (GTP-U's length would be
+/// wrong in each segment): those packets go through the UPF.
+pub fn gro_on(interface: &str) -> Option<bool> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    /// `struct ethtool_value`, for ETHTOOL_GGRO.
+    #[repr(C)]
+    struct EthtoolValue {
+        cmd: u32,
+        data: u32,
+    }
+    const ETHTOOL_GGRO: u32 = 0x2b;
+    // SAFETY: plain arguments; the descriptor is owned below.
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+    if fd < 0 {
+        return None;
+    }
+    // SAFETY: a descriptor just opened, owned by nothing else.
+    let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+    let mut value = EthtoolValue { cmd: ETHTOOL_GGRO, data: 0 };
+    // SAFETY: an all-zero ifreq is valid.
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    for (dst, src) in ifr.ifr_name.iter_mut().zip(interface.bytes().take(libc::IFNAMSIZ - 1)) {
+        *dst = src as libc::c_char;
+    }
+    ifr.ifr_ifru.ifru_data = (&mut value as *mut EthtoolValue).cast();
+    // SAFETY: SIOCETHTOOL reads the ifreq and writes `value`, both alive.
+    let done = unsafe { libc::ioctl(socket.as_raw_fd(), libc::SIOCETHTOOL as _, &mut ifr) } == 0;
+    done.then_some(value.data != 0)
+}
+
 fn ifindex(interface: &str) -> Result<u32, String> {
     let name = std::ffi::CString::new(interface).map_err(|e| e.to_string())?;
     // SAFETY: a NUL-terminated string, which outlives the call.
@@ -358,6 +390,12 @@ mod tests {
         assert_eq!(interface_of(Ipv4Addr::LOCALHOST).as_deref(), Some("lo"));
         assert_eq!(interface_of(Ipv4Addr::new(127, 0, 0, 2)).as_deref(), Some("lo"), "lo's network");
         assert_eq!(interface_of(Ipv4Addr::new(192, 0, 2, 77)), None, "TEST-NET-1: nobody's");
+    }
+
+    #[test]
+    fn gro_is_read() {
+        assert!(gro_on("lo").is_some(), "lo has GRO, on or off");
+        assert_eq!(gro_on("no-such-device"), None);
     }
 
     #[test]

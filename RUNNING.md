@@ -99,6 +99,8 @@ cores = [2]
 
 The card's interrupts: `grep <card> /proc/interrupts` lists them, `echo 2,3 | sudo tee /proc/irq/<n>/smp_affinity_list` places one (`irqbalance`, if it runs, spreads them over every core).
 
+**GRO** on the card the internet's traffic comes in by aggregates TCP, which the fast path cannot tunnel: TCP downloads would go through the UPF (the UPF raises a WARNING alarm when GRO is on for its N3 interface). Turn it off: `sudo ethtool -K <card> gro off` (the Docker deployment does it while the core runs).
+
 ## 3. The interfaces
 
 | Interface | Between | Protocol, port | Set by | What the other side needs |
